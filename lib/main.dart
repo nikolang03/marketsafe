@@ -8,9 +8,14 @@ import 'screens/face_login_screen.dart';
 import 'navigation_wrapper.dart';
 import 'services/network_service.dart';
 import 'services/watermarking_service.dart';
+import 'services/real_tflite_face_service.dart'; // REAL TensorFlow Lite service
+import 'services/lockout_service.dart';
 import 'widgets/loading_screen.dart';
+import 'package:camera/camera.dart';
 
-void main() async {
+List<CameraDescription> cameras = [];
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   
   if (kDebugMode) {
@@ -24,6 +29,7 @@ void main() async {
     await Firebase.initializeApp(
       options: DefaultFirebaseOptions.currentPlatform,
     );
+
     if (kDebugMode) {
       debugPrint('✅ Firebase initialized successfully');
       
@@ -38,6 +44,21 @@ void main() async {
       } catch (e) {
         debugPrint('❌ Watermarking test failed: $e');
       }
+      
+              // Initialize REAL TensorFlow Lite face recognition
+              debugPrint('🤖 Initializing REAL TensorFlow Lite face recognition...');
+              try {
+                await RealTFLiteFaceService.initialize();
+                debugPrint('✅ REAL TensorFlow Lite face recognition initialized successfully');
+              } catch (e) {
+                debugPrint('❌ REAL TensorFlow Lite initialization failed: $e');
+                debugPrint('🔄 Will use enhanced mathematical approach as fallback');
+              }
+
+      // Force clear lockout for testing
+      debugPrint('🔄 Force clearing lockout for testing...');
+      LockoutService.forceClearLockout();
+      debugPrint('✅ Lockout force cleared successfully');
       
     }
   } catch (e) {

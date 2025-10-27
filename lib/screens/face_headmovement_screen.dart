@@ -10,6 +10,7 @@ import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/real_face_recognition_service.dart';
 import '../services/face_uniqueness_service.dart';
+import '../services/face_net_service.dart'; // Added import for FaceNetService
 
 class FaceHeadMovementScreen extends StatefulWidget {
   const FaceHeadMovementScreen({super.key});
@@ -31,6 +32,7 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
   bool _hasCheckedFaceUniqueness = false;
   Face? _lastDetectedFace;
   CameraImage? _lastCameraImage; // Store last camera image for 128D embedding // Store the last detected face for feature extraction
+  Uint8List? _lastImageBytes; // Store last image bytes for FaceNetService
 
   double? _initialX;
   bool _movedLeft = false;
@@ -124,11 +126,12 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
 
       try {
         final XFile image = await _cameraController!.takePicture();
+        final Uint8List imageBytes = await image.readAsBytes();
         final inputImage = InputImage.fromFilePath(image.path);
         final faces = await _faceDetector.processImage(inputImage);
 
         if (faces.isNotEmpty) {
-          _detectHeadMovement(faces.first);
+          _detectHeadMovement(faces.first, null, imageBytes);
         } else {
           if (mounted) {
             setState(() {
@@ -227,24 +230,12 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
     }
   }
 
-  void _detectHeadMovement(Face face, [CameraImage? cameraImage]) async {
+  void _detectHeadMovement(Face face, [CameraImage? cameraImage, Uint8List? imageBytes]) async {
     // Store the face and camera image for feature extraction
     _lastDetectedFace = face;
-    _lastCameraImage = cameraImage; // Store camera image for 128D embedding
-    
-    // Check face uniqueness on first detection
-    if (!_hasCheckedFaceUniqueness && _progressPercentage == 0.0) {
-      final isFaceAlreadyRegistered =
-          await FaceUniquenessService.isFaceAlreadyRegistered(face, _lastCameraImage);
-      if (isFaceAlreadyRegistered) {
-        if (mounted) {
-          _showFaceAlreadyRegisteredDialog();
-        }
-        return;
-      }
-      _hasCheckedFaceUniqueness = true;
-    }
-    
+    _lastCameraImage = cameraImage;
+    _lastImageBytes = imageBytes;
+
     final headX =
         face.headEulerAngleY ?? 0; // negative = left, positive = right
 

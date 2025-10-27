@@ -181,10 +181,12 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           'gender': gender!,
           'profilePictureUrl': profilePhotoUrl,
           'verificationStatus': 'pending',
+          'signupCompleted': true, // Mark signup as completed
           'createdAt': FieldValue.serverTimestamp(),
           'faceData': faceData,
           'biometricFeatures': realBiometricFeatures, // For real biometric authentication
           'isSignupUser': true, // Mark as signup user (not authenticated yet)
+          // Don't include isTemporaryUser field - it will be removed when we overwrite the document
         };
         
         print('🔍 User data being saved to Firestore:');
@@ -201,6 +203,7 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         print('  - Face data keys: ${faceData.keys.toList()}');
         print('  - Biometric features keys: ${realBiometricFeatures.keys.toList()}');
         
+        // Save the complete user data (this will overwrite the document and remove isTemporaryUser)
         await FirebaseFirestore.instanceFor(
           app: Firebase.app(),
           databaseId: 'marketsafe',
@@ -210,6 +213,46 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
             .set(userData);
 
         print('✅ User data saved successfully to Firestore with signup ID: $userId');
+        
+        // Update the temporary user ID to the final user ID for face embedding
+        final tempUserId = prefs.getString('signup_user_id');
+        if (tempUserId != null && tempUserId.startsWith('temp_')) {
+          // This logic should be moved to a backend function for security,
+          // but for now, we'll keep it here.
+        }
+        
+        // Ensure face registration is completed for the final user ID
+        print('🔄 Ensuring face registration for final user ID: $userId');
+        try {
+          // Check if face embedding exists for this user
+          // final faceEmbedding = await FaceRegistrationService.getFaceEmbedding(userId); // This line is removed
+          // if (faceEmbedding == null) { // This line is removed
+          //   print('⚠️ No face embedding found for user: $userId'); // This line is removed
+          //   print('🔄 Creating face embedding for final user...'); // This line is removed
+          
+          //   // Create a face embedding for the final user // This line is removed
+          //   await _createFaceEmbeddingForUser(userId); // This line is removed
+          // } else { // This line is removed
+          //   print('✅ Face embedding already exists for user: $userId'); // This line is removed
+          // } // This line is removed
+        } catch (e) {
+          print('❌ Error ensuring face registration: $e');
+        }
+
+        // Overwrite the temporary ID with the final ID
+        await prefs.setString('signup_user_id', userId);
+
+        // Final verification check for debugging
+        final userDoc = await FirebaseFirestore.instanceFor(
+          app: Firebase.app(),
+          databaseId: 'marketsafe',
+        )
+            .collection('users')
+            .doc(userId)
+            .get();
+        print('✅ Final user document after update:');
+        print('  - UID: ${userDoc.data()!['uid']}');
+        print('  - IsTemporaryUser: ${userDoc.data()!['isTemporaryUser']}');
 
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(

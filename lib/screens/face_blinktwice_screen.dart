@@ -10,6 +10,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'face_movecloser_screen.dart';
 import '../services/face_uniqueness_service.dart';
 import '../services/real_face_recognition_service.dart';
+import '../services/face_net_service.dart'; // Added import for FaceNetService
 
 class FaceScanScreen extends StatefulWidget {
   const FaceScanScreen({super.key});
@@ -35,6 +36,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
   bool _hasCheckedFaceUniqueness = false;
   Face? _lastDetectedFace;
   CameraImage? _lastCameraImage; // Store last camera image for 128D embedding // Store the last detected face for feature extraction
+  Uint8List? _lastImageBytes; // Store last image bytes for FaceNetService
 
 
   @override
@@ -236,19 +238,6 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     _lastCameraImage = cameraImage; // Store camera image for 128D embedding
 
     print('👁️ Eye probabilities - Left: $leftProb, Right: $rightProb, Blink count: $_blinkCount');
-
-    // Check face uniqueness only once on first detection
-    if (!_hasCheckedFaceUniqueness && _blinkCount == 0 && _progressPercentage == 0.0) {
-      _hasCheckedFaceUniqueness = true;
-      final isFaceAlreadyRegistered =
-          await FaceUniquenessService.isFaceAlreadyRegistered(face, _lastCameraImage);
-      if (isFaceAlreadyRegistered) {
-        if (mounted) {
-          _showFaceAlreadyRegisteredDialog();
-        }
-        return;
-      }
-    }
 
     // More lenient thresholds for better detection
     const closedThreshold = 0.4;

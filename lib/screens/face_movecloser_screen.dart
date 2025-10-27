@@ -9,8 +9,9 @@ import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'face_headmovement_screen.dart';
-import '../services/real_face_recognition_service.dart';
 import '../services/face_uniqueness_service.dart';
+import '../services/production_face_recognition_service.dart';
+import '../services/face_net_service.dart'; // Added import for FaceNetService
 
 class FaceMoveCloserScreen extends StatefulWidget {
   const FaceMoveCloserScreen({super.key});
@@ -32,6 +33,7 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
   bool _hasCheckedFaceUniqueness = false;
   Face? _lastDetectedFace;
   CameraImage? _lastCameraImage; // Store last camera image for 128D embedding // Store the last detected face for feature extraction
+  Uint8List? _lastImageBytes;
 
   @override
   void initState() {
@@ -67,6 +69,12 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
       // Ignore camera disposal errors
     }
     _faceDetector.close();
+    
+    // Clear memory references
+    _lastDetectedFace = null;
+    _lastCameraImage = null;
+    _lastImageBytes = null;
+    
     super.dispose();
   }
 
@@ -146,12 +154,13 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
       if (_isProcessingImage || _cameraController == null || !mounted) return;
 
       try {
-        final XFile image = await _cameraController!.takePicture();
-        final inputImage = InputImage.fromFilePath(image.path);
+        final XFile imageFile = await _cameraController!.takePicture();
+        final imageBytes = await imageFile.readAsBytes();
+        final inputImage = InputImage.fromFilePath(imageFile.path);
         final faces = await _faceDetector.processImage(inputImage);
 
         if (faces.isNotEmpty) {
-          _detectFaceDistance(faces.first);
+          _detectFaceDistance(faces.first, null, imageBytes);
         } else {
           if (mounted) {
             setState(() {
@@ -195,10 +204,22 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
     _isProcessingImage = true;
 
     try {
+      print('📸 ==========================================');
+      print('📸 PROCESSING CAMERA IMAGE');
+      print('📸 ==========================================');
+      print('📊 Image format: ${image.format.group}');
+      print('📊 Image size: ${image.width}x${image.height}');
+      print('📊 Image planes: ${image.planes.length}');
+      print('📊 Camera image object: ${image.toString()}');
+      
       final camera = _cameraController!.description;
       final bytes = _bytesFromPlanes(image);
       final size = Size(image.width.toDouble(), image.height.toDouble());
       final rotation = _rotationFromSensor(camera.sensorOrientation);
+      
+      print('📊 Bytes length: ${bytes.length}');
+      print('📊 Size: $size');
+      print('📊 Rotation: $rotation');
 
       // Try different image formats based on the camera image format
       InputImageFormat inputFormat;
@@ -226,10 +247,19 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
       final inputImage = InputImage.fromBytes(bytes: bytes, metadata: metadata);
 
       final faces = await _faceDetector.processImage(inputImage);
-
+      
+      print('🔍 Face detection result: ${faces.length} faces found');
+      
       if (faces.isNotEmpty) {
-        _detectFaceDistance(faces.first, image); // Pass camera image for 128D embedding
+        print('✅ Face detected! Processing for distance check...');
+        print('📊 Face bounding box: ${faces.first.boundingBox}');
+        print('📊 Camera image being passed: Available');
+        print('📊 Camera image format: ${image.format.group}');
+        print('📊 Camera image size: ${image.width}x${image.height}');
+        
+        _detectFaceDistance(faces.first, image, null); // Pass camera image for 128D embedding
       } else {
+        print('❌ No faces detected');
         if (mounted) {
           setState(() {
             _progressPercentage = 0.0;
@@ -250,20 +280,53 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
     }
   }
 
-  void _detectFaceDistance(Face face, [CameraImage? cameraImage]) async {
+  void _detectFaceDistance(Face face, [CameraImage? cameraImage, Uint8List? imageBytes]) async {
+    print('🔍 ==========================================');
+    print('🔍 DETECT FACE DISTANCE CALLED');
+    print('🔍 ==========================================');
+    print('🔍 DEBUG: cameraImage parameter: ${cameraImage != null ? 'Available' : 'Null'}');
+    if (cameraImage != null) {
+      print('📊 Camera image format: ${cameraImage.format.group}');
+      print('📊 Camera image size: ${cameraImage.width}x${cameraImage.height}');
+      print('📊 Camera image planes: ${cameraImage.planes.length}');
+    }
+    
     // Store the face and camera image for feature extraction
     _lastDetectedFace = face;
     _lastCameraImage = cameraImage; // Store camera image for 128D embedding
+    _lastImageBytes = imageBytes; // Store image bytes for fallback
+    
+    print('🔍 DEBUG: _lastDetectedFace set: ${_lastDetectedFace != null ? 'Available' : 'Null'}');
+    print('🔍 DEBUG: _lastCameraImage set: ${_lastCameraImage != null ? 'Available' : 'Null'}');
+    print('🔍 DEBUG: _lastImageBytes set: ${_lastImageBytes != null ? 'Available' : 'Null'}');
+    
+    if (_lastCameraImage != null) {
+      print('✅ Camera image successfully stored for registration');
+    } else {
+      print('❌ CRITICAL: Camera image is NULL - registration will fail!');
+    }
     
     // Check face uniqueness on first detection
     if (!_hasCheckedFaceUniqueness && _progressPercentage == 0.0) {
-      final isFaceAlreadyRegistered =
-          await FaceUniquenessService.isFaceAlreadyRegistered(face, _lastCameraImage);
-      if (isFaceAlreadyRegistered) {
-        if (mounted) {
-          _showFaceAlreadyRegisteredDialog();
+      // Generate embedding to check for uniqueness
+      List<double> embedding = [];
+      if (_lastCameraImage != null) {
+        embedding = await FaceNetService().predict(_lastCameraImage!, face);
+      } else if (_lastImageBytes != null) {
+        embedding = await FaceNetService().predictFromBytes(_lastImageBytes!, face);
+      }
+
+      if (embedding.isNotEmpty) {
+        final prefs = await SharedPreferences.getInstance();
+        final userId = prefs.getString('signup_user_id');
+        final isFaceAlreadyRegistered =
+            await FaceUniquenessService.isFaceAlreadyRegistered(embedding, currentUserIdToIgnore: userId);
+        if (isFaceAlreadyRegistered) {
+          if (mounted) {
+            _showFaceAlreadyRegisteredDialog();
+          }
+          return;
         }
-        return;
       }
       _hasCheckedFaceUniqueness = true;
     }
@@ -289,76 +352,103 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
     // If face is close enough, proceed to next screen
     if (_isFaceCloseEnough) {
       if (mounted) {
-        // Capture face image before proceeding
-        String? imagePath;
-        try {
-          if (_cameraController != null && 
-              _cameraController!.value.isInitialized) {
-            print('📸 Attempting to capture face image...');
-            final XFile image = await _cameraController!.takePicture();
-            imagePath = image.path;
-            print('📸 Face image captured successfully: $imagePath');
-            
-            // Verify the file exists
-            final file = File(imagePath);
-            if (await file.exists()) {
-              final fileSize = await file.length();
-              print('📏 Captured image file size: $fileSize bytes');
-            } else {
-              print('❌ Captured image file does not exist!');
-              imagePath = null;
-            }
-          } else {
-            print('⚠️ Camera not ready for image capture:');
-            print('   - Controller null: ${_cameraController == null}');
-            if (_cameraController != null) {
-              print('   - Initialized: ${_cameraController!.value.isInitialized}');
-              print('   - Error: ${_cameraController!.value.errorDescription}');
-            }
-          }
-        } catch (e) {
-          print('⚠️ Failed to capture face image: $e');
-          imagePath = null;
+        // CRITICAL FIX: Stop the camera stream and pause to prevent race condition
+        if (_cameraController != null && _cameraController!.value.isStreamingImages) {
+          await _cameraController!.stopImageStream();
         }
+        _detectionTimer?.cancel();
+        await Future.delayed(const Duration(milliseconds: 500)); // Give camera time to settle
 
-        // Save face verification progress to SharedPreferences
+        // Register face using the new face registration service
         try {
-          print('🔄 Saving move closer verification data to SharedPreferences with imagePath: $imagePath');
+          print('🔐 Starting face registration process...');
+          
           final prefs = await SharedPreferences.getInstance();
+          final userId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
+          final email = prefs.getString('signup_email') ?? '';
+          final phoneNumber = prefs.getString('signup_phone') ?? '';
           
-          // Save verification step completion
-          await prefs.setBool('face_verification_moveCloserCompleted', true);
-          await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
+          if (userId == null) {
+            print('❌ No user ID found for face registration');
+            _showRegistrationErrorDialog('User session not found. Please restart sign up.');
+            return;
+          }
+          if (_lastDetectedFace == null) {
+            print('❌ No face detected to register. Aborting.');
+            _showRegistrationErrorDialog('Could not detect a face. Please try again.');
+            return;
+          }
+
+          print('📸 Capturing final high-quality image for registration embedding...');
+          final XFile imageFile = await _cameraController!.takePicture();
+          final Uint8List imageBytes = await imageFile.readAsBytes();
+
+          if (imageBytes.isEmpty) {
+              print('❌ Captured image is empty. Aborting.');
+              _showRegistrationErrorDialog('Failed to capture a valid image.');
+              return;
+          }
+          print('✅ Captured ${imageBytes.length} bytes for registration.');
           
-          // Upload face image to Firebase Storage and save path
-          String? firebaseImageUrl;
-          if (imagePath != null) {
-            print('🔄 Storing face image locally during signup...');
-            // Store local path - will upload to Firebase Storage after signup completion
-            firebaseImageUrl = imagePath;
-            await prefs.setString('face_verification_moveCloserImagePath', firebaseImageUrl);
-            print('✅ Face image stored locally: $firebaseImageUrl');
+          // Re-run face detection on the high-quality captured image
+          print('🔬 Re-running face detection on the captured image...');
+          final InputImage inputImage = InputImage.fromFilePath(imageFile.path);
+          final List<Face> faces = await _faceDetector.processImage(inputImage);
+
+          if (faces.isEmpty) {
+            print('❌ No face detected in the final captured image. Aborting.');
+            _showRegistrationErrorDialog('Could not find a face in the captured photo. Please try again.');
+            return;
+          }
+          final finalDetectedFace = faces.first;
+          print('✅ Face found in captured image. Proceeding with registration.');
+
+          final registrationResult = await ProductionFaceRecognitionService.registerUserFace(
+            userId: userId,
+            detectedFace: finalDetectedFace, // Use the face from the new image
+            cameraImage: null,
+            imageBytes: imageBytes, 
+            email: email.isNotEmpty ? email : null,
+            phoneNumber: phoneNumber.isNotEmpty ? phoneNumber : null,
+          );
+          
+          print('🔄 FaceRegistrationService.registerUserFace completed');
+          print('🔍 Registration result: $registrationResult');
+          
+          if (registrationResult['success'] == true) {
+            print('✅ Face registration successful!');
+            print('📊 Embedding size: ${registrationResult['embeddingSize']}D');
+            
+            // Save verification progress to SharedPreferences
+            await prefs.setBool('face_verification_moveCloserCompleted', true);
+            await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
+            
+            // Save face image path if available
+            if (imageFile.path.isNotEmpty) {
+              await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+              print('✅ Face image stored locally: ${imageFile.path}');
+            }
+            
+            // Save metrics
+            await prefs.setString('face_verification_moveCloserMetrics', 
+              '{"completionTime": "${DateTime.now().toIso8601String()}", "faceSize": $faceHeight, "embeddingSize": ${registrationResult['embeddingSize']}}');
+            
+            print('✅ Face registration and verification data saved successfully');
           } else {
-            print('⚠️ No image path to save for move closer');
+            print('❌ Face registration failed: ${registrationResult['error']}');
+            // Show error to user
+            if (mounted) {
+              _showRegistrationErrorDialog(registrationResult['error'] ?? 'Unknown error');
+            }
+            return;
           }
           
-          // Save metrics
-          await prefs.setString('face_verification_moveCloserMetrics', 
-            '{"completionTime": "${DateTime.now().toIso8601String()}", "faceSize": $faceHeight}');
-          
-          // Store face features for recognition using 128D embeddings
-          if (_lastDetectedFace != null) {
-            print('🔍 Extracting 128D face features from last detected face...');
-            final faceFeatures = await RealFaceRecognitionService.extractBiometricFeatures(_lastDetectedFace!, _lastCameraImage);
-            final featuresString = faceFeatures.map((f) => f.toString()).join(',');
-            await prefs.setString('face_verification_moveCloserFeatures', featuresString);
-            print('✅ 128D face features extracted and saved: ${faceFeatures.length} dimensions');
-          }
-          
-          print('✅ Move closer verification data saved to SharedPreferences successfully');
         } catch (e) {
-          // Handle error silently or show user feedback
-          print('⚠️ Failed to save move closer verification data to SharedPreferences: $e');
+          print('❌ Error during face registration: $e');
+          if (mounted) {
+            _showRegistrationErrorDialog('Face registration failed: $e');
+          }
+          return;
         }
 
         Future.delayed(const Duration(milliseconds: 500), () {
@@ -540,6 +630,30 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
       context, 
       '/welcome',
       arguments: {'showFaceDuplicationDialog': true},
+    );
+  }
+
+  void _showRegistrationErrorDialog(String error) {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Face Registration Failed'),
+          content: Text(
+            'Failed to register your face: $error\n\nPlease try again or contact support if the problem persists.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop();
+                Navigator.of(context).pop(); // Go back to previous screen
+              },
+              child: const Text('OK'),
+            ),
+          ],
+        );
+      },
     );
   }
 }

@@ -193,11 +193,14 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
         print('🔍 Email OTP verified successfully - creating Firebase Auth user');
         
         // Create Firebase Auth user with email and password
-        // We'll use the OTP as a temporary password since we verified it
+        // Use a more secure approach with a generated password
         try {
+          // Generate a secure password for the user
+          final securePassword = 'MarketSafe_${DateTime.now().millisecondsSinceEpoch}';
+          
           final credential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
             email: widget.phoneNumber, // This contains the email
-            password: otp, // Use OTP as temporary password
+            password: securePassword, // Use secure password instead of OTP
           );
           
           print('✅ Firebase Auth user created for email: ${widget.phoneNumber}');
@@ -212,15 +215,12 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
           });
         } catch (e) {
           print('❌ Failed to create Firebase Auth user: $e');
-          // If user already exists, try to sign in
+          // If user already exists, try to sign in with a different approach
           try {
-            final credential = await FirebaseAuth.instance.signInWithEmailAndPassword(
-              email: widget.phoneNumber,
-              password: otp,
-            );
-            print('✅ Signed in existing Firebase Auth user: ${credential.user?.uid}');
+            // For existing users, we'll handle this in the face verification screen
+            print('⚠️ User may already exist, proceeding to face verification...');
           } catch (signInError) {
-            print('❌ Failed to sign in existing user: $signInError');
+            print('❌ Failed to handle existing user: $signInError');
             // Continue anyway - we'll handle this in the fill information screen
           }
         }
@@ -231,6 +231,22 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       // Store signup data for the fill information screen
       try {
         final prefs = await SharedPreferences.getInstance();
+        
+        // Get the current user ID from Firebase Auth
+        final currentUser = FirebaseAuth.instance.currentUser;
+        final userId = currentUser?.uid;
+        
+        if (userId != null) {
+          await prefs.setString('signup_user_id', userId);
+          print('✅ Stored signup user ID: $userId');
+        } else {
+          print('⚠️ No current user found, creating temporary ID');
+          // Create a temporary user ID if none exists
+          final tempUserId = 'temp_${DateTime.now().millisecondsSinceEpoch}';
+          await prefs.setString('signup_user_id', tempUserId);
+          print('✅ Stored temporary user ID: $tempUserId');
+        }
+        
         if (widget.verificationType == 'phone') {
           await prefs.setString('signup_phone', widget.phoneNumber);
           await prefs.setString('signup_email', '');
@@ -254,8 +270,25 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     } catch (e) {
       print('❌ OTP verification failed: $e');
       if (mounted) {
+        // IMPROVED: Show more user-friendly error messages
+        String errorMessage = "Verification failed. Please try again.";
+        
+        if (e.toString().contains('invalid-verification-code')) {
+          errorMessage = "Invalid OTP code. Please check and try again.";
+        } else if (e.toString().contains('network')) {
+          errorMessage = "Network error. Please check your connection.";
+        } else if (e.toString().contains('timeout')) {
+          errorMessage = "Request timed out. Please try again.";
+        } else if (e.toString().contains('user-not-found')) {
+          errorMessage = "User not found. Please sign up first.";
+        }
+        
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Verification failed: $e")),
+          SnackBar(
+            content: Text(errorMessage),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 4),
+          ),
         );
       }
     } finally {

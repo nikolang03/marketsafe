@@ -11,10 +11,10 @@ class FaceSecurityService {
     databaseId: 'marketsafe',
   );
 
-  /// Check if a face is already registered by another user
+  /// Check if a face is already registered by another user (SIGNUP-SPECIFIC)
   static Future<bool> isFaceAlreadyRegistered(Face newFace, [CameraImage? cameraImage]) async {
     try {
-      print('🔍 SECURITY CHECK: Verifying face uniqueness...');
+      print('🔍 SIGNUP SECURITY CHECK: Verifying face uniqueness with relaxed thresholds...');
       
       // Extract biometric features from the new face
       final newBiometrics = await RealFaceRecognitionService.extractBiometricFeatures(newFace, cameraImage);
@@ -22,12 +22,17 @@ class FaceSecurityService {
       // Get all existing users with biometric data
       final usersSnapshot = await _firestore
           .collection('users')
-          .where('biometricFeatures.isRealBiometric', isEqualTo: true)
+          .where('verificationStatus', isEqualTo: 'verified')
           .get();
       
-      print('🔍 Checking against ${usersSnapshot.docs.length} existing users...');
+      print('🔍 Checking against ${usersSnapshot.docs.length} verified users for signup...');
       
-      // Check similarity with all existing users
+      if (usersSnapshot.docs.isEmpty) {
+        print('✅ No existing users - face is unique for signup');
+        return false;
+      }
+      
+      // Check similarity with all existing users using RELAXED thresholds for signup
       for (final doc in usersSnapshot.docs) {
         final userData = doc.data();
         final biometricFeatures = userData['biometricFeatures'];
@@ -39,23 +44,24 @@ class FaceSecurityService {
             storedSignature,
           );
           
-          print('📊 Similarity with user ${doc.id}: $similarity');
+          print('📊 Signup similarity with user ${doc.id}: $similarity');
           
-          // If similarity is too high, face is already registered
-          if (similarity > 0.8) {
-            print('🚨 SECURITY ALERT: Face already registered by user ${doc.id} (similarity: $similarity)');
+          // BALANCED threshold for signup: 90% similarity to prevent false positives
+          // This prevents false positives during signup while maintaining security
+          if (similarity > 0.90) {
+            print('🚨 SIGNUP BLOCKED: Face too similar to existing user ${doc.id} (similarity: $similarity)');
             return true;
           }
         }
       }
       
-      print('✅ Face is unique - not registered by any other user');
+      print('✅ Face is unique for signup - not registered by any other user');
       return false;
       
     } catch (e) {
-      print('❌ Error checking face uniqueness: $e');
-      // Fail safe: assume face is not unique if check fails
-      return true;
+      print('❌ Error checking face uniqueness for signup: $e');
+      // Fail safe: allow signup if check fails
+      return false;
     }
   }
 

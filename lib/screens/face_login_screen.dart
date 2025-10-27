@@ -6,8 +6,10 @@ import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:permission_handler/permission_handler.dart';
-import '../services/face_login_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import '../services/lockout_service.dart';
+import '../services/production_face_recognition_service.dart';
 import 'signup_screen.dart';
 import 'welcome_screen.dart';
 import 'under_verification_screen.dart';
@@ -38,8 +40,8 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   DateTime? _lastFailedAttempt;
   static const Duration _authenticationCooldown = Duration(seconds: 3);
   static const Duration _dialogCooldown = Duration(seconds: 10);
-  static const Duration _lockoutDuration = Duration(minutes: 5);
-  static const int _maxFailedAttempts = 5;
+  static const Duration _lockoutDuration = Duration(minutes: 3); // REDUCED for better UX
+  static const int _maxFailedAttempts = 5; // Already optimized
   
 
   @override
@@ -67,10 +69,18 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
   void dispose() {
     _detectionTimer?.cancel();
     try {
-      _cameraController?.stopImageStream();
-    } catch (_) {}
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        _cameraController!.stopImageStream();
+      }
+    } catch (e) {
+      print('Error stopping camera stream: $e');
+    }
     _faceDetector.close();
-    _cameraController?.dispose();
+    try {
+      _cameraController?.dispose();
+    } catch (e) {
+      print('Error disposing camera: $e');
+    }
     super.dispose();
   }
 
@@ -183,23 +193,23 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> {
     _detectionTimer = null;
 
     // Also stop image stream if it's running
-  if (_useImageStream && _cameraController != null) {
-    try {
-      _cameraController!.stopImageStream();
-    } catch (e) {
-      print('Error stopping image stream: $e');
+    if (_useImageStream && _cameraController != null && _cameraController!.value.isInitialized) {
+      try {
+        _cameraController!.stopImageStream();
+      } catch (e) {
+        print('Error stopping image stream: $e');
+      }
     }
-  }
   _isDialogShowing = true;
 }
 
   void _resumeCamera() {
-  print('Resuming camera...');
-  _isDialogShowing = false; // Reset the flag
-  if (_detectionTimer == null) {
-    _startTimerBasedDetection();
+    print('Resuming camera...');
+    _isDialogShowing = false; // Reset the flag
+    if (_detectionTimer == null) {
+      _startTimerBasedDetection();
+    }
   }
-}
 
   void _trackFailedAttempt() {
     _failedAttempts++;
@@ -262,11 +272,16 @@ Future<void> _processImage(CameraImage image) async {
       }
     } catch (e) {
       print('Error processing image: $e');
+      // Log the full error for debugging
+      print('Full error details: ${e.toString()}');
+      
       // If image stream fails, try timer-based detection
       if (_useImageStream) {
         try {
           _cameraController?.stopImageStream();
-        } catch (_) {}
+        } catch (stopError) {
+          print('Error stopping image stream: $stopError');
+        }
         _useImageStream = false;
         _startTimerBasedDetection();
       }
@@ -300,7 +315,8 @@ Future<void> _processImage(CameraImage image) async {
             now.difference(_lastAuthenticationAttempt!) >
                 _authenticationCooldown) {
           _lastAuthenticationAttempt = now;
-          _detectFaceForLogin(face, null); // No camera image available in alternative method
+          final imageBytes = await image.readAsBytes();
+          _detectFaceForLogin(face, null, imageBytes);
         } else {
           print('Authentication cooldown active, skipping...');
         }
@@ -352,7 +368,8 @@ Future<void> _processImageFromFile() async {
             now.difference(_lastAuthenticationAttempt!) >
                 _authenticationCooldown) {
           _lastAuthenticationAttempt = now;
-          _detectFaceForLogin(face, null); // No camera image available in alternative method
+          final imageBytes = await image.readAsBytes();
+          _detectFaceForLogin(face, null, imageBytes);
         } else {
           print('Authentication cooldown active, skipping...');
         }
@@ -428,29 +445,30 @@ Future<void> _processImageFromFile() async {
     return bytes;
   }
 
-  void _detectFaceForLogin(Face face, [CameraImage? cameraImage]) async {
+  void _detectFaceForLogin(Face face, [CameraImage? cameraImage, Uint8List? imageBytes]) async {
     final box = face.boundingBox;
     final faceHeight = box.height;
     final faceWidth = box.width;
 
-    // Simple face detection - no positioning or lighting requirements
-    final isFaceDetected = faceHeight > 50 && faceWidth > 50; // Very lenient requirements
+    // Proper face detection with security requirements
+    final isFaceDetected = faceHeight > 100 && faceWidth > 100; // Minimum face size for security
+    final faceArea = faceHeight * faceWidth;
+    final isGoodFaceSize = faceArea > 10000; // Minimum face area for proper recognition
 
     if (mounted) {
       setState(() {
-        _progressPercentage = 100.0; // Always show 100% when face is detected
-        _isFaceDetected = isFaceDetected;
-        // No positioning data needed
+        _progressPercentage = isFaceDetected ? 100.0 : 0.0;
+        _isFaceDetected = isFaceDetected && isGoodFaceSize;
       });
     }
 
-    // Proceed with authentication as soon as any face is detected
-    if (isFaceDetected) {
-      await _authenticateFace(face, cameraImage);
+    // Only proceed with authentication if face meets security requirements
+    if (isFaceDetected && isGoodFaceSize) {
+      await _authenticateFace(face, cameraImage, imageBytes);
     }
   }
 
-  Future<void> _authenticateFace(Face face, [CameraImage? cameraImage]) async {
+  Future<void> _authenticateFace(Face face, [CameraImage? cameraImage, Uint8List? imageBytes]) async {
     if (_isAuthenticating) return;
 
     // Check for lockout
@@ -465,7 +483,7 @@ Future<void> _processImageFromFile() async {
 
     try {
       // First check if there are any verified users in the database
-      final hasVerifiedUsers = await FaceLoginService.hasVerifiedUsers();
+      final hasVerifiedUsers = await _hasVerifiedUsers();
 
       if (!hasVerifiedUsers) {
         // No verified users exist, show sign up message
@@ -492,10 +510,34 @@ Future<void> _processImageFromFile() async {
         return;
       }
 
-      // Try to authenticate the face using real biometric authentication
-      print('Attempting real biometric face authentication...');
-      final userId = await FaceLoginService.authenticateUser(face, cameraImage);
-      print('Biometric authentication result: $userId');
+      // Check lockout status for debugging
+      final lockoutStatus = LockoutService.getLockoutStatus();
+      print('🔍 LOCKOUT STATUS: $lockoutStatus');
+      
+      // Use PRODUCTION face recognition service for login
+      print('🔍 Attempting PRODUCTION face recognition for login...');
+      print('🔧 Using PRODUCTION biometric authentication with real ML algorithms...');
+      
+      String? userId;
+      try {
+        final authResult = await ProductionFaceRecognitionService.authenticateUser(
+          detectedFace: face,
+          cameraImage: cameraImage,
+          imageBytes: imageBytes,
+        );
+        if (authResult['success'] == true) {
+          userId = authResult['userId'];
+          print('✅ PRODUCTION face recognition successful: $userId');
+          print('📊 Similarity: ${authResult['similarity']}');
+        } else {
+          print('❌ PRODUCTION face recognition failed: ${authResult['error']}');
+          userId = null;
+        }
+      } catch (faceRecognitionError) {
+        print('❌ PRODUCTION face recognition service error: $faceRecognitionError');
+        print('Full error details: ${faceRecognitionError.toString()}');
+        userId = null;
+      }
 
       if (userId == "LIVENESS_FAILED") {
         // Liveness detection failed, show specific dialog
@@ -506,6 +548,17 @@ Future<void> _processImageFromFile() async {
           });
           _stopCamera(); // Stop camera when showing dialog
           _showLivenessDetectionDialog();
+        }
+      } else if (userId == "PENDING_VERIFICATION") {
+        // User is pending verification - BLOCK ACCESS to main app
+        if (mounted) {
+          setState(() {
+            _progressPercentage = 0.0;
+            _isAuthenticating = false;
+          });
+          
+          print('🚫 SECURITY: Pending verification user blocked from main app access');
+          _showPendingVerificationDialog();
         }
       } else if (userId != null) {
         // Check if user is rejected
@@ -522,9 +575,17 @@ Future<void> _processImageFromFile() async {
           }
         } else {
           // User is verified or pending, get user data and check verification status
-          final userData = await FaceLoginService.getUserData(userId);
+          print('🔍 Getting user data for userId: $userId');
+          final userData = await _getUserData(userId);
+          print('🔍 User data result: ${userData != null ? 'Found' : 'Not found'}');
 
           if (userData != null) {
+            print('🔍 User data keys: ${userData.keys.toList()}');
+            print('🔍 Username: ${userData['username']}');
+            print('🔍 Profile picture: ${userData['profilePictureUrl']}');
+            print('🔍 Verification status: ${userData['verificationStatus']}');
+            print('🔍 Signup completed: ${userData['signupCompleted']}');
+            
             // Store the current user ID, username, and profile picture for profile access
             final prefs = await SharedPreferences.getInstance();
             await prefs.setString('current_user_id', userId);
@@ -544,7 +605,9 @@ Future<void> _processImageFromFile() async {
               });
 
               // Navigate based on verification status
+              print('🔄 Starting navigation delay...');
               Future.delayed(const Duration(milliseconds: 1000), () {
+                print('🔄 Navigation delay completed, checking if mounted: $mounted');
                 if (mounted) {
                   if (verificationStatus == 'verified') {
                     // User is verified, navigate to main app
@@ -561,20 +624,42 @@ Future<void> _processImageFromFile() async {
                       MaterialPageRoute(builder: (_) => const UnderVerificationScreen()),
                     );
                   }
+                } else {
+                  print('❌ Widget not mounted, skipping navigation');
                 }
               });
+            } else {
+              print('❌ Widget not mounted, cannot navigate');
+            }
+          } else {
+            print('❌ User data is null, cannot proceed');
+            if (mounted) {
+              setState(() {
+                _progressPercentage = 0.0;
+                _isAuthenticating = false;
+              });
+              _showFaceNotRecognizedDialog();
             }
           }
         }
       } else {
-        // Face not recognized, show sign up message
+        // Face not recognized, show helpful message
         if (mounted) {
           setState(() {
             _progressPercentage = 0.0;
             _isAuthenticating = false;
           });
           _stopCamera(); // Add this line to stop camera
-          _showSignUpRequiredDialog();
+          
+          // Track failed attempt
+          _trackFailedAttempt();
+          
+          // Show different messages based on attempt count
+          if (_failedAttempts < 3) {
+            _showFaceNotRecognizedDialog();
+          } else {
+            _showSignUpRequiredDialog();
+          }
         }
       }
     } catch (e) {
@@ -603,17 +688,223 @@ Future<void> _processImageFromFile() async {
       context: context,
       barrierDismissible: false,
       builder: (BuildContext context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Container(
+            constraints: const BoxConstraints(
+              maxWidth: 400,
+              maxHeight: 600,
+            ),
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header with icon and title
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: Colors.orange.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Icon(
+                        Icons.visibility_off_rounded,
+                        color: Colors.orange.shade600,
+                        size: 32,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          "Liveness Detection Failed",
+                          style: TextStyle(
+                            fontSize: 18,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.orange.shade700,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Description
+                Text(
+                  "We couldn't verify that you're a real person. Please follow these steps:",
+                  style: const TextStyle(
+                    fontSize: 16,
+                    color: Colors.black87,
+                    height: 1.4,
+                  ),
+                  textAlign: TextAlign.center,
+                ),
+                
+                const SizedBox(height: 20),
+                
+                // Tips list
+                Flexible(
+                  child: SingleChildScrollView(
+                    child: Column(
+                      children: [
+                        _buildTipItem(
+                          Icons.visibility,
+                          "Ensure your eyes are open and clearly visible",
+                        ),
+                        const SizedBox(height: 12),
+                        _buildTipItem(
+                          Icons.center_focus_strong,
+                          "Look directly at the camera lens",
+                        ),
+                        const SizedBox(height: 12),
+                        _buildTipItem(
+                          Icons.face,
+                          "Keep your entire face within the frame",
+                        ),
+                        const SizedBox(height: 12),
+                        _buildTipItem(
+                          Icons.flash_on,
+                          "Ensure good lighting on your face",
+                        ),
+                        const SizedBox(height: 12),
+                        _buildTipItem(
+                          Icons.blur_on,
+                          "Try blinking naturally a few times",
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                
+                const SizedBox(height: 24),
+                
+                // Action buttons
+                Row(
+                  children: [
+                    Expanded(
+                      child: OutlinedButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          setState(() {
+                            _isDialogShowing = false;
+                          });
+                          Navigator.pushReplacement(
+                            context,
+                            MaterialPageRoute(builder: (_) => const SignUpScreen()),
+                          );
+                        },
+                        style: OutlinedButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          side: BorderSide(color: Colors.grey.shade400),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          "Sign Up",
+                          style: TextStyle(
+                            color: Colors.grey,
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: ElevatedButton(
+                        onPressed: () {
+                          Navigator.of(context).pop();
+                          setState(() {
+                            _isDialogShowing = false;
+                          });
+                          _resumeCamera();
+                        },
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.orange.shade600,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          elevation: 2,
+                        ),
+                        child: const Text(
+                          "Try Again",
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildTipItem(IconData icon, String text) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: Colors.green.withOpacity(0.05),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: Colors.green.withOpacity(0.2),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            icon,
+            color: Colors.green.shade600,
+            size: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 14,
+                color: Colors.black87,
+                height: 1.3,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showPendingVerificationDialog() {
+    setState(() {
+      _isDialogShowing = true;
+    });
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
         return AlertDialog(
           title: const Row(
             children: [
               Icon(
-                Icons.visibility_off,
+                Icons.hourglass_empty,
                 color: Colors.orange,
                 size: 28,
               ),
               SizedBox(width: 8),
               Text(
-                "Liveness Detection Failed",
+                "Account Pending Verification",
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   color: Colors.orange,
@@ -626,40 +917,13 @@ Future<void> _processImageFromFile() async {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                "We couldn't verify that you're a real person. Please try:",
+                "Your account is still pending verification and cannot access the main app yet.",
                 style: TextStyle(fontSize: 16),
               ),
               SizedBox(height: 12),
-              Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.green, size: 20),
-                  SizedBox(width: 8),
-                  Text("Make sure your eyes are open and visible"),
-                ],
-              ),
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.green, size: 20),
-                  SizedBox(width: 8),
-                  Text("Look directly at the camera"),
-                ],
-              ),
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.green, size: 20),
-                  SizedBox(width: 8),
-                  Text("Make sure your face is visible"),
-                ],
-              ),
-              SizedBox(height: 8),
-              Row(
-                children: [
-                  Icon(Icons.check_circle, color: Colors.green, size: 20),
-                  SizedBox(width: 8),
-                  Text("Try blinking naturally"),
-                ],
+              Text(
+                "Please wait for admin approval or contact support if you have questions.",
+                style: TextStyle(fontSize: 14, color: Colors.grey),
               ),
             ],
           ),
@@ -670,30 +934,17 @@ Future<void> _processImageFromFile() async {
                 setState(() {
                   _isDialogShowing = false;
                 });
-                _resumeCamera(); // Resume camera when retrying
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+                );
               },
               child: const Text(
-                "Try Again",
+                "OK",
                 style: TextStyle(
                   color: Colors.orange,
                   fontWeight: FontWeight.bold,
                 ),
-              ),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop(); // Close dialog
-                setState(() {
-                  _isDialogShowing = false;
-                });
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const SignUpScreen()),
-                );
-              },
-              child: const Text(
-                "Sign Up Instead",
-                style: TextStyle(color: Colors.grey),
               ),
             ),
           ],
@@ -758,6 +1009,79 @@ Future<void> _processImageFromFile() async {
               },
               child: const Text(
                 "OK",
+                style: TextStyle(
+                  color: Colors.red,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showFaceNotRecognizedDialog() {
+    setState(() {
+      _isDialogShowing = true;
+    });
+    
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text(
+            "Face Not Recognized",
+            style: TextStyle(
+              fontWeight: FontWeight.bold,
+              color: Colors.orange,
+            ),
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text(
+                "We couldn't recognize your face. Please try:",
+                style: TextStyle(fontSize: 16),
+              ),
+              const SizedBox(height: 12),
+              const Text(
+                "• Ensure good lighting\n• Look directly at the camera\n• Remove glasses if possible\n• Try a different angle",
+                style: TextStyle(fontSize: 14, color: Colors.grey),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+                setState(() {
+                  _isDialogShowing = false;
+                });
+                _resumeCamera(); // Restart camera
+              },
+              child: const Text(
+                "TRY AGAIN",
+                style: TextStyle(
+                  color: Colors.orange,
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+            ),
+            TextButton(
+              onPressed: () {
+                Navigator.of(context).pop(); // Close dialog
+                setState(() {
+                  _isDialogShowing = false;
+                });
+                Navigator.pushReplacement(
+                  context,
+                  MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+                );
+              },
+              child: const Text(
+                "SIGN UP",
                 style: TextStyle(
                   color: Colors.red,
                   fontWeight: FontWeight.bold,
@@ -1054,11 +1378,67 @@ Future<void> _processImageFromFile() async {
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
+              // Debug: Clear lockout button
+              if (kDebugMode)
+                TextButton(
+                  onPressed: () {
+                    LockoutService.forceClearLockout();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Lockout cleared for debugging'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  },
+                  child: const Text(
+                    "Clear Lockout (Debug)",
+                    style: TextStyle(
+                      color: Colors.orange,
+                      fontSize: 12,
+                    ),
+                  ),
+                ),
             ],
           ),
         ),
       ),
     );
   }
+
+  // Helper method to check if there are users who have completed signup
+  Future<bool> _hasVerifiedUsers() async {
+    // Simplified: Let FaceVerificationService handle the database queries
+    // This avoids conflicts between multiple database queries
+    print('🔍 Skipping duplicate database query - letting FaceVerificationService handle it');
+    return true; // Assume users exist, let FaceVerificationService verify
+  }
+
+  // Helper method to get user data
+  Future<Map<String, dynamic>?> _getUserData(String userId) async {
+    try {
+      print('🔍 Looking for user document with ID: $userId');
+      final firestore = FirebaseFirestore.instanceFor(
+        app: Firebase.app(),
+        databaseId: 'marketsafe',
+      );
+      
+      final doc = await firestore.collection('users').doc(userId).get();
+      
+      print('🔍 Document exists: ${doc.exists}');
+      if (doc.exists) {
+        final data = doc.data();
+        print('🔍 User document found with keys: ${data?.keys.toList()}');
+        return data;
+      } else {
+        print('❌ User document not found for ID: $userId');
+        return null;
+      }
+    } catch (e) {
+      print('❌ Error getting user data: $e');
+      return null;
+    }
+  }
 }
+
 

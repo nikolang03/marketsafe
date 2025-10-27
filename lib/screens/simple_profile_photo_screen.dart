@@ -90,7 +90,17 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
 
       // Step 2: Verify face matches user's registered face
       print('🔍 Verifying face match...');
-      final verificationResult = await _verifyFaceMatch(userId, detectedFace);
+      Map<String, dynamic> verificationResult;
+      try {
+        verificationResult = await _verifyFaceMatch(userId, detectedFace);
+      } catch (e) {
+        print('❌ Error in face verification: $e');
+        _showErrorDialog(
+          'Verification Error',
+          'Failed to verify face. Please try again.',
+        );
+        return;
+      }
       
       if (!verificationResult['success']) {
         _showErrorDialog(
@@ -108,21 +118,42 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
         _isUploading = true;
       });
 
-      final file = File(_image!.path);
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final ref = FirebaseStorage.instance.ref().child('profile_photos/$userId/profile_$timestamp.jpg');
-      
-      final uploadTask = await ref.putFile(file);
-      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      String downloadUrl;
+      try {
+        final file = File(_image!.path);
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final ref = FirebaseStorage.instance.ref().child('profile_photos/$userId/profile_$timestamp.jpg');
+        
+        final uploadTask = await ref.putFile(file);
+        downloadUrl = await uploadTask.ref.getDownloadURL();
+        print('✅ Profile photo uploaded to Firebase Storage');
+      } catch (e) {
+        print('❌ Error uploading to Firebase Storage: $e');
+        _showErrorDialog(
+          'Upload Error',
+          'Failed to upload photo. Please check your internet connection and try again.',
+        );
+        return;
+      }
       
       // Step 4: Update user document in Firestore
-      await FirebaseFirestore.instanceFor(
-        app: Firebase.app(),
-        databaseId: 'marketsafe',
-      ).collection('users').doc(userId).update({
-        'profilePictureUrl': downloadUrl,
-        'profilePhotoUpdatedAt': FieldValue.serverTimestamp(),
-      });
+      try {
+        await FirebaseFirestore.instanceFor(
+          app: Firebase.app(),
+          databaseId: 'marketsafe',
+        ).collection('users').doc(userId).update({
+          'profilePictureUrl': downloadUrl,
+          'profilePhotoUpdatedAt': FieldValue.serverTimestamp(),
+        });
+        print('✅ User document updated in Firestore');
+      } catch (e) {
+        print('❌ Error updating Firestore: $e');
+        _showErrorDialog(
+          'Database Error',
+          'Failed to save profile photo. Please try again.',
+        );
+        return;
+      }
       
       // Step 5: Save to SharedPreferences
       await prefs.setString('profile_photo_url', downloadUrl);
@@ -190,7 +221,27 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
       }
 
       // Extract features from the uploaded photo
-      final detectedFeatures = await RealFaceRecognitionService.extractBiometricFeatures(detectedFace);
+      List<double> detectedFeatures;
+      try {
+        detectedFeatures = await RealFaceRecognitionService.extractBiometricFeatures(detectedFace);
+        print('✅ Face features extracted successfully: ${detectedFeatures.length}D');
+      } catch (e) {
+        print('❌ Error extracting face features: $e');
+        return {
+          'success': false,
+          'error': 'Failed to process face features. Please try again.',
+          'similarity': 0.0,
+        };
+      }
+      
+      // Safety check for detected features
+      if (detectedFeatures.isEmpty || detectedFeatures.any((x) => x.isNaN || x.isInfinite)) {
+        return {
+          'success': false,
+          'error': 'Failed to extract valid face features from uploaded photo',
+          'similarity': 0.0,
+        };
+      }
       
       // Handle biometric features format
       List<double> storedFeatures = [];
@@ -225,8 +276,8 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
       print('   - Stored features: ${storedFeatures.length}');
       print('   - Similarity score: $similarity');
 
-      // Use a threshold for verification (adjust as needed)
-      const double similarityThreshold = 0.6; // 60% similarity threshold
+      // Use a more lenient threshold for profile photo verification
+      const double similarityThreshold = 0.4; // 40% similarity threshold for profile photos
       
       if (similarity >= similarityThreshold) {
         return {

@@ -15,7 +15,7 @@ class UserCheckService {
       final querySnapshot = await _firestore
           .collection('users')
           .where('email', isEqualTo: email)
-          .where('verificationStatus', whereIn: ['pending', 'approved', 'verified'])
+          .where('signupCompleted', isEqualTo: true) // Only check users who completed signup
           .limit(1)
           .get();
       
@@ -34,7 +34,7 @@ class UserCheckService {
       final querySnapshot = await _firestore
           .collection('users')
           .where('phoneNumber', isEqualTo: phoneNumber)
-          .where('verificationStatus', whereIn: ['pending', 'approved', 'verified'])
+          .where('signupCompleted', isEqualTo: true) // Only check users who completed signup
           .limit(1)
           .get();
       

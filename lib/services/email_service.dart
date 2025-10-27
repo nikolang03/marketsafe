@@ -96,7 +96,19 @@ class EmailService {
       final allOtps = await _getAllOtps();
       print('🔍 Available emails in storage: ${allOtps.keys.toList()}');
       print('🔍 All stored OTPs: $allOtps');
-      return false;
+      
+      // IMPROVED: Try case-insensitive email matching
+      for (final storedEmail in allOtps.keys) {
+        if (storedEmail.toLowerCase() == email.toLowerCase()) {
+          print('🔍 Found case-insensitive match: $storedEmail');
+          storedData = allOtps[storedEmail];
+          break;
+        }
+      }
+      
+      if (storedData == null) {
+        return false;
+      }
     }
 
     print('🔍 Found stored OTP data: $storedData');
@@ -110,7 +122,8 @@ class EmailService {
     }
 
     print('🔍 Comparing OTPs - Expected: ${storedData['otp']}, Got: $code');
-    if (storedData['otp'] != code) {
+    // IMPROVED: Trim whitespace and compare
+    if (storedData['otp'].toString().trim() != code.trim()) {
       print('❌ Invalid OTP code for $email. Expected: ${storedData['otp']}, Got: $code');
       return false;
     }

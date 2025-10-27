@@ -1,10 +1,13 @@
 import 'dart:io';
 
 import 'package:capstone2/screens/under_verification_screen.dart';
-import 'package:capstone2/services/profile_photo_verification_service.dart';
+import 'package:capstone2/services/image_metadata_service.dart';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 
 class AddProfilePhotoScreen extends StatefulWidget {
   const AddProfilePhotoScreen({super.key});
@@ -44,25 +47,25 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
           return;
         }
 
-        // Check if user has completed face verification
-        final hasCompletedVerification = await ProfilePhotoVerificationService.hasUserCompletedFaceVerification(userId);
+        // Verify image originality using metadata service
+        final imageVerification = await ImageMetadataService.verifyImageOriginality(File(_image!.path));
         
-        if (!hasCompletedVerification) {
+        if (!imageVerification.isValid) {
           _showErrorDialog(
-            'Face Verification Required',
-            'Please complete face verification first to upload profile photos.',
+            'Image Verification Failed',
+            'Please upload an original photo taken with your camera.',
           );
           return;
         }
 
-        // Verify and upload the profile photo
-        final verificationResult = await ProfilePhotoVerificationService.verifyAndUploadProfilePhoto(_image!.path);
+        // Upload the profile photo (simplified approach)
+        final uploadResult = await _uploadProfilePhoto(_image!.path);
         
-        if (verificationResult.success) {
+        if (uploadResult['success'] == true) {
           // Save the Firebase Storage URL to SharedPreferences for immediate access
-          if (verificationResult.downloadUrl != null) {
-            await prefs.setString('profile_photo_url', verificationResult.downloadUrl!);
-            print('📸 Profile photo URL saved to SharedPreferences: ${verificationResult.downloadUrl}');
+          if (uploadResult['downloadUrl'] != null) {
+            await prefs.setString('profile_photo_url', uploadResult['downloadUrl']);
+            print('📸 Profile photo URL saved to SharedPreferences: ${uploadResult['downloadUrl']}');
           }
           
           // Photo verified successfully - proceed to under verification screen
@@ -77,12 +80,12 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
             },
           );
           
-          print('📸 Profile photo verified and uploaded: ${verificationResult.downloadUrl}');
+          print('📸 Profile photo verified and uploaded: ${uploadResult['downloadUrl']}');
         } else {
           // Photo verification failed
           _showErrorDialog(
             'Photo Verification Failed',
-            verificationResult.error ?? 'The uploaded photo doesn\'t match to the face verification',
+            uploadResult['message'] ?? 'The uploaded photo doesn\'t match to the face verification',
           );
         }
       } catch (e) {
@@ -291,5 +294,58 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
       ),
         ),
     );
+  }
+
+  // Real profile photo upload method
+  Future<Map<String, dynamic>> _uploadProfilePhoto(String imagePath) async {
+    try {
+      print('📸 Starting profile photo upload...');
+      
+      // Get current user ID
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('signup_user_id') ?? 
+                    prefs.getString('current_user_id') ?? '';
+      
+      if (userId.isEmpty) {
+        return {
+          'success': false,
+          'message': 'No user logged in'
+        };
+      }
+      
+      // Upload to Firebase Storage
+      final file = File(imagePath);
+      final timestamp = DateTime.now().millisecondsSinceEpoch;
+      final ref = FirebaseStorage.instance.ref().child('profile_photos/$userId/profile_$timestamp.jpg');
+      
+      print('📸 Uploading to Firebase Storage...');
+      final uploadTask = await ref.putFile(file);
+      final downloadUrl = await uploadTask.ref.getDownloadURL();
+      
+      print('✅ Profile photo uploaded: $downloadUrl');
+      
+      // Update user document in Firestore
+      await FirebaseFirestore.instanceFor(
+        app: Firebase.app(),
+        databaseId: 'marketsafe',
+      ).collection('users').doc(userId).update({
+        'profilePictureUrl': downloadUrl,
+        'profilePhotoUpdatedAt': FieldValue.serverTimestamp(),
+      });
+      
+      print('✅ User document updated in Firestore');
+      
+      return {
+        'success': true,
+        'downloadUrl': downloadUrl,
+        'message': 'Profile photo uploaded successfully'
+      };
+    } catch (e) {
+      print('❌ Error uploading profile photo: $e');
+      return {
+        'success': false,
+        'message': 'Failed to upload profile photo: $e'
+      };
+    }
   }
 }
