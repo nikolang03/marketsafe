@@ -31,7 +31,7 @@ class ProductionFaceRecognitionService {
   // Flutter → Your Backend → Luxand Cloud (API key stays on server)
   static const String _backendUrl = String.fromEnvironment(
     'FACE_AUTH_BACKEND_URL',
-    defaultValue: 'https://your-backend-domain.com', // TODO: Replace with your backend URL
+    defaultValue: 'https://marketsafe-production.up.railway.app', // Railway backend URL
   );
   
   static FaceAuthBackendService? _backendService;
@@ -2502,16 +2502,16 @@ class ProductionFaceRecognitionService {
         );
 
         if (generatedEmbedding.isEmpty) {
-          print('🚨🚨🚨 CRITICAL: Embedding generation returned empty list');
-          print('🚨 This can happen if:');
-          print('   1. Embedding validation failed (range/variance/stdDev below threshold)');
-          print('   2. Model output was all zeros (invalid/corrupted image)');
-          print('   3. Image decoding/cropping failed');
-          print('🚨 Check FaceNetService logs above for specific validation failure');
-          print('💡 Solution: Ensure photo has good lighting, clear face visibility, and proper positioning');
-          return {
-            'success': false,
-            'error': 'Failed to generate face embedding. Please ensure the photo has good lighting and a clear, visible face.',
+        print('🚨🚨🚨 CRITICAL: Embedding generation returned empty list');
+        print('🚨 This can happen if:');
+        print('   1. Embedding validation failed (range/variance/stdDev below threshold)');
+        print('   2. Model output was all zeros (invalid/corrupted image)');
+        print('   3. Image decoding/cropping failed');
+        print('🚨 Check FaceNetService logs above for specific validation failure');
+        print('💡 Solution: Ensure photo has good lighting, clear face visibility, and proper positioning');
+        return {
+          'success': false,
+          'error': 'Failed to generate face embedding. Please ensure the photo has good lighting and a clear, visible face.',
           };
         }
 
