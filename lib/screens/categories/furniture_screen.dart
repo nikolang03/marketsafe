@@ -191,86 +191,103 @@ class _FurnitureScreenState extends State<FurnitureScreen> {
         centerTitle: true,
         leading: Padding(
           padding: const EdgeInsets.all(8.0),
-          child: Image.asset("assets/logo.png"),
+          child: GestureDetector(
+            onTap: () {
+              Navigator.pop(context);
+            },
+            child: Image.asset("assets/logo.png"),
+          ),
         ),
         actions: [
-          IconButton(
-            color: Colors.white,
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadProducts,
-          ),
           IconButton(
             color: Colors.white,
             icon: const Icon(Icons.filter_list),
             onPressed: _showFilterDialog,
           ),
-          IconButton(
-            color: Colors.white,
-            icon: const Icon(Icons.notifications_none),
-            onPressed: () {},
-          ),
         ],
       ),
-      body: _isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            )
-          : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      const Icon(Icons.error, color: Colors.red, size: 50),
-                      const SizedBox(height: 16),
-                      const Text(
-                        'Error loading products',
-                        style: TextStyle(color: Colors.white, fontSize: 18),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        _error!,
-                        style: const TextStyle(color: Colors.white70),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 16),
-                      ElevatedButton(
-                        onPressed: _loadProducts,
-                        child: const Text('Retry'),
-                      ),
-                    ],
+      body: RefreshIndicator(
+        onRefresh: _loadProducts,
+        color: Colors.red,
+        child: _isLoading
+            ? const SingleChildScrollView(
+                physics: AlwaysScrollableScrollPhysics(),
+                child: SizedBox(
+                  height: 600,
+                  child: Center(
+                    child: CircularProgressIndicator(color: Colors.white),
                   ),
-                )
-              : _products.isEmpty
-                  ? const Center(
-                      child: Column(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.inventory_2_outlined, color: Colors.white70, size: 50),
-                          SizedBox(height: 16),
-                          Text(
-                            'No furniture found',
-                            style: TextStyle(color: Colors.white70, fontSize: 18),
-                          ),
-                          SizedBox(height: 8),
-                          Text(
-                            'Be the first to post a furniture item!',
-                            style: TextStyle(color: Colors.white54),
-                          ),
-                        ],
+                ),
+              )
+            : _error != null
+                ? SingleChildScrollView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    child: SizedBox(
+                      height: MediaQuery.of(context).size.height - 200,
+                      child: Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            const Icon(Icons.error, color: Colors.red, size: 50),
+                            const SizedBox(height: 16),
+                            const Text(
+                              'Error loading products',
+                              style: TextStyle(color: Colors.white, fontSize: 18),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              _error!,
+                              style: const TextStyle(color: Colors.white70),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 16),
+                            ElevatedButton(
+                              onPressed: _loadProducts,
+                              child: const Text('Retry'),
+                            ),
+                          ],
+                        ),
                       ),
-                    )
-                  : ListView.builder(
-                      itemCount: _products.length,
-                      itemBuilder: (context, index) {
-                        final product = _products[index];
-                        return ProductCard(
-                          product: product,
-                          onRefresh: _loadProducts,
-                          selectedMin: selectedMin,
-                          selectedMax: selectedMax,
-                        );
-                      },
                     ),
+                  )
+                : _products.isEmpty
+                    ? SingleChildScrollView(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        child: SizedBox(
+                          height: MediaQuery.of(context).size.height - 200,
+                          child: const Center(
+                            child: Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.inventory_2_outlined, color: Colors.white70, size: 50),
+                                SizedBox(height: 16),
+                                Text(
+                                  'No furniture found',
+                                  style: TextStyle(color: Colors.white70, fontSize: 18),
+                                ),
+                                SizedBox(height: 8),
+                                Text(
+                                  'Be the first to post a furniture item!',
+                                  style: TextStyle(color: Colors.white54),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      )
+                    : ListView.builder(
+                        itemCount: _products.length,
+                        itemBuilder: (context, index) {
+                          final product = _products[index];
+                          return ProductCard(
+                            product: product,
+                            onRefresh: _loadProducts,
+                            selectedMin: selectedMin,
+                            selectedMax: selectedMax,
+                          );
+                        },
+                      ),
+      ),
     );
   }
 }

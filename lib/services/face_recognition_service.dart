@@ -1,15 +1,26 @@
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:camera/camera.dart';
 import 'production_face_service.dart';
 
-/// Face Recognition Service for Login
+/// @deprecated Face Recognition Service for Login
+/// 
+/// ⚠️ DEPRECATED: This service uses OLD biometricFeatures format (64D simulated)
+/// ⚠️ NEW SYSTEM: Use ProductionFaceRecognitionService instead (512D real embeddings)
+/// 
+/// Old implementation with:
+/// - 0.85 similarity threshold (too low)
+/// - Reads from biometricFeatures.biometricSignature (deprecated)
+/// - 64D simulated embeddings (not real)
+/// 
 /// Implements the face recognition process as described:
 /// 1. Open camera and detect current face
 /// 2. Generate embedding using TFLite model
 /// 3. Compare with stored embeddings in Firebase
 /// 4. Return user ID if match found (distance < threshold)
+@Deprecated('Use ProductionFaceRecognitionService instead - this uses old biometricFeatures format')
 class FaceRecognitionService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instanceFor(
     app: Firebase.app(),
@@ -24,11 +35,13 @@ class FaceRecognitionService {
   /// Recognize a user by their face during login
   /// Returns user ID if match found, null otherwise
   static Future<String?> recognizeUser({
+    required String email,
     required Face detectedFace,
     CameraImage? cameraImage,
   }) async {
     try {
-      print('🔍 Starting face recognition for login...');
+      print('🔍 Starting face recognition (legacy service) for login...');
+      print('🔐 Email (1:1 target): $email');
       
       // Step 1: Generate 128D face embedding for the detected face
       print('📊 Generating face embedding for recognition...');
@@ -42,75 +55,36 @@ class FaceRecognitionService {
       print('✅ Generated ${detectedEmbedding.length}D face embedding');
       print('📊 Sample embedding values: ${detectedEmbedding.take(5).toList()}');
       
-      // Step 2: Get all stored face embeddings from Firebase
-      print('🔍 Retrieving stored face embeddings from Firebase...');
-      final storedEmbeddings = await _getAllStoredEmbeddings();
+      // Step 2: Get embedding for the specific email (1:1)
+      print('🔍 Retrieving stored face embedding for $email ...');
+      final storedEmbedding = await _getEmbeddingByEmail(email);
       
-      if (storedEmbeddings.isEmpty) {
-        print('❌ No face embeddings found in database');
-        print('🔍 This could mean:');
-        print('  1. No users have completed signup yet');
-        print('  2. Face embeddings were not stored properly');
-        print('  3. Database query is not finding the right documents');
+      if (storedEmbedding == null) {
+        print('❌ No face embedding found for email: $email');
+        await _logRecognitionEvent(null, 0.0, false, 'NO_EMBEDDING_FOR_EMAIL');
         return null;
       }
       
-      print('📊 Found ${storedEmbeddings.length} stored face embeddings');
-      
-      // Step 3: Use production face service for comparison
-      print('🔍 Comparing with stored embeddings using production service...');
-      final matchResult = await ProductionFaceService.findBestMatch(detectedEmbedding, storedEmbeddings);
-      
-      if (matchResult != null) {
-        final bestMatchUserId = matchResult['userId'] as String;
-        final bestSimilarity = matchResult['similarity'] as double;
-        final uniquenessScore = matchResult['uniquenessScore'] as double;
+      final storedVector = storedEmbedding['faceEmbedding'] as List<double>;
+      final storedUserId = storedEmbedding['userId'] as String? ?? '';
+
+      print('📊 Retrieved stored embedding (${storedVector.length}D) for user: $storedUserId');
+
+      // Step 3: Compare embeddings using Euclidean distance
+      print('🔍 Performing 1:1 distance comparison...');
+      final distance = _calculateEuclideanDistance(storedVector, detectedEmbedding);
+      final similarity = 1.0 - distance; // simple similarity approximation
         
-        print('📊 Best match: user $bestMatchUserId with similarity ${bestSimilarity.toStringAsFixed(4)}');
-        print('📊 Uniqueness score: ${uniquenessScore.toStringAsFixed(4)}');
-        print('📊 Threshold: $_similarityThreshold');
-        print('📊 Uniqueness threshold: $_uniquenessThreshold');
-        
-        // Enhanced security checks
-        final secondBestSimilarity = bestSimilarity - uniquenessScore;
-        final isHighSimilarity = bestSimilarity >= _similarityThreshold;
-        final isUniqueMatch = uniquenessScore >= _uniquenessThreshold;
-        final isSecondBestLow = secondBestSimilarity <= _maxSecondBestSimilarity;
-        
-        print('🔒 Security Analysis:');
-        print('  - Best similarity: ${bestSimilarity.toStringAsFixed(4)} (required: $_similarityThreshold)');
-        print('  - Second-best similarity: ${secondBestSimilarity.toStringAsFixed(4)} (max: $_maxSecondBestSimilarity)');
-        print('  - Uniqueness score: ${uniquenessScore.toStringAsFixed(4)} (required: $_uniquenessThreshold)');
-        print('  - High similarity: $isHighSimilarity');
-        print('  - Unique match: $isUniqueMatch');
-        print('  - Second-best low: $isSecondBestLow');
-        
-        if (isHighSimilarity && isUniqueMatch && isSecondBestLow) {
-          print('✅ Face recognized with SECURE unique match! User: $bestMatchUserId');
-          
-          // Log successful recognition
-          await _logRecognitionEvent(bestMatchUserId, bestSimilarity, true, 'SECURE_MATCH');
-          
-          return bestMatchUserId;
-        } else {
-          String reason = '';
-          if (!isHighSimilarity) reason += 'Low similarity; ';
-          if (!isUniqueMatch) reason += 'Not unique; ';
-          if (!isSecondBestLow) reason += 'Second-best too high; ';
-          
-          print('❌ Face not recognized. $reason');
-          
-          // Log failed recognition
-          await _logRecognitionEvent(null, bestSimilarity, false, reason.trim());
-          
-          return null;
-        }
+      print('📊 Distance: ${distance.toStringAsFixed(4)} (threshold: $_similarityThreshold)');
+      print('📊 Similarity approximation: ${similarity.toStringAsFixed(4)}');
+
+      if (similarity >= _similarityThreshold) {
+        print('✅ Face verified successfully for $email (user: $storedUserId)');
+        await _logRecognitionEvent(storedUserId.isNotEmpty ? storedUserId : email, similarity, true, '1:1_MATCH');
+        return storedUserId.isNotEmpty ? storedUserId : email;
       } else {
-        print('❌ No suitable match found');
-        
-        // Log failed recognition
-        await _logRecognitionEvent(null, 0.0, false);
-        
+        print('❌ Face did not match the registered embedding for $email');
+        await _logRecognitionEvent(storedUserId.isNotEmpty ? storedUserId : null, similarity, false, 'MISMATCH');
         return null;
       }
       
@@ -137,7 +111,64 @@ class FaceRecognitionService {
   
 
 
-  /// Get all stored face embeddings from Firebase
+  /// Get a stored face embedding by email
+  static Future<Map<String, dynamic>?> _getEmbeddingByEmail(String email) async {
+    try {
+      print('🔍 Looking for face embedding for email: $email');
+
+      final usersSnapshot = await _firestore
+          .collection('users')
+          .where('email', isEqualTo: email.toLowerCase())
+          .limit(1)
+          .get();
+
+      if (usersSnapshot.docs.isEmpty) {
+        print('❌ No user document found for email: $email');
+        return null;
+      }
+
+      final userDoc = usersSnapshot.docs.first;
+      final userId = userDoc.id;
+      final userData = userDoc.data();
+
+      if (userData.containsKey('biometricFeatures')) {
+        final biometricFeatures = userData['biometricFeatures'] as Map<String, dynamic>?;
+        if (biometricFeatures != null && biometricFeatures.containsKey('biometricSignature')) {
+          final biometricSignature = biometricFeatures['biometricSignature'] as List<dynamic>?;
+          if (biometricSignature != null && biometricSignature.isNotEmpty) {
+            final faceEmbedding = biometricSignature.map((e) => (e as num).toDouble()).toList();
+            return {
+              'userId': userId,
+              'faceEmbedding': faceEmbedding,
+            };
+          }
+        }
+      }
+
+      print('⚠️ No biometricSignature found for user: $userId');
+      return null;
+    } catch (e) {
+      print('❌ Error retrieving embedding by email: $e');
+      return null;
+    }
+  }
+
+  /// Calculate Euclidean distance between two embeddings
+  static double _calculateEuclideanDistance(List<double> a, List<double> b) {
+    if (a.length != b.length) {
+      print('⚠️ Embedding length mismatch: ${a.length} vs ${b.length}');
+      return double.infinity;
+    }
+
+    double sum = 0.0;
+    for (int i = 0; i < a.length; i++) {
+      final diff = a[i] - b[i];
+      sum += diff * diff;
+    }
+    return sqrt(sum);
+  }
+
+  /// Get all stored face embeddings from Firebase (legacy helper)
   static Future<List<Map<String, dynamic>>> _getAllStoredEmbeddings() async {
     try {
       print('🔍 Looking for face embeddings in users collection...');

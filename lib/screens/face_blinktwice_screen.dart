@@ -1,57 +1,59 @@
 import 'dart:typed_data';
 import 'dart:async';
-import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'face_movecloser_screen.dart';
-import '../services/face_uniqueness_service.dart';
-import '../services/real_face_recognition_service.dart';
-import '../services/face_net_service.dart'; // Added import for FaceNetService
+import '../services/production_face_recognition_service.dart';
+import '../services/face_net_service.dart';
 
-class FaceScanScreen extends StatefulWidget {
-  const FaceScanScreen({super.key});
+class FaceBlinkTwiceScreen extends StatefulWidget {
+  const FaceBlinkTwiceScreen({super.key});
 
   @override
-  State<FaceScanScreen> createState() => _FaceScanScreenState();
+  State<FaceBlinkTwiceScreen> createState() => _FaceBlinkTwiceScreenState();
 }
 
-class _FaceScanScreenState extends State<FaceScanScreen> {
+class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> {
   CameraController? _cameraController;
   List<CameraDescription> _cameras = const [];
   late final FaceDetector _faceDetector;
-
   bool _isCameraInitialized = false;
   bool _isProcessingImage = false;
-  bool isBlinking = false;
-  bool isAccomplished = false;
-  DateTime? lastBlinkTime;
   Timer? _detectionTimer;
   bool _useImageStream = true;
   double _progressPercentage = 0.0;
   int _blinkCount = 0;
-  bool _hasCheckedFaceUniqueness = false;
-  Face? _lastDetectedFace;
-  CameraImage? _lastCameraImage; // Store last camera image for 128D embedding // Store the last detected face for feature extraction
-  Uint8List? _lastImageBytes; // Store last image bytes for FaceNetService
-
+  bool _isBlinkComplete = false;
+  bool _navigated = false;
+  
+  // Blink detection variables
+  List<double> _eyeProbabilities = [];
+  bool _wasEyesClosed = false;
+  DateTime? _lastBlinkTime;
 
   @override
   void initState() {
     super.initState();
     _faceDetector = FaceDetector(
       options: FaceDetectorOptions(
-        enableClassification: true, // required for eye probabilities
-        enableLandmarks: true, // helps with eye detection
-        enableContours: true, // helps with face shape detection
+        enableClassification: true, // Required for eye open probability
+        enableLandmarks: true,
+        enableContours: true,
         performanceMode: FaceDetectorMode.accurate,
-        minFaceSize: 0.1, // smaller minimum face size for better detection
+        minFaceSize: 0.1,
       ),
     );
-    _initializeCamera();
+    // Add a delay to ensure the previous camera is fully disposed
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        _initializeCamera();
+      }
+    });
   }
 
   @override
@@ -73,7 +75,35 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
   Future<void> _initializeCamera() async {
     try {
+      // Check camera permission first
+      final cameraStatus = await Permission.camera.status;
+
+      if (cameraStatus.isDenied) {
+        final result = await Permission.camera.request();
+        if (result.isDenied) {
+          if (mounted) {
+            setState(() {
+              _isCameraInitialized = false;
+            });
+          }
+          return;
+        }
+      }
+
+      if (cameraStatus.isPermanentlyDenied) {
+        if (mounted) {
+          setState(() {
+            _isCameraInitialized = false;
+          });
+        }
+        return;
+      }
+
+      // Wait a bit more if camera is still in use
+      await Future.delayed(const Duration(milliseconds: 200));
+
       _cameras = await availableCameras();
+
       final frontCamera = _cameras.firstWhere(
         (c) => c.lensDirection == CameraLensDirection.front,
       );
@@ -86,10 +116,14 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
       await controller.initialize();
 
-      if (!mounted) return;
+      if (!mounted) {
+        controller.dispose();
+        return;
+      }
+
       setState(() {
         _cameraController = controller;
-        _isCameraInitialized = true;
+        _isCameraInitialized = controller.value.isInitialized;
       });
 
       // Try image stream first, fallback to timer-based detection
@@ -111,12 +145,12 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
   void _startTimerBasedDetection() {
     _detectionTimer =
-        Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+        Timer.periodic(const Duration(milliseconds: 200), (timer) async {
       if (_isProcessingImage || _cameraController == null || !mounted) return;
 
       try {
-        final XFile image = await _cameraController!.takePicture();
-        final inputImage = InputImage.fromFilePath(image.path);
+        final XFile imageFile = await _cameraController!.takePicture();
+        final inputImage = InputImage.fromFilePath(imageFile.path);
         final faces = await _faceDetector.processImage(inputImage);
 
         if (faces.isNotEmpty) {
@@ -125,7 +159,6 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
           if (mounted) {
             setState(() {
               _progressPercentage = 0.0;
-              _blinkCount = 0;
             });
           }
         }
@@ -197,17 +230,12 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
 
       final faces = await _faceDetector.processImage(inputImage);
 
-      print('🔍 Face detection result: ${faces.length} faces found');
-
       if (faces.isNotEmpty) {
-        print('👤 Processing first face for blink detection');
-        _detectBlink(faces.first, image); // Pass camera image for 128D embedding
+        _detectBlink(faces.first);
       } else {
-        print('❌ No faces detected');
         if (mounted) {
           setState(() {
             _progressPercentage = 0.0;
-            _blinkCount = 0;
           });
         }
       }
@@ -225,161 +253,198 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     }
   }
 
-  void _detectBlink(Face face, [CameraImage? cameraImage]) async {
-    final leftProb = face.leftEyeOpenProbability;
-    final rightProb = face.rightEyeOpenProbability;
+  void _detectBlink(Face face) {
+    final leftEyeProb = face.leftEyeOpenProbability ?? 0.0;
+    final rightEyeProb = face.rightEyeOpenProbability ?? 0.0;
 
-    if (leftProb == null || rightProb == null) {
-      return;
-    }
+    // Calculate average eye open probability
+    if (leftEyeProb > 0.0 && rightEyeProb > 0.0) {
+      final avgEyeProb = (leftEyeProb + rightEyeProb) / 2.0;
+      _eyeProbabilities.add(avgEyeProb);
 
-    // Store the face and camera image for feature extraction
-    _lastDetectedFace = face;
-    _lastCameraImage = cameraImage; // Store camera image for 128D embedding
-
-    print('👁️ Eye probabilities - Left: $leftProb, Right: $rightProb, Blink count: $_blinkCount');
-
-    // More lenient thresholds for better detection
-    const closedThreshold = 0.4;
-    const openThreshold = 0.5;
-
-    // Update UI with current eye probabilities
-    if (mounted) {
-      setState(() {
-        _progressPercentage = 10.0; // Show some progress when face is detected
-      });
-    }
-
-    final eyesClosed =
-        (leftProb < closedThreshold && rightProb < closedThreshold);
-    final eyesOpen = (leftProb > openThreshold && rightProb > openThreshold);
-
-    print('👁️ Eyes closed: $eyesClosed, Eyes open: $eyesOpen, Currently blinking: $isBlinking');
-
-    if (eyesClosed && !isBlinking) {
-      print('👁️ Eyes closed detected - starting blink');
-      if (mounted) {
-        setState(() {
-          isBlinking = true;
-          _progressPercentage = 30.0; // Progress when eyes are closed
-        });
+      // Keep only last 15 probabilities (3 seconds at ~200ms intervals)
+      if (_eyeProbabilities.length > 15) {
+        _eyeProbabilities.removeAt(0);
       }
-    } else if (eyesOpen && isBlinking) {
-      print('👁️ Eyes open detected - completing blink #${_blinkCount + 1}');
-      if (mounted) {
-        setState(() {
-          isBlinking = false;
+
+      // Check if eyes are currently closed (< 0.3 threshold)
+      final bool isEyesClosed = avgEyeProb < 0.3;
+
+      // Detect blink: transition from open to closed, then closed to open
+      if (!_wasEyesClosed && isEyesClosed) {
+        // Eyes just closed - start of blink
+        _wasEyesClosed = true;
+        print('👁️ Blink started - eyes closed');
+      } else if (_wasEyesClosed && !isEyesClosed && avgEyeProb > 0.5) {
+        // Eyes just opened - end of blink
+        _wasEyesClosed = false;
+        
+        // Prevent multiple blinks in quick succession (debounce)
+        final now = DateTime.now();
+        if (_lastBlinkTime == null || 
+            now.difference(_lastBlinkTime!) > const Duration(milliseconds: 500)) {
           _blinkCount++;
-          _progressPercentage = 50.0 +
-              (_blinkCount * 25.0); // 50% for first blink, 75% for second
+          _lastBlinkTime = now;
+          
+          print('✅ Blink detected! Total blinks: $_blinkCount');
+          
+          if (mounted) {
+            setState(() {
+              _progressPercentage = (_blinkCount / 2.0 * 100).clamp(0.0, 100.0);
+            });
+          }
+          
+          // Check if we've completed 2 blinks
+          if (_blinkCount >= 2 && !_isBlinkComplete && !_navigated) {
+            _isBlinkComplete = true;
+            print('🎉 Two blinks detected! Verification complete.');
+            
+            if (mounted) {
+              setState(() {
+                _progressPercentage = 100.0;
+              });
+              
+              // CRITICAL: Wait for embedding registration to complete before navigation
+              // Also save state to SharedPreferences
+              _completeBlinkVerification(face); // Call async function
+            }
+          }
+        }
+      }
+
+      // Update progress based on blink count
+      if (!_isBlinkComplete) {
+        if (mounted) {
+          setState(() {
+            // Show progress: 50% after first blink, 100% after second
+            _progressPercentage = (_blinkCount / 2.0 * 100).clamp(0.0, 100.0);
+          });
+        }
+      }
+    } else {
+      // No valid eye probabilities - reset blink state
+      if (_wasEyesClosed) {
+        _wasEyesClosed = false;
+      }
+      
+      if (mounted && _blinkCount == 0) {
+        setState(() {
+          _progressPercentage = 0.0;
         });
       }
-      _handleBlink();
     }
   }
 
-  void _handleBlink() async {
-    final now = DateTime.now();
-
-    // Check if we have enough blinks (2 or more)
-    if (_blinkCount >= 2) {
-      if (!mounted) return;
-      setState(() {
-        isAccomplished = true;
-        _progressPercentage = 100.0; // Complete success
-      });
-
-      // Capture face image before proceeding
-      String? imagePath;
-      try {
-        if (_cameraController != null && 
-            _cameraController!.value.isInitialized) {
-          print('📸 Attempting to capture face image...');
-          final XFile image = await _cameraController!.takePicture();
-          imagePath = image.path;
-          print('📸 Face image captured successfully: $imagePath');
+  Future<void> _completeBlinkVerification(Face face) async {
+    try {
+      // Save blink completion state
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('face_verification_blinkCompleted', true);
+      await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
+      print('✅ Blink completion state saved to SharedPreferences');
+      
+      // Extract and register face embedding from blink verification
+      await _registerBlinkEmbedding(face); // AWAIT to ensure completion
+      
+      // Navigate to next screen after a short delay
+      Future.delayed(const Duration(milliseconds: 1500), () {
+        if (mounted && !_navigated) {
+          _navigated = true;
+          // Stop camera before navigation
+          if (_cameraController != null && _cameraController!.value.isStreamingImages) {
+            _cameraController!.stopImageStream();
+          }
+          _detectionTimer?.cancel();
           
-          // Verify the file exists
-          final file = File(imagePath);
-          if (await file.exists()) {
-            final fileSize = await file.length();
-            print('📏 Captured image file size: $fileSize bytes');
-          } else {
-            print('❌ Captured image file does not exist!');
-            imagePath = null;
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => const FaceMoveCloserScreen()),
+          );
+        }
+      });
+    } catch (e) {
+      print('❌ Error during blink completion: $e');
+      // Still navigate even if registration fails
+      if (mounted && !_navigated) {
+        _navigated = true;
+        Future.delayed(const Duration(milliseconds: 1500), () {
+          if (mounted) {
+            if (_cameraController != null && _cameraController!.value.isStreamingImages) {
+              _cameraController!.stopImageStream();
+            }
+            _detectionTimer?.cancel();
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const FaceMoveCloserScreen()),
+            );
           }
-        } else {
-          print('⚠️ Camera not ready for image capture:');
-          print('   - Controller null: ${_cameraController == null}');
-          if (_cameraController != null) {
-            print('   - Initialized: ${_cameraController!.value.isInitialized}');
-            print('   - Error: ${_cameraController!.value.errorDescription}');
-          }
-        }
-      } catch (e) {
-        print('⚠️ Failed to capture face image: $e');
-        imagePath = null;
+        });
       }
-
-      // Save face verification progress to SharedPreferences
-      try {
-        print('🔄 Saving face verification data to SharedPreferences with imagePath: $imagePath');
-        final prefs = await SharedPreferences.getInstance();
-        
-        // Save verification step completion
-        await prefs.setBool('face_verification_blinkCompleted', true);
-        await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
-        
-        // Upload face image to Firebase Storage and save path
-        String? firebaseImageUrl;
-        if (imagePath != null) {
-          print('🔄 Storing face image locally during signup...');
-          // Store local path - will upload to Firebase Storage after signup completion
-          firebaseImageUrl = imagePath;
-          await prefs.setString('face_verification_blinkImagePath', firebaseImageUrl);
-          print('✅ Face image stored locally: $firebaseImageUrl');
-        } else {
-          print('⚠️ No image path to save for blink verification');
-        }
-        
-        // Save metrics
-        await prefs.setString('face_verification_blinkMetrics', 
-          '{"blinkCount": $_blinkCount, "completionTime": "${DateTime.now().toIso8601String()}"}');
-        
-        // Store real biometric features for recognition
-        if (_lastDetectedFace != null) {
-          print('🔍 Extracting REAL biometric features from last detected face...');
-          final biometricFeatures = await RealFaceRecognitionService.extractBiometricFeatures(_lastDetectedFace!, _lastCameraImage);
-          final featuresString = biometricFeatures.map((f) => f.toString()).join(',');
-          await prefs.setString('face_verification_blinkFeatures', featuresString);
-          print('✅ REAL biometric features extracted and saved: ${biometricFeatures.length} dimensions');
-          print('📊 Sample features: ${biometricFeatures.take(5).toList()}');
-        } else {
-          print('⚠️ No face detected to extract features from');
-        }
-        
-        print('✅ Face verification data saved to SharedPreferences successfully');
-      } catch (e) {
-        // Handle error silently or show user feedback
-        print('⚠️ Failed to save face verification data to SharedPreferences: $e');
-      }
-
-      if (!mounted) return;
-      Navigator.pushReplacement(
-        context,
-        MaterialPageRoute(builder: (_) => const FaceMoveCloserScreen()),
-      );
     }
-    lastBlinkTime = now;
   }
 
-  void _showFaceAlreadyRegisteredDialog() {
-    // Navigate directly to welcome screen with dialog flag
-    Navigator.pushReplacementNamed(
-      context, 
-      '/welcome',
-      arguments: {'showFaceDuplicationDialog': true},
-    );
+  Future<void> _registerBlinkEmbedding(Face face) async {
+    try {
+      print('🔍 Extracting face embedding from blink verification...');
+      
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
+      final email = prefs.getString('signup_email') ?? '';
+      final phone = prefs.getString('signup_phone') ?? '';
+      
+      if (userId == null || userId.isEmpty) {
+        print('⚠️ No user ID found for blink embedding registration');
+        return;
+      }
+      
+      // Capture image for embedding extraction
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        final XFile imageFile = await _cameraController!.takePicture();
+        final Uint8List imageBytes = await imageFile.readAsBytes();
+        
+        // Re-detect face in captured image
+        final inputImage = InputImage.fromFilePath(imageFile.path);
+        final faces = await _faceDetector.processImage(inputImage);
+        
+        if (faces.isNotEmpty) {
+          final capturedFace = faces.first;
+          
+          // Register embedding from blink verification
+          final result = await ProductionFaceRecognitionService.registerAdditionalEmbedding(
+            userId: userId,
+            detectedFace: capturedFace,
+            cameraImage: null,
+            imageBytes: imageBytes,
+            source: 'blink_twice',
+            email: email.isNotEmpty ? email : null,
+            phoneNumber: phone.isNotEmpty ? phone : null,
+          );
+          
+          if (result['success'] == true) {
+            print('✅ Blink verification embedding registered successfully');
+            
+            // Save face features to SharedPreferences for backward compatibility
+            final prefs = await SharedPreferences.getInstance();
+            if (imageBytes.isNotEmpty) {
+              final faceFeatures = await FaceNetService().predictFromBytes(imageBytes, capturedFace);
+              if (faceFeatures.isNotEmpty) {
+                final featuresString = faceFeatures.map((f) => f.toString()).join(',');
+                await prefs.setString('face_verification_blinkFeatures', featuresString);
+                print('✅ Blink features saved to SharedPreferences: ${faceFeatures.length}D');
+              }
+            }
+          } else {
+            print('⚠️ Failed to register blink embedding: ${result['error']}');
+          }
+        } else {
+          print('⚠️ No face detected in captured image for blink embedding');
+        }
+      } else {
+        print('⚠️ Camera not available for blink embedding capture');
+      }
+    } catch (e) {
+      print('❌ Error registering blink embedding: $e');
+    }
   }
 
   @override
@@ -412,7 +477,6 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                 ),
               ),
               
-              
               const SizedBox(height: 30),
               
               // Camera preview with elliptical shape and progress border
@@ -431,7 +495,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                         strokeWidth: 8,
                         backgroundColor: Colors.grey[300],
                         valueColor: AlwaysStoppedAnimation<Color>(
-                          isAccomplished ? Colors.green : Colors.red,
+                          _isBlinkComplete ? Colors.green : Colors.red,
                         ),
                       ),
                     ),
@@ -454,7 +518,9 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                           bottomLeft: Radius.elliptical(120, 170),
                           bottomRight: Radius.elliptical(120, 170),
                         ),
-                        child: _isCameraInitialized && _cameraController != null
+                        child: _isCameraInitialized &&
+                                _cameraController != null &&
+                                _cameraController!.value.isInitialized
                             ? CameraPreview(_cameraController!)
                             : Container(
                                 color: Colors.grey[200],
@@ -474,12 +540,16 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
               
               // Status text
               Text(
-                isAccomplished ? "SUCCESS!" : "BLINK TWICE",
+                _isBlinkComplete 
+                    ? "SUCCESS!" 
+                    : _blinkCount == 1 
+                        ? "BLINK ONCE MORE"
+                        : "BLINK TWICE",
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 20,
-                  color: isAccomplished ? Colors.green : Colors.red,
+                  color: _isBlinkComplete ? Colors.green : Colors.red,
                   letterSpacing: 0.5,
                 ),
               ),
@@ -488,13 +558,15 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
               
               // Helpful instruction
               Text(
-                isAccomplished 
-                  ? "Great job! Moving to next step..." 
-                  : "Just blink naturally - any eye movement will be detected!",
+                _isBlinkComplete 
+                    ? "Great job! Moving to next step..." 
+                    : _blinkCount == 1
+                        ? "One blink detected! Blink once more"
+                        : "Please blink twice naturally",
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 14,
-                  color: Colors.white70,
+                  color: Colors.grey,
                 ),
               ),
               
@@ -502,7 +574,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
               
               // Progress text
               Text(
-                "Progress: ${_progressPercentage.toInt()}% (${_blinkCount}/2 blinks)",
+                "Blinks: $_blinkCount/2",
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 14,
@@ -514,7 +586,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
               
               // Instructions
               Text(
-                "Blink naturally - the system will detect your eye movements",
+                "Keep your face centered and blink naturally",
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 12,
@@ -523,8 +595,7 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
                 ),
               ),
               
-              
-              if (isAccomplished)
+              if (_isBlinkComplete)
                 const Text(
                   "Navigating to next screen...",
                   textAlign: TextAlign.center,
@@ -541,3 +612,8 @@ class _FaceScanScreenState extends State<FaceScanScreen> {
     );
   }
 }
+
+
+
+
+

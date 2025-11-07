@@ -8,6 +8,9 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
+import '../services/production_face_recognition_service.dart';
 
 class AddProfilePhotoScreen extends StatefulWidget {
   const AddProfilePhotoScreen({super.key});
@@ -18,8 +21,23 @@ class AddProfilePhotoScreen extends StatefulWidget {
 
 class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
   final ImagePicker _picker = ImagePicker();
+  final FaceDetector _faceDetector = FaceDetector(
+    options: FaceDetectorOptions(
+      enableClassification: true,
+      enableLandmarks: true,
+      enableContours: true,
+      performanceMode: FaceDetectorMode.accurate,
+      minFaceSize: 0.1,
+    ),
+  );
   XFile? _image;
   bool _isVerifying = false;
+  
+  @override
+  void dispose() {
+    _faceDetector.close();
+    super.dispose();
+  }
 
   Future<void> _pickImage(ImageSource source) async {
     final pickedImage = await _picker.pickImage(source: source);
@@ -58,7 +76,154 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
           return;
         }
 
-        // Upload the profile photo (simplified approach)
+        // Extract face embedding from profile photo
+        print('🔍 Extracting face embedding from profile photo...');
+        final imageBytes = await File(_image!.path).readAsBytes();
+        final inputImage = InputImage.fromFilePath(_image!.path);
+        final faces = await _faceDetector.processImage(inputImage);
+        
+        if (faces.isEmpty) {
+          _showErrorDialog(
+            'No Face Detected',
+            'Please upload a photo with a clear face visible.',
+          );
+          return;
+        }
+        
+        if (faces.length > 1) {
+          _showErrorDialog(
+            'Multiple Faces Detected',
+            'Please upload a photo with only one face.',
+          );
+          return;
+        }
+        
+        final detectedFace = faces.first;
+        
+        // CRITICAL SECURITY: Verify the face matches the user's registered face BEFORE uploading
+        // This ensures users can only upload their own face as profile photo
+        print('🔐 Starting PERFECT face verification for profile photo...');
+        
+        // Get user's email/phone for verification
+        final firestore = FirebaseFirestore.instanceFor(
+          app: Firebase.app(),
+          databaseId: 'marketsafe',
+        );
+        final userDoc = await firestore.collection('users').doc(userId).get();
+        
+        if (!userDoc.exists) {
+          _showErrorDialog('Error', 'User account not found');
+          return;
+        }
+        
+        final userData = userDoc.data()!;
+        final email = userData['email']?.toString() ?? '';
+        final phone = userData['phoneNumber']?.toString() ?? '';
+        
+        if (email.isEmpty && phone.isEmpty) {
+          _showErrorDialog('Error', 'User account missing email/phone. Cannot verify face.');
+          return;
+        }
+        
+        // CRITICAL: Check if user has luxandUuid (enrolled to Luxand)
+        // If not, enroll at least one face from the 3 captured images first
+        String? luxandUuid = userData['luxandUuid']?.toString();
+        if (luxandUuid == null || luxandUuid.isEmpty) {
+          print('⚠️ User has no luxandUuid. Enrolling faces from signup verification...');
+          
+          // Try to enroll all 3 faces (or at least one)
+          final enrollResult = await ProductionFaceRecognitionService.enrollAllThreeFaces(
+            email: email,
+          );
+          
+          if (enrollResult['success'] == true) {
+            luxandUuid = enrollResult['luxandUuid']?.toString();
+            final enrolledCount = enrollResult['enrolledCount'] as int? ?? 0;
+            print('✅ Enrolled $enrolledCount face(s) to Luxand. UUID: $luxandUuid');
+            
+            // Refresh user data to get the updated luxandUuid
+            final updatedUserDoc = await firestore.collection('users').doc(userId).get();
+            if (updatedUserDoc.exists) {
+              final updatedData = updatedUserDoc.data()!;
+              luxandUuid = updatedData['luxandUuid']?.toString();
+            }
+          } else {
+            print('❌ Failed to enroll faces: ${enrollResult['error']}');
+            _showErrorDialog(
+              'Enrollment Error',
+              'Failed to enroll your face. Please try again or restart signup.',
+            );
+            return;
+          }
+        }
+        
+        if (luxandUuid == null || luxandUuid.isEmpty) {
+          _showErrorDialog(
+            'Enrollment Required',
+            'Your face has not been enrolled yet. Please complete the face verification steps first.',
+          );
+          return;
+        }
+        
+        // Use PERFECT RECOGNITION to verify face matches user's registered face
+        // NOTE: isProfilePhotoVerification=true for more lenient consistency checks
+        final emailOrPhone = email.isNotEmpty ? email : phone;
+        final verificationResult = await ProductionFaceRecognitionService.verifyUserFace(
+          emailOrPhone: emailOrPhone,
+          detectedFace: detectedFace,
+          cameraImage: null,
+          imageBytes: imageBytes,
+          isProfilePhotoVerification: true, // More lenient for profile photos
+        );
+        
+        if (verificationResult['success'] != true) {
+          print('🚨 Profile photo face verification FAILED: ${verificationResult['error']}');
+          _showErrorDialog(
+            'Face Verification Failed',
+            verificationResult['error'] ?? 'The uploaded photo does not match your registered face. Please upload a photo of yourself.',
+          );
+          return;
+        }
+        
+        final similarity = verificationResult['similarity'] as double?;
+        print('✅ Profile photo face verification PASSED! Similarity: ${similarity?.toStringAsFixed(4) ?? 'unknown'}');
+        
+        // CRITICAL: Verify similarity meets threshold (98.5%+ for profile photos, more lenient than login)
+        // Profile photos can have different lighting/angles, so we use 98.5%+ instead of 99%+
+        if (similarity == null || similarity < 0.985) {
+          print('🚨 PROFILE PHOTO REJECTION: Similarity ${similarity?.toStringAsFixed(4) ?? 'null'} < 0.985');
+          _showErrorDialog(
+            'Face Verification Failed',
+            'The uploaded photo does not match your registered face with sufficient accuracy. Please upload a clear photo of yourself.',
+          );
+          return;
+        }
+        
+        print('🎯 PERFECT RECOGNITION: Profile photo face matches registered face (similarity: ${similarity.toStringAsFixed(4)})');
+        
+        // Get email and phone for registration
+        final signupEmail = prefs.getString('signup_email') ?? email;
+        final signupPhone = prefs.getString('signup_phone') ?? phone;
+        
+        // Register face embedding from profile photo (now that we've verified it matches)
+        final embeddingResult = await ProductionFaceRecognitionService.registerAdditionalEmbedding(
+          userId: userId,
+          detectedFace: detectedFace,
+          cameraImage: null,
+          imageBytes: imageBytes,
+          source: 'profile_photo',
+          email: signupEmail.isNotEmpty ? signupEmail : null,
+          phoneNumber: signupPhone.isNotEmpty ? signupPhone : null,
+        );
+        
+        if (embeddingResult['success'] != true) {
+          print('⚠️ Failed to register profile photo embedding: ${embeddingResult['error']}');
+          // Continue anyway - face is verified, just embedding registration failed
+        } else {
+          print('✅ Profile photo embedding registered successfully');
+        }
+
+        // Upload the profile photo (only after PERFECT face verification)
         final uploadResult = await _uploadProfilePhoto(_image!.path);
         
         if (uploadResult['success'] == true) {

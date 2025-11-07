@@ -86,11 +86,11 @@ class FaceReadyScreen extends StatelessWidget {
               // Ready button
               ElevatedButton(
                 onPressed: () {
-                  Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                        builder: (context) => const FaceScanScreen()),
-                  );
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                            builder: (context) => const FaceBlinkTwiceScreen()),
+                      );
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.red,

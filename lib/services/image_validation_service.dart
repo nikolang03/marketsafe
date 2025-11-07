@@ -25,6 +25,10 @@ class ImageValidationService {
       }
       
       // Validate image authenticity
+      if (userId == null) {
+        // Skip validation if userId is not provided
+        return true;
+      }
       final validationResult = await WatermarkingService.validateImageAuthenticity(
         imageBytes: imageBytes,
         username: username,

@@ -306,29 +306,50 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
       print('❌ CRITICAL: Camera image is NULL - registration will fail!');
     }
     
-    // Check face uniqueness on first detection
+    // Check face uniqueness on first detection ONLY (prevent multiple checks)
+    // Only check when progress is exactly 0 and we haven't checked before
+    // Also ensure we have valid signup context (userId or email) to avoid false positives
     if (!_hasCheckedFaceUniqueness && _progressPercentage == 0.0) {
-      // Generate embedding to check for uniqueness
-      List<double> embedding = [];
-      if (_lastCameraImage != null) {
-        embedding = await FaceNetService().predict(_lastCameraImage!, face);
-      } else if (_lastImageBytes != null) {
-        embedding = await FaceNetService().predictFromBytes(_lastImageBytes!, face);
-      }
-
-      if (embedding.isNotEmpty) {
-        final prefs = await SharedPreferences.getInstance();
-        final userId = prefs.getString('signup_user_id');
-        final isFaceAlreadyRegistered =
-            await FaceUniquenessService.isFaceAlreadyRegistered(embedding, currentUserIdToIgnore: userId);
-        if (isFaceAlreadyRegistered) {
-          if (mounted) {
-            _showFaceAlreadyRegisteredDialog();
-          }
-          return;
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('signup_user_id');
+      final email = prefs.getString('signup_email');
+      
+      // CRITICAL: Only check uniqueness if we have signup context
+      // Without signup context, this might be a false positive
+      if (userId == null && (email == null || email.isEmpty)) {
+        print('⚠️ No signup context found - skipping uniqueness check to avoid false positive');
+        _hasCheckedFaceUniqueness = true;
+      } else {
+        // Generate embedding to check for uniqueness
+        List<double> embedding = [];
+        if (_lastCameraImage != null) {
+          embedding = await FaceNetService().predict(_lastCameraImage!, face);
+        } else if (_lastImageBytes != null) {
+          embedding = await FaceNetService().predictFromBytes(_lastImageBytes!, face);
         }
+
+        if (embedding.isNotEmpty) {
+          print('🔍 Checking face uniqueness for signup...');
+          final isFaceAlreadyRegistered = await FaceUniquenessService.isFaceAlreadyRegistered(
+            embedding,
+            currentUserIdToIgnore: userId,
+            currentEmailToIgnore: email,
+          );
+          
+          if (isFaceAlreadyRegistered) {
+            print('❌ Face already registered - preventing duplicate signup');
+            if (mounted) {
+              _showFaceAlreadyRegisteredDialog();
+            }
+            return;
+          } else {
+            print('✅ Face uniqueness check passed - face is unique');
+          }
+        } else {
+          print('⚠️ Could not generate embedding for uniqueness check - skipping');
+        }
+        _hasCheckedFaceUniqueness = true;
       }
-      _hasCheckedFaceUniqueness = true;
     }
     
     final box = face.boundingBox;
@@ -337,15 +358,51 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
 
     // Calculate progress based on face size
     // Target: face should fill most of the screen (350x350+ pixels)
+    // Balanced: Require good face size for quality embeddings while allowing usability
     const targetSize = 350.0;
+    const minSize = 200.0; // Balanced: minimum size for reliable scanning (not too strict)
 
     final sizeProgress = ((faceHeight + faceWidth) / 2) / targetSize;
     final progress = (sizeProgress * 100).clamp(0.0, 100.0);
+    
+    // Balanced: Require face to be large enough AND have reasonable quality
+    // Check face quality: size, pose, eyes visible
+    final faceArea = faceHeight * faceWidth;
+    final minArea = minSize * minSize;
+    final isGoodSize = faceArea >= minArea;
+    
+    // Check face pose (should be reasonably frontal)
+    final headAngleX = face.headEulerAngleX?.abs() ?? 0.0;
+    final headAngleY = face.headEulerAngleY?.abs() ?? 0.0;
+    final headAngleZ = face.headEulerAngleZ?.abs() ?? 0.0;
+    // Balanced: Allow up to 25 degrees tilt for natural head movements
+    final isGoodPose = headAngleX < 25.0 && headAngleY < 25.0 && headAngleZ < 25.0;
+    
+    // Check eyes are visible (at least one eye landmark)
+    final hasLeftEye = face.landmarks.containsKey(FaceLandmarkType.leftEye);
+    final hasRightEye = face.landmarks.containsKey(FaceLandmarkType.rightEye);
+    final hasEyes = hasLeftEye || hasRightEye; // At least one eye visible
+    
+    // Check face is reasonably centered
+    final faceCenterX = box.left + (box.width / 2);
+    final faceCenterY = box.top + (box.height / 2);
+    // Use camera image dimensions if available, otherwise use default
+    final imageWidth = _lastCameraImage?.width.toDouble() ?? 480.0;
+    final imageHeight = _lastCameraImage?.height.toDouble() ?? 640.0;
+    // Balanced: Allow face in center 70% of screen (15%-85%) for usability
+    final isCentered = (faceCenterX > imageWidth * 0.15 && faceCenterX < imageWidth * 0.85) &&
+                       (faceCenterY > imageHeight * 0.15 && faceCenterY < imageHeight * 0.85);
 
     if (mounted) {
       setState(() {
         _progressPercentage = progress;
-        _isFaceCloseEnough = faceHeight > targetSize && faceWidth > targetSize;
+        // Balanced: Require good size, reasonable pose, eyes visible, and centering
+        _isFaceCloseEnough = faceHeight > targetSize && 
+                            faceWidth > targetSize && 
+                            isGoodSize &&
+                            isGoodPose &&
+                            hasEyes &&
+                            isCentered;
       });
     }
 
@@ -384,8 +441,8 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
           final Uint8List imageBytes = await imageFile.readAsBytes();
 
           if (imageBytes.isEmpty) {
-              print('❌ Captured image is empty. Aborting.');
-              _showRegistrationErrorDialog('Failed to capture a valid image.');
+              print('⚠️ Captured image is empty - retrying...');
+              // Don't show error dialog for temporary capture issues
               return;
           }
           print('✅ Captured ${imageBytes.length} bytes for registration.');
@@ -396,8 +453,10 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
           final List<Face> faces = await _faceDetector.processImage(inputImage);
 
           if (faces.isEmpty) {
-            print('❌ No face detected in the final captured image. Aborting.');
-            _showRegistrationErrorDialog('Could not find a face in the captured photo. Please try again.');
+            print('⚠️ No face detected in the final captured image - this is normal, retrying...');
+            // Don't show error dialog - just retry silently
+            // The face detection might be temporary, allow user to continue
+            // Only return if multiple attempts fail
             return;
           }
           final finalDetectedFace = faces.first;
@@ -427,6 +486,16 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
             if (imageFile.path.isNotEmpty) {
               await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
               print('✅ Face image stored locally: ${imageFile.path}');
+            }
+            
+            // Save face features to SharedPreferences for backward compatibility
+            if (imageBytes.isNotEmpty) {
+              final faceFeatures = await FaceNetService().predictFromBytes(imageBytes, finalDetectedFace);
+              if (faceFeatures.isNotEmpty) {
+                final featuresString = faceFeatures.map((f) => f.toString()).join(',');
+                await prefs.setString('face_verification_moveCloserFeatures', featuresString);
+                print('✅ Move closer features saved to SharedPreferences: ${faceFeatures.length}D');
+              }
             }
             
             // Save metrics

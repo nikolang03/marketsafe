@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -6,8 +7,8 @@ import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import '../services/real_face_recognition_service.dart';
 import '../services/product_service.dart';
+import '../services/production_face_recognition_service.dart';
 
 class SimpleProfilePhotoScreen extends StatefulWidget {
   const SimpleProfilePhotoScreen({super.key});
@@ -87,12 +88,15 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
       }
 
       final detectedFace = faces.first;
+      
+      // Read image bytes for face verification
+      final imageBytes = await File(_image!.path).readAsBytes();
 
       // Step 2: Verify face matches user's registered face
       print('🔍 Verifying face match...');
       Map<String, dynamic> verificationResult;
       try {
-        verificationResult = await _verifyFaceMatch(userId, detectedFace);
+        verificationResult = await _verifyFaceMatch(userId, detectedFace, imageBytes);
       } catch (e) {
         print('❌ Error in face verification: $e');
         _showErrorDialog(
@@ -193,106 +197,83 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
     }
   }
 
-  Future<Map<String, dynamic>> _verifyFaceMatch(String userId, Face detectedFace) async {
+  Future<Map<String, dynamic>> _verifyFaceMatch(String userId, Face detectedFace, Uint8List imageBytes) async {
     try {
-      // Get user's stored face features
-      final userDoc = await FirebaseFirestore.instanceFor(
+      print('🔐 Starting PERFECT face verification for profile photo...');
+      
+      // Get user's email/phone for verification
+      final firestore = FirebaseFirestore.instanceFor(
         app: Firebase.app(),
         databaseId: 'marketsafe',
-      ).collection('users').doc(userId).get();
+      );
+      final userDoc = await firestore.collection('users').doc(userId).get();
       
       if (!userDoc.exists) {
         return {
           'success': false,
-          'error': 'User data not found',
+          'error': 'User account not found',
           'similarity': 0.0,
         };
       }
 
       final userData = userDoc.data()!;
-      final storedBiometricFeatures = userData['biometricFeatures'];
-
-      if (storedBiometricFeatures == null) {
+      final email = userData['email']?.toString() ?? '';
+      final phone = userData['phoneNumber']?.toString() ?? '';
+      
+      if (email.isEmpty && phone.isEmpty) {
         return {
           'success': false,
-          'error': 'No face data found for this user. Please complete face verification first.',
-          'similarity': 0.0,
-        };
-      }
-
-      // Extract features from the uploaded photo
-      List<double> detectedFeatures;
-      try {
-        detectedFeatures = await RealFaceRecognitionService.extractBiometricFeatures(detectedFace);
-        print('✅ Face features extracted successfully: ${detectedFeatures.length}D');
-      } catch (e) {
-        print('❌ Error extracting face features: $e');
-        return {
-          'success': false,
-          'error': 'Failed to process face features. Please try again.',
+          'error': 'User account missing email/phone. Cannot verify face.',
           'similarity': 0.0,
         };
       }
       
-      // Safety check for detected features
-      if (detectedFeatures.isEmpty || detectedFeatures.any((x) => x.isNaN || x.isInfinite)) {
-        return {
-          'success': false,
-          'error': 'Failed to extract valid face features from uploaded photo',
-          'similarity': 0.0,
-        };
-      }
-      
-      // Handle biometric features format
-      List<double> storedFeatures = [];
-      
-      if (storedBiometricFeatures is Map && storedBiometricFeatures.containsKey('biometricSignature')) {
-        // New format: {biometricSignature: [...], featureCount: 64, ...}
-        final biometricSignature = storedBiometricFeatures['biometricSignature'];
-        if (biometricSignature is List) {
-          storedFeatures = biometricSignature.cast<double>();
-        }
-      } else if (storedBiometricFeatures is List) {
-        // Old format: direct list of features
-        storedFeatures = storedBiometricFeatures.cast<double>();
-      }
-
-      if (storedFeatures.isEmpty) {
-        return {
-          'success': false,
-          'error': 'Invalid face data format',
-          'similarity': 0.0,
-        };
-      }
-
-      // Calculate real biometric similarity using lenient profile photo method
-      final similarity = RealFaceRecognitionService.calculateProfilePhotoSimilarity(
-        detectedFeatures, 
-        storedFeatures,
+      // CRITICAL SECURITY: Use PERFECT RECOGNITION to verify face matches user's registered face
+      // This ensures users can only upload their own face as profile photo
+      // NOTE: isProfilePhotoVerification=true for more lenient consistency checks
+      final emailOrPhone = email.isNotEmpty ? email : phone;
+      final verificationResult = await ProductionFaceRecognitionService.verifyUserFace(
+        emailOrPhone: emailOrPhone,
+        detectedFace: detectedFace,
+        cameraImage: null,
+        imageBytes: imageBytes,
+        isProfilePhotoVerification: true, // More lenient for profile photos
       );
-
-      print('📊 Face similarity calculation:');
-      print('   - Detected features: ${detectedFeatures.length}');
-      print('   - Stored features: ${storedFeatures.length}');
-      print('   - Similarity score: $similarity');
-
-      // Use a more lenient threshold for profile photo verification
-      const double similarityThreshold = 0.4; // 40% similarity threshold for profile photos
       
-      if (similarity >= similarityThreshold) {
-        return {
-          'success': true,
-          'similarity': similarity,
-        };
-      } else {
+      if (verificationResult['success'] != true) {
+        print('🚨 Profile photo face verification FAILED: ${verificationResult['error']}');
         return {
           'success': false,
-          'error': 'Face verification failed. The uploaded photo doesn\'t match your registered face. (Similarity: ${(similarity * 100).toStringAsFixed(1)}% - Required: 60%)',
-          'similarity': similarity,
+          'error': verificationResult['error'] ?? 'The uploaded photo does not match your registered face. Please upload a photo of yourself.',
+          'similarity': verificationResult['similarity'] as double? ?? 0.0,
         };
       }
+      
+      final similarity = verificationResult['similarity'] as double?;
+      print('✅ Profile photo face verification PASSED! Similarity: ${similarity?.toStringAsFixed(4) ?? 'unknown'}');
+      
+      // CRITICAL: Verify similarity meets threshold (98.5%+ for profile photos, more lenient than login)
+      // Profile photos can have different lighting/angles/environment, so we use 98.5%+ instead of 99%+
+      // This still ensures ONLY the user's own face can be uploaded, but allows for natural variation
+      if (similarity == null || similarity < 0.985) {
+        print('🚨 PROFILE PHOTO REJECTION: Similarity ${similarity?.toStringAsFixed(4) ?? 'null'} < 0.985');
+        return {
+          'success': false,
+          'error': 'The uploaded photo does not match your registered face with sufficient accuracy. Please upload a clear photo of yourself. (Similarity: ${similarity != null ? (similarity * 100).toStringAsFixed(1) : 'unknown'}% - Required: 98.5%+)',
+          'similarity': similarity ?? 0.0,
+        };
+      }
+      
+      print('🎯 PROFILE PHOTO VERIFICATION: Profile photo face matches registered face (similarity: ${similarity.toStringAsFixed(4)})');
+      print('🎯 This ensures users can only upload their own face as profile photo');
+      print('🎯 Profile photo verification uses 98.5%+ threshold (more lenient than login 99%+) to allow for lighting/angle variation');
+      
+      return {
+        'success': true,
+        'similarity': similarity,
+      };
     } catch (e) {
-      print('❌ Error in face verification: $e');
+      print('❌ Error in PERFECT face verification: $e');
       return {
         'success': false,
         'error': 'Face verification failed: $e',

@@ -1,16 +1,16 @@
 import 'dart:typed_data';
 import 'dart:async';
 import 'dart:io';
-import 'package:capstone2/screens/fill_information_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../services/real_face_recognition_service.dart';
-import '../services/face_uniqueness_service.dart';
-import '../services/face_net_service.dart'; // Added import for FaceNetService
+import 'fill_information_screen.dart';
+import '../services/face_net_service.dart';
+import '../services/production_face_recognition_service.dart';
 
 class FaceHeadMovementScreen extends StatefulWidget {
   const FaceHeadMovementScreen({super.key});
@@ -29,15 +29,14 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
   Timer? _detectionTimer;
   bool _useImageStream = true;
   double _progressPercentage = 0.0;
-  bool _hasCheckedFaceUniqueness = false;
-  Face? _lastDetectedFace;
-  CameraImage? _lastCameraImage; // Store last camera image for 128D embedding // Store the last detected face for feature extraction
-  Uint8List? _lastImageBytes; // Store last image bytes for FaceNetService
 
   double? _initialX;
   bool _movedLeft = false;
   bool _movedRight = false;
   bool _success = false;
+  Face? _lastDetectedFace;
+  CameraImage? _lastCameraImage;
+  Uint8List? _lastImageBytes;
 
   @override
   void initState() {
@@ -78,6 +77,33 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
 
   Future<void> _initializeCamera() async {
     try {
+      // Check camera permission first
+      final cameraStatus = await Permission.camera.status;
+
+      if (cameraStatus.isDenied) {
+        final result = await Permission.camera.request();
+        if (result.isDenied) {
+          if (mounted) {
+            setState(() {
+              _isCameraInitialized = false;
+            });
+          }
+          return;
+        }
+      }
+
+      if (cameraStatus.isPermanentlyDenied) {
+        if (mounted) {
+          setState(() {
+            _isCameraInitialized = false;
+          });
+        }
+        return;
+      }
+
+      // Wait a bit more if camera is still in use
+      await Future.delayed(const Duration(milliseconds: 200));
+
       _cameras = await availableCameras();
 
       final frontCamera = _cameras.firstWhere(
@@ -121,13 +147,13 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
 
   void _startTimerBasedDetection() {
     _detectionTimer =
-        Timer.periodic(const Duration(milliseconds: 500), (timer) async {
+        Timer.periodic(const Duration(milliseconds: 200), (timer) async {
       if (_isProcessingImage || _cameraController == null || !mounted) return;
 
       try {
-        final XFile image = await _cameraController!.takePicture();
-        final Uint8List imageBytes = await image.readAsBytes();
-        final inputImage = InputImage.fromFilePath(image.path);
+        final XFile imageFile = await _cameraController!.takePicture();
+        final imageBytes = await imageFile.readAsBytes();
+        final inputImage = InputImage.fromFilePath(imageFile.path);
         final faces = await _faceDetector.processImage(inputImage);
 
         if (faces.isNotEmpty) {
@@ -208,7 +234,7 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
       final faces = await _faceDetector.processImage(inputImage);
 
       if (faces.isNotEmpty) {
-        _detectHeadMovement(faces.first, image); // Pass camera image for 128D embedding
+        _detectHeadMovement(faces.first, image, null);
       } else {
         if (mounted) {
           setState(() {
@@ -231,14 +257,15 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
   }
 
   void _detectHeadMovement(Face face, [CameraImage? cameraImage, Uint8List? imageBytes]) async {
-    // Store the face and camera image for feature extraction
+    // Store the face and camera image
     _lastDetectedFace = face;
     _lastCameraImage = cameraImage;
     _lastImageBytes = imageBytes;
 
-    final headX =
-        face.headEulerAngleY ?? 0; // negative = left, positive = right
+    // headEulerAngleY: negative = left, positive = right
+    final headX = face.headEulerAngleY ?? 0;
 
+    // Initialize base position on first detection
     _initialX ??= headX;
 
     // Calculate progress based on movement
@@ -257,20 +284,22 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
       });
     }
 
-    // Detect LEFT
+    // Detect LEFT movement (positive angle change > 15 degrees)
     if (!_movedLeft && headX > _initialX! + 15) {
       if (mounted) {
         setState(() => _movedLeft = true);
+        print('✅ Head moved LEFT detected');
       }
     }
 
-    // Detect RIGHT (only after left)
+    // Detect RIGHT movement (only after left, negative angle change < -15 degrees from initial)
     if (_movedLeft && !_movedRight && headX < _initialX! - 15) {
       if (mounted) {
         setState(() {
           _movedRight = true;
           _success = true;
         });
+        print('✅ Head moved RIGHT detected - Verification complete!');
       }
 
       if (!_navigated) {
@@ -296,12 +325,7 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
               imagePath = null;
             }
           } else {
-            print('⚠️ Camera not ready for image capture:');
-            print('   - Controller null: ${_cameraController == null}');
-            if (_cameraController != null) {
-              print('   - Initialized: ${_cameraController!.value.isInitialized}');
-              print('   - Error: ${_cameraController!.value.errorDescription}');
-            }
+            print('⚠️ Camera not ready for image capture');
           }
         } catch (e) {
           print('⚠️ Failed to capture face image: $e');
@@ -310,21 +334,17 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
 
         // Save face verification progress to SharedPreferences
         try {
-          print('🔄 Saving head movement verification data to SharedPreferences with imagePath: $imagePath');
+          print('🔄 Saving head movement verification data to SharedPreferences');
           final prefs = await SharedPreferences.getInstance();
           
           // Save verification step completion
           await prefs.setBool('face_verification_headMovementCompleted', true);
           await prefs.setString('face_verification_headMovementCompletedAt', DateTime.now().toIso8601String());
           
-          // Upload face image to Firebase Storage and save path
-          String? firebaseImageUrl;
+          // Store face image path if available
           if (imagePath != null) {
-            print('🔄 Storing face image locally during signup...');
-            // Store local path - will upload to Firebase Storage after signup completion
-            firebaseImageUrl = imagePath;
-            await prefs.setString('face_verification_headMovementImagePath', firebaseImageUrl);
-            print('✅ Face image stored locally: $firebaseImageUrl');
+            await prefs.setString('face_verification_headMovementImagePath', imagePath);
+            print('✅ Face image stored locally: $imagePath');
           } else {
             print('⚠️ No image path to save for head movement');
           }
@@ -333,28 +353,69 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
           await prefs.setString('face_verification_headMovementMetrics', 
             '{"leftMovement": $_movedLeft, "rightMovement": $_movedRight, "completionTime": "${DateTime.now().toIso8601String()}"}');
           
-          // Store face features for recognition using 128D embeddings
+          // Register face embedding from head movement verification
           if (_lastDetectedFace != null) {
-            print('🔍 Extracting 128D face features from last detected face...');
-            final faceFeatures = await RealFaceRecognitionService.extractBiometricFeatures(_lastDetectedFace!, _lastCameraImage);
-            final featuresString = faceFeatures.map((f) => f.toString()).join(',');
-            await prefs.setString('face_verification_headMovementFeatures', featuresString);
-            print('✅ 128D face features extracted and saved: ${faceFeatures.length} dimensions');
+            print('🔍 Registering face embedding from head movement verification...');
+            
+            final currentUserId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
+            final email = prefs.getString('signup_email') ?? '';
+            final phone = prefs.getString('signup_phone') ?? '';
+            
+            // Register embedding
+            if (currentUserId != null && currentUserId.isNotEmpty &&
+                (_lastCameraImage != null || _lastImageBytes != null)) {
+              final result = await ProductionFaceRecognitionService.registerAdditionalEmbedding(
+                userId: currentUserId,
+                detectedFace: _lastDetectedFace!,
+                cameraImage: _lastCameraImage,
+                imageBytes: _lastImageBytes,
+                source: 'head_movement',
+                email: email.isNotEmpty ? email : null,
+                phoneNumber: phone.isNotEmpty ? phone : null,
+              );
+              
+              if (result['success'] == true) {
+                print('✅ Head movement embedding registered successfully');
+                
+                // Also save to SharedPreferences for backward compatibility
+                if (_lastCameraImage != null) {
+                  final faceFeatures = await FaceNetService().predict(_lastCameraImage!, _lastDetectedFace!);
+                  if (faceFeatures.isNotEmpty) {
+                    final featuresString = faceFeatures.map((f) => f.toString()).join(',');
+                    await prefs.setString('face_verification_headMovementFeatures', featuresString);
+                  }
+                } else if (_lastImageBytes != null) {
+                  final faceFeatures = await FaceNetService().predictFromBytes(_lastImageBytes!, _lastDetectedFace!);
+                  if (faceFeatures.isNotEmpty) {
+                    final featuresString = faceFeatures.map((f) => f.toString()).join(',');
+                    await prefs.setString('face_verification_headMovementFeatures', featuresString);
+                  }
+                }
+              } else {
+                print('⚠️ Failed to register head movement embedding: ${result['error']}');
+              }
+            } else {
+              print('⚠️ No camera image or bytes available for head movement embedding');
+            }
           }
           
           print('✅ Head movement verification data saved to SharedPreferences successfully');
         } catch (e) {
-          // Handle error silently or show user feedback
-          print('⚠️ Failed to save head movement verification data to SharedPreferences: $e');
+          print('⚠️ Failed to save head movement verification data: $e');
         }
 
         if (mounted) {
-          Future.delayed(const Duration(milliseconds: 500), () {
+          Future.delayed(const Duration(milliseconds: 1000), () {
             if (mounted) {
+              // Stop camera before navigation
+              if (_cameraController != null && _cameraController!.value.isStreamingImages) {
+                _cameraController!.stopImageStream();
+              }
+              _detectionTimer?.cancel();
+              
               Navigator.pushReplacement(
                 context,
-                MaterialPageRoute(
-                    builder: (_) => const FillInformationScreen()),
+                MaterialPageRoute(builder: (_) => const FillInformationScreen()),
               );
             }
           });
@@ -392,7 +453,6 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
                   letterSpacing: 0.5,
                 ),
               ),
-              
               
               const SizedBox(height: 30),
               
@@ -483,7 +543,7 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
                 textAlign: TextAlign.center,
                 style: const TextStyle(
                   fontSize: 14,
-                  color: Colors.white70,
+                  color: Colors.grey,
                 ),
               ),
               
@@ -512,7 +572,6 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
                 ),
               ),
               
-              
               if (_success)
                 const Text(
                   "Navigating to next screen...",
@@ -527,15 +586,6 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
           ),
         ),
       ),
-    );
-  }
-
-  void _showFaceAlreadyRegisteredDialog() {
-    // Navigate directly to welcome screen with dialog flag
-    Navigator.pushReplacementNamed(
-      context, 
-      '/welcome',
-      arguments: {'showFaceDuplicationDialog': true},
     );
   }
 }

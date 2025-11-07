@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/product_service.dart';
 import '../services/image_metadata_service.dart';
 import '../navigation_wrapper.dart';
-import 'watermark_preview_screen.dart';
+import '../services/watermarking_service.dart';
 
 class PostDetailsScreen extends StatefulWidget {
   const PostDetailsScreen({super.key});
@@ -498,11 +498,11 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
       Navigator.of(context).pop();
 
       if (verificationResult.isValid) {
-        // Image is valid, show watermark preview
-        print('✅ Image verified, showing watermark preview');
+        // Image is valid, apply watermark automatically
+        print('✅ Image verified, applying automatic watermark');
         print('📸 Image path: ${imageFile.path}');
         print('📸 Image size: ${await imageFile.length()} bytes');
-        await _showWatermarkPreview(imageFile);
+        await _applyAutomaticWatermark(imageFile);
         return true;
       } else {
         // Image failed verification, show error dialog
@@ -1360,48 +1360,46 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
     );
   }
 
-  /// Show watermark preview screen for image positioning
-  Future<void> _showWatermarkPreview(File imageFile) async {
+  /// Apply automatic watermark to image (no manual positioning)
+  Future<void> _applyAutomaticWatermark(File imageFile) async {
     try {
       // Get current user info
       final prefs = await SharedPreferences.getInstance();
       final username = prefs.getString('current_user_name') ?? 
                       prefs.getString('signup_user_name') ?? 
                       'User${DateTime.now().millisecondsSinceEpoch}';
-      final userId = prefs.getString('current_user_id') ?? 
-                     prefs.getString('signup_user_id') ?? 
-                     'unknown';
 
       print('👤 Username for watermark: $username');
-      print('🆔 User ID for watermark: $userId');
+      print('📸 Applying automatic watermark to: ${imageFile.path}');
 
-      // Show watermark preview screen
-      final result = await Navigator.push<String>(
-        context,
-        MaterialPageRoute(
-          builder: (context) => WatermarkPreviewScreen(
-            imagePath: imageFile.path,
-            username: username,
-            userId: userId,
-            onWatermarkApplied: (watermarkedImagePath) {
-              // Add the watermarked image to media files
-              setState(() {
-                _mediaFiles.add(File(watermarkedImagePath));
-              });
-              print('✅ Watermarked image added to media files');
-            },
-          ),
-        ),
+      // Read image bytes
+      final imageBytes = await imageFile.readAsBytes();
+      
+      // Apply automatic watermark
+      final watermarkedBytes = await WatermarkingService.applyUsernameWatermark(
+        imageBytes: imageBytes,
+        username: username,
       );
 
-      if (result != null) {
-        print('✅ Watermark preview completed: $result');
-      }
+      // Save watermarked image
+      final watermarkedFile = File('${imageFile.path}_watermarked.jpg');
+      await watermarkedFile.writeAsBytes(watermarkedBytes);
+
+      // Add the watermarked image to media files
+      setState(() {
+        _mediaFiles.add(watermarkedFile);
+      });
+
+      print('✅ Automatic watermark applied and added to media files');
     } catch (e) {
-      print('❌ Error showing watermark preview: $e');
+      print('❌ Error applying automatic watermark: $e');
+      // On error, add original image without watermark
+      setState(() {
+        _mediaFiles.add(imageFile);
+      });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error showing watermark preview: $e'),
+          content: Text('Error applying watermark: $e'),
           backgroundColor: Colors.red,
         ),
       );

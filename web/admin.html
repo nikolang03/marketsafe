@@ -35,7 +35,10 @@
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             color: var(--pure-white);
             min-height: 100vh;
+            margin: 0;
+            padding: 0;
         }
+        
 
         /* Header/Navbar */
         .navbar {
@@ -466,6 +469,20 @@
         .modal-content {
             border: 2px solid var(--pure-black);
             border-radius: 15px;
+            background-color: var(--pure-white) !important;
+            color: var(--pure-black) !important;
+        }
+        
+        #loginModal {
+            z-index: 1055 !important;
+        }
+        
+        #loginModal .modal-dialog {
+            z-index: 1056 !important;
+        }
+        
+        #loginModal .modal-content {
+            z-index: 1057 !important;
         }
 
         .modal-header {
@@ -566,7 +583,7 @@
     </nav>
 
     <!-- Main Content -->
-    <div class="main-content">
+    <div class="main-content" style="display: none;">
         <div class="container-fluid">
             <!-- Connection Status -->
             <div id="connectionStatus" class="alert connection-status" style="display: none;"></div>
@@ -657,6 +674,11 @@
                             <i class="fas fa-shopping-cart me-2"></i>Product Moderation
                         </button>
                     </li>
+                    <li class="nav-item" role="presentation" id="adminManagementTabItem" style="display: none;">
+                        <button class="nav-link" id="adminManagement-tab" data-bs-toggle="tab" data-bs-target="#adminManagement" type="button" role="tab" aria-controls="adminManagement" aria-selected="false">
+                            <i class="fas fa-user-shield me-2"></i>Admin Management
+                        </button>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -729,6 +751,46 @@
                 </div>
             </div>
         </div>
+            </div>
+
+            <!-- Admin Management Tab -->
+            <div class="tab-pane fade" id="adminManagement" role="tabpanel" aria-labelledby="adminManagement-tab">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header bg-white">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-user-shield me-2"></i>Admin Accounts
+                                    </h5>
+                                    <button class="btn btn-primary" onclick="showCreateAdminModal()">
+                                        <i class="fas fa-plus me-2"></i>Add New Admin
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="card-body">
+                                <div id="adminsList" class="table-responsive">
+                                    <table class="table">
+                                        <thead>
+                                            <tr>
+                                                <th>Name</th>
+                                                <th>Email</th>
+                                                <th>Role</th>
+                                                <th>Last Login</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="adminsTableBody">
+                                            <tr>
+                                                <td colspan="5" class="text-center">Loading admins...</td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </div>
 
             <!-- Product Moderation Tab -->
@@ -933,6 +995,16 @@
                             <div id="rejectionReasonDiv" class="mb-3" style="display: none;">
                                 <strong>Rejection Reason:</strong> <span id="productRejectionReason">None</span>
                             </div>
+                            <div class="mb-3">
+                                <hr>
+                                <h6><i class="fas fa-info-circle me-2"></i>Image Metadata</h6>
+                                <div id="imageMetadata" class="small" style="max-height: 200px; overflow-y: auto; color: #333;">
+                                    <div class="spinner-border spinner-border-sm" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <span class="ms-2" style="color: #333;">Loading metadata...</span>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -990,10 +1062,28 @@
         </div>
     </div>
 
+
     <!-- Scripts -->
-    <!-- Scripts -->
-<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getAuth, signInWithEmailAndPassword, createUserWithEmailAndPassword } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        
+        const firebaseConfig = {
+            apiKey: 'AIzaSyAa-268Fx-XfJTsJLGznwcztd82r2vdf3Q',
+            authDomain: 'marketsafe-e57cf.firebaseapp.com',
+            projectId: 'marketsafe-e57cf'
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        
+        window.firebaseAuth = auth;
+        window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+        window.createUserWithEmailAndPassword = createUserWithEmailAndPassword;
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
 
 <script>
     // Firebase REST API configuration
@@ -1009,6 +1099,10 @@
     // Global variables
     let usersData = {};
     let selectedUserId = null;
+    let currentUser = null;
+    let currentUserRole = null;
+    let currentUserPermissions = null;
+    let isCreatingAdmin = false; // Flag to prevent auth state change during admin creation
     
     // Real-time functionality variables
     let socket = null;
@@ -1021,6 +1115,262 @@
     document.addEventListener('DOMContentLoaded', function() {
         console.log('MarketSafe Admin Panel loaded with Firebase REST API');
         
+        // Check authentication first - redirect to login if not authenticated
+        checkAuthentication();
+    });
+    
+
+    // Authentication Functions
+    async function checkAuthentication() {
+        console.log('🔐 Checking authentication...');
+        
+        // Wait for Firebase Auth to load (with timeout)
+        let authLoaded = false;
+        await new Promise((resolve) => {
+            const checkAuth = setInterval(() => {
+                if (window.firebaseAuth) {
+                    clearInterval(checkAuth);
+                    authLoaded = true;
+                    console.log('✅ Firebase Auth loaded');
+                    resolve();
+                }
+            }, 100);
+            
+            // Timeout after 5 seconds - redirect to login
+            setTimeout(() => {
+                if (!authLoaded) {
+                    clearInterval(checkAuth);
+                    console.warn('⚠️ Firebase Auth taking too long, redirecting to login');
+                    window.location.replace('login.html');
+                    resolve();
+                }
+            }, 5000);
+        });
+
+        if (!window.firebaseAuth) {
+            console.error('❌ Firebase Auth not available, redirecting to login');
+            window.location.replace('login.html');
+            return;
+        }
+
+        // Check current user first (before waiting for onAuthStateChanged)
+        const currentUser = window.firebaseAuth.currentUser;
+        console.log('👤 Current user (immediate check):', currentUser ? currentUser.uid : 'none');
+        
+        if (currentUser) {
+            // User is already signed in, check admin role immediately
+            console.log('✅ User already signed in, checking admin role...');
+            await checkAdminRole(currentUser.uid);
+        } else {
+            // No user signed in, set up listener for auth state changes
+            console.log('⏳ No user signed in, waiting for auth state...');
+            window.firebaseAuth.onAuthStateChanged(async (user) => {
+                // Skip auth state check if we're in the middle of creating an admin
+                if (isCreatingAdmin) {
+                    console.log('⏭️ Skipping auth state check - admin creation in progress');
+                    return;
+                }
+                
+                console.log('🔄 Auth state changed, user:', user ? user.uid : 'none');
+                if (user) {
+                    // User is signed in, check admin role
+                    await checkAdminRole(user.uid);
+                } else {
+                    // User is not signed in, redirect to login page
+                    console.log('❌ No user signed in, redirecting to login page');
+                    window.location.replace('login.html');
+                }
+            });
+        }
+    }
+
+    async function checkAdminRole(userId) {
+        try {
+            console.log('🔍 Checking admin role for user:', userId);
+            console.log('🔍 Checking URL:', `${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`);
+            
+            const response = await fetch(`${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`);
+            console.log('📊 Admin role check response status:', response.status);
+            console.log('📊 Response OK:', response.ok);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('📋 Admin data received:', data);
+                const adminData = data.fields;
+                
+                console.log('✅ User is admin/manager');
+                console.log('📋 Raw adminData from Firestore:', adminData);
+                console.log('📋 Role from Firestore:', adminData.role?.stringValue);
+                
+                currentUser = {
+                    uid: userId,
+                    email: adminData.email?.stringValue || '',
+                    name: adminData.name?.stringValue || '',
+                    role: adminData.role?.stringValue || 'admin'
+                };
+                currentUserRole = currentUser.role;
+                
+                console.log('👤 Set currentUserRole to:', currentUserRole);
+                console.log('👤 Current user object:', currentUser);
+                currentUserPermissions = {
+                    canApproveUsers: adminData.permissions?.mapValue?.fields?.canApproveUsers?.booleanValue || false,
+                    canRejectUsers: adminData.permissions?.mapValue?.fields?.canRejectUsers?.booleanValue || false,
+                    canViewUserData: adminData.permissions?.mapValue?.fields?.canViewUserData?.booleanValue || false,
+                    canDeleteUsers: adminData.permissions?.mapValue?.fields?.canDeleteUsers?.booleanValue || false,
+                    canCreateAdmins: adminData.permissions?.mapValue?.fields?.canCreateAdmins?.booleanValue || false
+                };
+
+                console.log('👤 Current user role:', currentUserRole);
+                console.log('👤 Current user name:', currentUser.name);
+                console.log('👤 Current user email:', currentUser.email);
+                console.log('🔑 Permissions:', currentUserPermissions);
+
+                // Show admin panel first
+                document.querySelector('.main-content').style.display = 'block';
+                document.querySelector('.navbar').style.display = 'flex';
+                
+                // Update navbar with user info (before updateLastLogin to show name immediately)
+                updateNavbarWithUser();
+                
+                // Initialize admin panel (this will show Admin Management tab if manager)
+                initializeAdminPanel();
+                
+                // Update last login (non-blocking, won't affect UI)
+                updateLastLogin(userId).catch(err => {
+                    console.warn('⚠️ Last login update failed (non-critical):', err);
+                });
+            } else {
+                // User is not an admin - get error details
+                const errorText = await response.text();
+                console.error('❌ Admin check failed:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    errorText: errorText,
+                    userId: userId,
+                    url: `${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`
+                });
+                
+                // Check if it's a 404 (document not found) vs other error
+                if (response.status === 404) {
+                    console.error('❌ Manager/Admin document not found in Firestore for user ID:', userId);
+                    console.error('💡 Make sure the document ID in adminUsers collection matches the Firebase Auth user ID');
+                    alert(`Access Denied: Your account (${userId}) is not found in the admin database. Please contact the administrator.`);
+                } else {
+                    console.error('❌ Unexpected error checking admin role');
+                    alert(`Access Denied: Error checking authorization (${response.status}). Please contact the administrator.`);
+                }
+                
+                await window.firebaseAuth.signOut();
+                window.location.replace('login.html');
+            }
+        } catch (error) {
+            console.error('❌ Error checking admin role:', error);
+            console.error('❌ Error details:', {
+                message: error.message,
+                stack: error.stack,
+                userId: userId
+            });
+            await window.firebaseAuth.signOut();
+            alert(`Error checking authorization: ${error.message}. Please try again.`);
+            window.location.replace('login.html');
+        }
+    }
+
+
+    function updateNavbarWithUser() {
+        const navbar = document.querySelector('.navbar .container-fluid');
+        if (currentUser && navbar) {
+            // Remove existing user info if any
+            const existingInfo = navbar.querySelector('.navbar-text');
+            if (existingInfo) existingInfo.remove();
+            
+            // Get display name - use email if name is missing
+            const displayName = currentUser.name && currentUser.name.trim() !== '' 
+                ? currentUser.name 
+                : (currentUser.email || 'Manager');
+            
+            const userInfo = document.createElement('div');
+            userInfo.className = 'navbar-text ms-auto d-flex align-items-center';
+            userInfo.innerHTML = `
+                <span class="me-3">
+                    <i class="fas fa-user me-2"></i>${escapeHtml(displayName)} (${currentUserRole || 'admin'})
+                </span>
+                <button class="btn btn-sm btn-outline-light" onclick="logout()">
+                    <i class="fas fa-sign-out-alt me-1"></i>Logout
+                </button>
+            `;
+            navbar.appendChild(userInfo);
+            
+            console.log('✅ Navbar updated with user:', displayName, currentUserRole);
+        } else {
+            console.warn('⚠️ Cannot update navbar - currentUser or navbar not found');
+            console.log('currentUser:', currentUser);
+            console.log('navbar element:', navbar);
+        }
+    }
+
+    async function updateLastLogin(userId) {
+        try {
+            console.log('🕐 Updating last login for user:', userId);
+            
+            // First, get the current document to preserve all existing fields
+            const getResponse = await fetch(`${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`);
+            
+            if (!getResponse.ok) {
+                console.warn('⚠️ Could not get current admin data to preserve fields');
+                // Skip update if we can't get current data (to avoid overwriting)
+                return;
+            }
+            
+            const currentDoc = await getResponse.json();
+            const currentFields = currentDoc.fields || {};
+            
+            // Merge existing fields with the new lastLoginAt field
+            const updateData = {
+                fields: {
+                    ...currentFields, // Preserve all existing fields
+                    lastLoginAt: { timestampValue: new Date().toISOString() }
+                }
+            };
+            
+            console.log('🕐 Updating with preserved fields:', Object.keys(updateData.fields));
+            
+            const response = await fetch(`${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updateData)
+            });
+            
+            if (response.ok) {
+                console.log('✅ Last login updated successfully (all fields preserved)');
+            } else {
+                const errorText = await response.text();
+                console.warn('⚠️ Failed to update last login (non-critical):', response.status, errorText);
+                // Don't throw error - this is not critical for login
+            }
+        } catch (error) {
+            console.warn('⚠️ Error updating last login (non-critical):', error);
+            // Don't throw error - this is not critical for login
+        }
+    }
+
+
+    async function logout() {
+        try {
+            console.log('🚪 Logging out...');
+            await window.firebaseAuth.signOut();
+            currentUser = null;
+            currentUserRole = null;
+            // Redirect to login page
+            window.location.replace('login.html');
+        } catch (error) {
+            console.error('❌ Logout error:', error);
+            // Redirect anyway
+            window.location.replace('login.html');
+        }
+    }
+
+    function initializeAdminPanel() {
         // Set default values for stats cards
         updateDashboardStats({});
         
@@ -1034,7 +1384,24 @@
         
         // Start auto-refresh
         startAutoRefresh();
-    });
+
+        // Add Admin Management tab ONLY if user is manager (not regular admins)
+        console.log('🔍 Checking role for Admin Management tab. currentUserRole:', currentUserRole);
+        console.log('🔍 Type of currentUserRole:', typeof currentUserRole);
+        console.log('🔍 Comparison result:', currentUserRole === 'manager');
+        
+        if (currentUserRole === 'manager') {
+            console.log('✅ User is manager - showing Admin Management tab');
+            addAdminManagementTab();
+        } else {
+            console.log('❌ User is not manager (role:', currentUserRole, ') - hiding Admin Management tab');
+            // Hide Admin Management tab for regular admins
+            const tabItem = document.getElementById('adminManagementTabItem');
+            if (tabItem) {
+                tabItem.style.display = 'none';
+            }
+        }
+    }
 
     // Setup event listeners
     function setupEventListeners() {
@@ -2453,8 +2820,8 @@
                 </div>
             `;
         } else if (imageUrl) {
-            // Show image
-            imagesContainer.innerHTML = `<img src="${imageUrl}" class="img-fluid rounded" alt="Product Image">`;
+            // Show image with metadata loading
+            imagesContainer.innerHTML = `<img src="${imageUrl}" class="img-fluid rounded" alt="Product Image" id="productImagePreview" onload="loadImageMetadata('${imageUrl}')">`;
         } else {
             // Show placeholder
             imagesContainer.innerHTML = '<div class="bg-light rounded d-flex align-items-center justify-content-center" style="height: 200px;"><i class="fas fa-image fa-3x text-muted"></i></div>';
@@ -2868,7 +3235,607 @@
         displayProducts(filteredProducts);
     }
 
+    // Load and display image metadata from Firebase Storage
+    // Note: We skip fetching the image blob to avoid CORS issues
+    async function loadImageMetadata(imageUrl) {
+        const metadataContainer = document.getElementById('imageMetadata');
+        if (!metadataContainer) return;
+
+        try {
+            console.log('📸 Loading metadata for image:', imageUrl);
+            // Skip blob fetching to avoid CORS issues
+            // Go directly to Firebase Storage metadata API
+            await extractStorageMetadata(imageUrl, metadataContainer);
+        } catch (error) {
+            console.error('❌ Error loading image metadata:', error);
+            if (metadataContainer) {
+                metadataContainer.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle me-1"></i>Could not load metadata</span>';
+            }
+        }
+    }
+
+    // Extract metadata from Firebase Storage
+    async function extractStorageMetadata(imageUrl, container) {
+        try {
+            console.log('🔍 Attempting to extract metadata from:', imageUrl);
+            
+            // First, try to get metadata from Firestore (product data) as primary source
+            // This avoids CORS issues completely since Firestore allows cross-origin requests
+            const product = productsData[selectedProductId];
+            console.log('🔍 Checking product data for metadata. Product:', product);
+            console.log('🔍 Product keys:', product ? Object.keys(product) : 'No product');
+            
+            if (product) {
+                // Check for imageMetadata field in product
+                console.log('🔍 Checking imageMetadata field:', product.imageMetadata);
+                if (product.imageMetadata && typeof product.imageMetadata === 'object') {
+                    console.log('✅ Found metadata in product data:', product.imageMetadata);
+                    console.log('📊 Metadata keys:', Object.keys(product.imageMetadata));
+                    displayMetadata(product.imageMetadata, container);
+                    return;
+                }
+                
+                // For products without imageMetadata, try to construct from available data
+                if (product.sellerUsername || product.createdAt) {
+                    console.log('📊 Constructing metadata from product data');
+                    const constructedMetadata = {
+                        username: product.sellerUsername || product.sellerName || 'Unknown',
+                        userId: product.sellerId || '',
+                        productId: product.id || selectedProductId || '',
+                        uploadDate: product.createdAt || new Date().toISOString(),
+                        deviceInfo: 'Unknown Device',
+                        appName: 'MarketSafe',
+                        appVersion: '1.0.3',
+                    };
+                    console.log('📊 Constructed metadata:', constructedMetadata);
+                    displayMetadata(constructedMetadata, container);
+                    return;
+                }
+            }
+            
+            // If no product data available, try to fetch from Firestore directly
+            // This still avoids CORS since we're using Firestore REST API
+            try {
+                console.log('📡 Attempting to fetch product metadata from Firestore...');
+                // Use FIREBASE_REST_BASE which already includes the correct database ID (marketsafe)
+                const firestoreUrl = `${FIREBASE_REST_BASE}/products/${selectedProductId}?key=${FIREBASE_CONFIG.apiKey}`;
+                console.log('📡 Fetching from Firestore:', firestoreUrl);
+                const response = await fetch(firestoreUrl);
+                console.log('📊 Firestore response status:', response.status);
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    console.log('📊 Firestore response data:', data);
+                    
+                    if (data.fields && data.fields.imageMetadata) {
+                        // Firestore returns fields in a specific format
+                        const metadataField = data.fields.imageMetadata.mapValue?.fields || {};
+                        const metadata = {};
+                        for (const [key, value] of Object.entries(metadataField)) {
+                            if (value.stringValue !== undefined) {
+                                metadata[key] = value.stringValue;
+                            } else if (value.integerValue !== undefined) {
+                                metadata[key] = parseInt(value.integerValue);
+                            } else if (value.doubleValue !== undefined) {
+                                metadata[key] = parseFloat(value.doubleValue);
+                            }
+                        }
+                        if (Object.keys(metadata).length > 0) {
+                            console.log('✅ Found metadata in Firestore:', metadata);
+                            displayMetadata(metadata, container);
+                            return;
+                        }
+                    } else {
+                        console.log('⚠️ No imageMetadata field in Firestore document');
+                        console.log('📊 Available fields:', Object.keys(data.fields || {}));
+                    }
+                } else {
+                    const errorText = await response.text();
+                    console.log('⚠️ Firestore fetch failed:', response.status, errorText);
+                }
+            } catch (e) {
+                console.error('❌ Error fetching from Firestore:', e);
+            }
+            
+            // Skip Firebase Storage API call if opening from file:// protocol
+            // (CORS will block it anyway)
+            // Firestore approach above should have already worked
+            console.log('⚠️ Metadata not found in Firestore, falling back to product data');
+            displayProductMetadata(container);
+        } catch (error) {
+            console.error('❌ Error extracting storage metadata:', error);
+            displayProductMetadata(container);
+        }
+    }
+
+    // Display metadata in the container
+    function displayMetadata(metadata, container) {
+        if (!metadata || Object.keys(metadata).length === 0) {
+            console.log('⚠️ Empty metadata, using fallback');
+            displayProductMetadata(container);
+            return;
+        }
+
+        console.log('📊 Displaying metadata:', metadata);
+
+        // Remove text-muted class from container to ensure text is visible
+        container.classList.remove('text-muted');
+        container.classList.add('text-dark');
+        
+        let html = '<div class="metadata-list" style="color: #333;">';
+        
+        if (metadata.username) {
+            html += `<div class="mb-1"><strong style="color: #dc3545;">Username:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(metadata.username)}</span></div>`;
+        }
+        if (metadata.uploadDate) {
+            try {
+                const date = new Date(metadata.uploadDate);
+                html += `<div class="mb-1"><strong style="color: #dc3545;">Upload Date:</strong> <span style="color: #333; margin-left: 8px;">${date.toLocaleString()}</span></div>`;
+            } catch (e) {
+                html += `<div class="mb-1"><strong style="color: #dc3545;">Upload Date:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(metadata.uploadDate)}</span></div>`;
+            }
+        } else if (metadata.uploadedAt) {
+            try {
+                const date = new Date(metadata.uploadedAt);
+                html += `<div class="mb-1"><strong style="color: #dc3545;">Upload Date:</strong> <span style="color: #333; margin-left: 8px;">${date.toLocaleString()}</span></div>`;
+            } catch (e) {
+                html += `<div class="mb-1"><strong style="color: #dc3545;">Upload Date:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(metadata.uploadedAt)}</span></div>`;
+            }
+        }
+        if (metadata.uniqueId) {
+            html += `<div class="mb-1"><strong style="color: #dc3545;">Unique ID:</strong> <span style="color: #333; margin-left: 8px; font-family: monospace; font-size: 0.9em;">${escapeHtml(metadata.uniqueId)}</span></div>`;
+        }
+        if (metadata.productId) {
+            html += `<div class="mb-1"><strong style="color: #dc3545;">Product ID:</strong> <span style="color: #333; margin-left: 8px; font-family: monospace; font-size: 0.9em;">${escapeHtml(metadata.productId)}</span></div>`;
+        }
+        if (metadata.deviceInfo) {
+            html += `<div class="mb-1"><strong style="color: #dc3545;">Device:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(metadata.deviceInfo)}</span></div>`;
+        }
+        if (metadata.userId) {
+            html += `<div class="mb-1"><strong style="color: #dc3545;">User ID:</strong> <span style="color: #333; margin-left: 8px; font-family: monospace; font-size: 0.9em;">${escapeHtml(metadata.userId)}</span></div>`;
+        }
+        if (metadata.appName) {
+            html += `<div class="mb-1"><strong style="color: #dc3545;">App:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(metadata.appName)}</span></div>`;
+        }
+        if (metadata.appVersion) {
+            html += `<div class="mb-1"><strong style="color: #dc3545;">Version:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(metadata.appVersion)}</span></div>`;
+        }
+        if (metadata.watermarked === 'true' || metadata.watermarked === true) {
+            html += `<div class="mb-1"><span class="badge bg-success">Watermarked</span></div>`;
+        }
+        
+        html += '</div>';
+        container.innerHTML = html;
+    }
+    
+    // Helper function to escape HTML
+    function escapeHtml(text) {
+        if (!text) return '';
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // Display product metadata as fallback
+    function displayProductMetadata(container) {
+        // Remove text-muted class to ensure text is visible
+        container.classList.remove('text-muted');
+        container.classList.add('text-dark');
+        
+        const product = productsData[selectedProductId];
+        if (!product) {
+            container.innerHTML = '<span style="color: #6c757d;">No metadata available</span>';
+            return;
+        }
+
+        let html = '<div class="metadata-list" style="color: #333;">';
+        html += `<div class="mb-1"><strong style="color: #dc3545;">Seller:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(product.sellerName || 'Unknown')}</span></div>`;
+        if (product.createdAt) {
+            try {
+                const date = new Date(product.createdAt);
+                html += `<div class="mb-1"><strong style="color: #dc3545;">Created:</strong> <span style="color: #333; margin-left: 8px;">${date.toLocaleString()}</span></div>`;
+            } catch (e) {
+                html += `<div class="mb-1"><strong style="color: #dc3545;">Created:</strong> <span style="color: #333; margin-left: 8px;">${escapeHtml(product.createdAt)}</span></div>`;
+            }
+        }
+        html += `<div class="mb-1"><strong style="color: #dc3545;">Product ID:</strong> <span style="color: #333; margin-left: 8px; font-family: monospace; font-size: 0.9em;">${escapeHtml(selectedProductId)}</span></div>`;
+        html += '</div>';
+        container.innerHTML = html;
+    }
+
+    // ==================== ADMIN MANAGEMENT FUNCTIONS ====================
+    
+    function addAdminManagementTab() {
+        console.log('📋 Adding Admin Management tab...');
+        const tabItem = document.getElementById('adminManagementTabItem');
+        if (tabItem) {
+            tabItem.style.display = 'block';
+            console.log('✅ Admin Management tab is now visible');
+        } else {
+            console.error('❌ Admin Management tab item not found in DOM!');
+            console.error('❌ Looking for element with ID: adminManagementTabItem');
+        }
+        loadAdmins();
+    }
+
+    async function loadAdmins() {
+        try {
+            console.log('📋 Loading admins...');
+            const response = await fetch(`${FIREBASE_REST_BASE}/adminUsers?key=${FIREBASE_CONFIG.apiKey}`);
+            console.log('📊 Load admins response status:', response.status);
+            
+            if (response.ok) {
+                const data = await response.json();
+                console.log('📋 Admins data:', data);
+                const admins = [];
+                
+                if (data.documents) {
+                    for (const doc of data.documents) {
+                        const docId = doc.name.split('/').pop();
+                        const fields = doc.fields;
+                        const role = fields.role?.stringValue || 'admin';
+                        
+                        // Skip manager - only show regular admins in the list
+                        if (role === 'manager') {
+                            console.log('⏭️ Skipping manager from admin list:', docId);
+                            continue;
+                        }
+                        
+                        // Debug: Log each admin document
+                        console.log('📋 Processing admin document:', docId, fields);
+                        
+                        admins.push({
+                            id: docId,
+                            email: fields.email?.stringValue || 'No email',
+                            name: fields.name?.stringValue || 'No name',
+                            role: role,
+                            lastLoginAt: fields.lastLoginAt?.timestampValue || null
+                        });
+                    }
+                }
+                
+                console.log('✅ Loaded', admins.length, 'admins');
+                displayAdmins(admins);
+            } else {
+                const errorText = await response.text();
+                console.error('❌ Error loading admins:', response.status, errorText);
+                document.getElementById('adminsTableBody').innerHTML = 
+                    `<tr><td colspan="5" class="text-center text-danger">Error loading admins: ${response.status}</td></tr>`;
+            }
+        } catch (error) {
+            console.error('❌ Error loading admins:', error);
+            document.getElementById('adminsTableBody').innerHTML = 
+                `<tr><td colspan="5" class="text-center text-danger">Error loading admins: ${error.message}</td></tr>`;
+        }
+    }
+
+    function displayAdmins(admins) {
+        const tbody = document.getElementById('adminsTableBody');
+        if (admins.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-center">No admins found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = admins.map(admin => {
+            const lastLogin = admin.lastLoginAt ? 
+                new Date(admin.lastLoginAt).toLocaleString() : 'Never';
+            const roleBadge = admin.role === 'manager' ? 
+                '<span class="badge bg-danger">Manager</span>' : 
+                '<span class="badge bg-secondary">Admin</span>';
+            
+            // Show placeholder if name/email is missing
+            const displayName = admin.name && admin.name !== 'No name' && admin.name.trim() !== '' ? 
+                escapeHtml(admin.name) : 
+                '<span class="text-muted fst-italic">(No name set)</span>';
+            const displayEmail = admin.email && admin.email !== 'No email' && admin.email.trim() !== '' ? 
+                escapeHtml(admin.email) : 
+                '<span class="text-muted fst-italic">(No email set)</span>';
+            
+            return `
+                <tr>
+                    <td>${displayName}</td>
+                    <td>${displayEmail}</td>
+                    <td>${roleBadge}</td>
+                    <td>${lastLogin}</td>
+                    <td>
+                        ${admin.role !== 'manager' && currentUserRole === 'manager' ? 
+                            `<button class="btn btn-sm btn-danger" onclick="deleteAdmin('${admin.id}')">
+                                <i class="fas fa-trash me-1"></i>Delete
+                            </button>` : 
+                            '<span class="text-muted">-</span>'}
+                    </td>
+                </tr>
+            `;
+        }).join('');
+    }
+
+    function showCreateAdminModal() {
+        const modalHtml = `
+            <div class="modal fade" id="createAdminModal" tabindex="-1">
+                <div class="modal-dialog">
+                    <div class="modal-content">
+                        <div class="modal-header" style="background-color: var(--pure-black);">
+                            <h5 class="modal-title text-white">
+                                <i class="fas fa-user-plus me-2"></i>Create New Admin
+                            </h5>
+                            <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="createAdminError" class="alert alert-danger" style="display: none;"></div>
+                            <form id="createAdminForm">
+                                <div class="mb-3">
+                                    <label for="adminName" class="form-label">Full Name</label>
+                                    <input type="text" class="form-control" id="adminName" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="adminEmail" class="form-label">Email</label>
+                                    <input type="email" class="form-control" id="adminEmail" required>
+                                </div>
+                                <div class="mb-3">
+                                    <label for="adminPassword" class="form-label">Password</label>
+                                    <input type="password" class="form-control" id="adminPassword" required minlength="6">
+                                    <small class="form-text text-muted">Minimum 6 characters</small>
+                                </div>
+                            </form>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                            <button type="button" class="btn btn-primary" onclick="createAdmin()">
+                                <i class="fas fa-save me-2"></i>Create Admin
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Remove existing modal if any
+        const existing = document.getElementById('createAdminModal');
+        if (existing) existing.remove();
+        
+        // Add modal to body
+        document.body.insertAdjacentHTML('beforeend', modalHtml);
+        
+        // Show modal
+        const modal = new bootstrap.Modal(document.getElementById('createAdminModal'));
+        modal.show();
+        
+        // Handle form submit
+        document.getElementById('createAdminForm').addEventListener('submit', (e) => {
+            e.preventDefault();
+            createAdmin();
+        });
+    }
+
+    async function createAdmin() {
+        const name = document.getElementById('adminName').value.trim();
+        const email = document.getElementById('adminEmail').value.trim();
+        const password = document.getElementById('adminPassword').value;
+
+        const errorDiv = document.getElementById('createAdminError');
+        errorDiv.style.display = 'none';
+
+        if (!name || !email || !password) {
+            errorDiv.textContent = 'Please fill in all fields';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        if (password.length < 6) {
+            errorDiv.textContent = 'Password must be at least 6 characters';
+            errorDiv.style.display = 'block';
+            return;
+        }
+
+        try {
+            console.log('👤 Creating Firebase Auth user for:', email);
+            
+            // Check if currentUser is set
+            if (!currentUser || !currentUser.uid) {
+                throw new Error('You must be logged in to create admins.');
+            }
+            
+            // Set flag to prevent auth state change handler from running
+            isCreatingAdmin = true;
+            console.log('🚩 Set isCreatingAdmin flag to true');
+            
+            // Store manager's user ID, email, and auth token before creating admin
+            const managerUserId = currentUser.uid;
+            const managerEmail = currentUser.email;
+            const managerAuthToken = await window.firebaseAuth.currentUser?.getIdToken();
+            console.log('👤 Storing manager info before admin creation:', managerUserId, managerEmail);
+            
+            // Disable button during creation
+            const createButton = document.querySelector('#createAdminModal .btn-primary');
+            if (createButton) {
+                createButton.disabled = true;
+                createButton.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Creating...';
+            }
+            
+            // Create Firebase Auth user
+            // NOTE: This will automatically sign in as the new user!
+            const userCredential = await window.createUserWithEmailAndPassword(
+                window.firebaseAuth, 
+                email, 
+                password
+            );
+            const userId = userCredential.user.uid;
+            console.log('✅ Firebase Auth user created with ID:', userId);
+            console.log('⚠️ Firebase auto-signed in as new user (this is expected)');
+
+            // Verify current user is a manager before creating admin
+            if (currentUserRole !== 'manager') {
+                throw new Error('Only managers can create admin accounts.');
+            }
+            
+            // Add admin to Firestore
+            const adminData = {
+                fields: {
+                    email: { stringValue: email },
+                    name: { stringValue: name },
+                    role: { stringValue: 'admin' }, // Regular admin, not manager
+                    permissions: {
+                        mapValue: {
+                            fields: {
+                                canApproveUsers: { booleanValue: true },
+                                canRejectUsers: { booleanValue: true },
+                                canViewUserData: { booleanValue: true },
+                                canDeleteUsers: { booleanValue: false },
+                                canCreateAdmins: { booleanValue: false } // Admins cannot create other admins
+                            }
+                        }
+                    },
+                    createdAt: { timestampValue: new Date().toISOString() },
+                    createdBy: { stringValue: currentUser.uid },
+                    createdByName: { stringValue: currentUser.name || 'Manager' }
+                }
+            };
+
+            console.log('📝 Creating admin in Firestore with data:', adminData);
+            console.log('📝 Firestore URL:', `${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`);
+            
+            // For Firestore REST API v1, to create a document with specific ID:
+            // Use PATCH without updateMask (updateMask is only for updates, not creates)
+            // PATCH will create the document if it doesn't exist
+            const response = await fetch(`${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(adminData)
+            });
+
+            console.log('📊 Create admin response status:', response.status);
+            
+            if (response.ok) {
+                const responseData = await response.json();
+                console.log('✅ Admin created successfully in Firestore:', responseData);
+                
+                // Clear the form
+                document.getElementById('adminName').value = '';
+                document.getElementById('adminEmail').value = '';
+                document.getElementById('adminPassword').value = '';
+                
+                // IMPORTANT: Firebase auto-signed in as the new admin user
+                // We need to sign out the new user and restore manager session
+                console.log('🔄 Signing out new admin user (Firebase auto-signed in as them)...');
+                
+                // Keep flag set to prevent auth state change handler from running during sign out
+                
+                await window.firebaseAuth.signOut();
+                
+                // Wait a moment for sign out to complete
+                await new Promise(resolve => setTimeout(resolve, 500));
+                
+                // Close modal
+                bootstrap.Modal.getInstance(document.getElementById('createAdminModal')).hide();
+                
+                // Reload admins list
+                loadAdmins();
+                
+                // Show success message
+                alert('✅ Admin account created successfully!\n\nThe new admin can now log in and will have access to:\n- User Management\n- Product Moderation\n\n⚠️ You will need to log in again as manager.');
+                
+                // Reset the flag AFTER showing the message and waiting a bit
+                // This allows the user to see the success message before redirect
+                setTimeout(() => {
+                    isCreatingAdmin = false;
+                    console.log('🚩 Reset isCreatingAdmin flag to false - will redirect to login');
+                    // The auth state change handler will detect no user and redirect to login
+                }, 2000);
+            } else {
+                const errorText = await response.text();
+                console.error('❌ Failed to create admin:', response.status, errorText);
+                console.error('❌ Full error details:', {
+                    status: response.status,
+                    statusText: response.statusText,
+                    errorText: errorText,
+                    url: `${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`,
+                    requestBody: JSON.stringify(adminData, null, 2)
+                });
+                
+                // Try to parse error for better message
+                let errorMessage = `Failed to create admin in Firestore: ${response.status}`;
+                try {
+                    const errorJson = JSON.parse(errorText);
+                    if (errorJson.error && errorJson.error.message) {
+                        errorMessage = errorJson.error.message;
+                        console.error('❌ Parsed error message:', errorMessage);
+                    }
+                } catch (e) {
+                    errorMessage = `${errorMessage} - ${errorText}`;
+                }
+                
+                throw new Error(errorMessage);
+            }
+        } catch (error) {
+            // Reset flag on error
+            isCreatingAdmin = false;
+            console.log('🚩 Reset isCreatingAdmin flag to false (error occurred)');
+            
+            console.error('❌ Error creating admin:', error);
+            let errorMessage = 'Failed to create admin. Please try again.';
+            
+            // Handle Firebase Auth errors
+            if (error.code === 'auth/email-already-in-use') {
+                errorMessage = '❌ This email is already registered in Firebase Authentication. Please use a different email address.';
+            } else if (error.code === 'auth/invalid-email') {
+                errorMessage = '❌ Invalid email address. Please enter a valid email.';
+            } else if (error.code === 'auth/weak-password') {
+                errorMessage = '❌ Password is too weak. Please use a stronger password (at least 6 characters).';
+            } else if (error.code === 'auth/operation-not-allowed') {
+                errorMessage = '❌ Email/password accounts are not enabled. Please contact the administrator.';
+            } else if (error.code === 'auth/network-request-failed') {
+                errorMessage = '❌ Network error. Please check your internet connection and try again.';
+            } else if (error.message) {
+                // Check if it's a Firebase error
+                if (error.message.includes('email-already-in-use') || error.message.includes('EMAIL_EXISTS')) {
+                    errorMessage = '❌ This email is already registered. Please use a different email address.';
+                } else {
+                    errorMessage = `❌ ${error.message}`;
+                }
+            }
+            
+            errorDiv.textContent = errorMessage;
+            errorDiv.style.display = 'block';
+            
+            // Re-enable the button
+            const loginButton = document.querySelector('#createAdminModal .btn-primary');
+            if (loginButton) {
+                loginButton.disabled = false;
+                loginButton.innerHTML = '<i class="fas fa-save me-2"></i>Create Admin';
+            }
+        }
+    }
+
+    async function deleteAdmin(adminId) {
+        if (!confirm('Are you sure you want to delete this admin? This action cannot be undone.')) {
+            return;
+        }
+
+        try {
+            console.log('🗑️ Deleting admin:', adminId);
+            const response = await fetch(`${FIREBASE_REST_BASE}/adminUsers/${adminId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                method: 'DELETE'
+            });
+
+            console.log('📊 Delete admin response status:', response.status);
+
+            if (response.ok) {
+                console.log('✅ Admin deleted successfully');
+                alert('Admin deleted successfully!');
+                loadAdmins();
+            } else {
+                const errorText = await response.text();
+                console.error('❌ Failed to delete admin:', response.status, errorText);
+                throw new Error(`Failed to delete admin: ${response.status} - ${errorText}`);
+            }
+        } catch (error) {
+            console.error('❌ Error deleting admin:', error);
+            alert(`Failed to delete admin: ${error.message || 'Please try again.'}`);
+        }
+    }
 
 </script>
+<!-- EXIF.js library for reading EXIF data -->
+<script src="https://cdn.jsdelivr.net/npm/exif-js@2.3.0/exif.js"></script>
 </body>
 </html>

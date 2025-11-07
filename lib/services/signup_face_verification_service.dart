@@ -4,8 +4,9 @@ import 'dart:ui';
 import 'dart:math';
 import 'package:camera/camera.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
-import 'real_face_recognition_service.dart';
+import 'face_net_service.dart';
 
+/// Service for handling face verification steps during signup
 class SignupFaceVerificationService {
   static final SignupFaceVerificationService _instance = SignupFaceVerificationService._internal();
   factory SignupFaceVerificationService() => _instance;
@@ -26,6 +27,7 @@ class SignupFaceVerificationService {
   int _frameCount = 0;
   DateTime? _verificationStartTime;
   CameraImage? _lastCameraImage; // Store last camera image for embedding generation
+  Face? _lastDetectedFace; // Store last detected face for embedding generation
 
   void initialize() {
     _faceDetector = FaceDetector(
@@ -62,6 +64,7 @@ class SignupFaceVerificationService {
         if (faces.isNotEmpty) {
           final face = faces.first;
           _frameCount++;
+          _lastDetectedFace = face; // Store the detected face
           
           // Update face tracking data
           _updateFaceTrackingData(face);
@@ -347,12 +350,12 @@ class SignupFaceVerificationService {
       print('🔍 Generating 128D face embedding for signup...');
       List<double>? faceEmbedding;
       
-      if (_lastCameraImage != null) {
+      if (_lastDetectedFace != null && _lastCameraImage != null) {
         try {
-          faceEmbedding = await RealFaceRecognitionService.extractBiometricFeatures(face, _lastCameraImage!);
+          faceEmbedding = await FaceNetService().predict(_lastCameraImage!, _lastDetectedFace!);
           print('✅ 512D face embedding generated successfully');
         } catch (e) {
-          print('❌ Error extracting face embedding: $e');
+          print('❌ Error generating face embedding: $e');
           print('🔄 Using fallback mathematical approach...');
           // Fallback to basic mathematical approach
           faceEmbedding = await _extractBasicFaceEmbedding(face);
@@ -386,7 +389,7 @@ class SignupFaceVerificationService {
       };
       
       // Add face embedding data if available
-      if (faceEmbedding != null) {
+      if (faceEmbedding != null && faceEmbedding.isNotEmpty) {
         _verificationData['faceEmbedding'] = faceEmbedding;
         _verificationData['embeddingType'] = '128D';
         print('✅ 128D face embedding generated and stored for signup');
@@ -444,6 +447,8 @@ class SignupFaceVerificationService {
     _eyeProbabilities.clear();
     _frameCount = 0;
     _verificationStartTime = null;
+    _lastDetectedFace = null;
+    _lastCameraImage = null;
   }
 
   void dispose() {
@@ -517,3 +522,4 @@ class SignupFaceVerificationService {
     }
   }
 }
+

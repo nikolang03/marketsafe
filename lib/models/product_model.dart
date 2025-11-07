@@ -23,6 +23,7 @@ class Product {
   final bool isVerified;
   final List<String> likedBy; // List of user IDs who liked this product
   final List<Map<String, dynamic>> comments; // List of comments with user info
+  final Map<String, dynamic>? imageMetadata; // Image metadata (username, uploadDate, deviceInfo, etc.)
   
   // Moderation fields
   final String moderationStatus; // pending, approved, rejected
@@ -53,6 +54,7 @@ class Product {
     this.isVerified = false,
     this.likedBy = const [],
     this.comments = const [],
+    this.imageMetadata,
     this.moderationStatus = 'pending',
     this.reviewedBy,
     this.reviewedAt,
@@ -84,6 +86,7 @@ class Product {
       'isVerified': isVerified,
       'likedBy': likedBy,
       'comments': comments,
+      'imageMetadata': imageMetadata,
       'moderationStatus': moderationStatus,
       'reviewedBy': reviewedBy,
       'reviewedAt': reviewedAt != null ? Timestamp.fromDate(reviewedAt!) : null,
@@ -116,6 +119,7 @@ class Product {
       isVerified: map['isVerified'] ?? false,
       likedBy: List<String>.from(map['likedBy'] ?? []),
       comments: List<Map<String, dynamic>>.from(map['comments'] ?? []),
+      imageMetadata: map['imageMetadata'] != null ? Map<String, dynamic>.from(map['imageMetadata']) : null,
       moderationStatus: map['moderationStatus'] ?? 'pending',
       reviewedBy: map['reviewedBy'],
       reviewedAt: (map['reviewedAt'] as Timestamp?)?.toDate(),
@@ -153,6 +157,7 @@ class Product {
     bool? isVerified,
     List<String>? likedBy,
     List<Map<String, dynamic>>? comments,
+    Map<String, dynamic>? imageMetadata,
     String? moderationStatus,
     String? reviewedBy,
     DateTime? reviewedAt,
@@ -181,6 +186,7 @@ class Product {
       isVerified: isVerified ?? this.isVerified,
       likedBy: likedBy ?? this.likedBy,
       comments: comments ?? this.comments,
+      imageMetadata: imageMetadata ?? this.imageMetadata,
       moderationStatus: moderationStatus ?? this.moderationStatus,
       reviewedBy: reviewedBy ?? this.reviewedBy,
       reviewedAt: reviewedAt ?? this.reviewedAt,

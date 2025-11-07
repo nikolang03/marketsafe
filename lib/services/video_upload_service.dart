@@ -67,19 +67,13 @@ class VideoUploadService {
         print('⚠️ Video thumbnail appears to be from internet - this is unusual for video thumbnails');
       }
       
-      if (username != null) {
-        print('🎨 Adding watermark and metadata to video thumbnail for user: $username');
-        thumbnailBytes = await WatermarkingService.addWatermarkToImage(
+      if (username != null && username.isNotEmpty) {
+        print('🎨 Adding username watermark to video thumbnail for user: $username');
+        thumbnailBytes = await WatermarkingService.applyUsernameWatermark(
           imageBytes: fileBytes,
           username: username,
-          userId: userId,
-          customText: '@$username',
-          customPosition: WatermarkPosition.center,
-          customSize: 0.8,
-          customOpacity: 0.9,
-          customColor: WatermarkColor.yellow,
         );
-        print('✅ Watermark and metadata added to thumbnail successfully');
+        print('✅ Watermarked thumbnail generated');
       } else {
         thumbnailBytes = fileBytes;
         print('⚠️ No username provided, uploading thumbnail without watermark');

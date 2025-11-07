@@ -1,52 +1,19 @@
 {
-  "firestore": {
-    "rules": "firestore.rules",
-    "indexes": "firestore.indexes.json"
+  "functions": {
+    "source": "functions"
   },
-  "storage": {
-    "rules": "storage.rules"
-  },
-  "flutter": {
-    "platforms": {
-      "android": {
-        "default": {
-          "projectId": "marketsafe-e57cf",
-          "appId": "1:744810618140:android:21734dc6e84b9eea57aed9",
-          "fileOutput": "android/app/google-services.json"
-        }
-      },
-      "dart": {
-        "lib/firebase_options.dart": {
-          "projectId": "marketsafe-e57cf",
-          "configurations": {
-            "android": "1:744810618140:android:21734dc6e84b9eea57aed9",
-            "ios": "1:744810618140:ios:a46feedae992ee9357aed9",
-            "macos": "1:744810618140:ios:a46feedae992ee9357aed9",
-            "web": "1:744810618140:web:1b333167538cf6d957aed9",
-            "windows": "1:744810618140:web:edfe2a3aebac75e157aed9"
-          }
-        }
+  "hosting": {
+    "public": "web",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "rewrites": [
+      {
+        "source": "**",
+        "destination": "/index.html"
       }
-    }
-  },
-  "functions": [
-    {
-      "codebase": "default",
-      "region": "us-central1",
-      "gen": "2",
-      "source": "functions",
-      "runtime": "nodejs20"
-    },
-    {
-      "source": "marketsafe",
-      "codebase": "functions",
-      "ignore": [
-        "node_modules",
-        ".git",
-        "firebase-debug.log",
-        "firebase-debug.*.log",
-        "*.local"
-      ]
-    }
-  ]
+    ]
+  }
 }

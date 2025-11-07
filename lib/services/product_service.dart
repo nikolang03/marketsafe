@@ -9,6 +9,8 @@ import 'video_upload_service.dart';
 import 'notification_service.dart';
 import 'network_service.dart';
 import 'watermarking_service.dart';
+import 'image_exif_metadata_service.dart';
+import 'package:device_info_plus/device_info_plus.dart';
 
 class ProductService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instanceFor(
@@ -114,6 +116,22 @@ class ProductService {
 
       print('✅ Successfully uploaded ${imageUrls.length} images');
 
+      // Prepare image metadata from the first image upload
+      Map<String, dynamic>? imageMetadataMap;
+      if (imageUrls.isNotEmpty) {
+        final deviceInfo = await _getDeviceInfo();
+        // Use sellerUsername for metadata (same as used for watermarking)
+        final metadataUsername = sellerUsername ?? 'user';
+        imageMetadataMap = ImageExifMetadataService.prepareMetadata(
+          username: metadataUsername,
+          userId: userId,
+          productId: productId,
+          deviceInfo: deviceInfo,
+        );
+        imageMetadataMap['watermarked'] = 'true';
+        print('📝 Image metadata prepared for Firestore: $imageMetadataMap');
+      }
+      
       // Create product object
       final product = Product(
         id: productId,
@@ -128,6 +146,7 @@ class ProductService {
         sellerProfilePictureUrl: sellerProfilePictureUrl,
         imageUrl: imageUrls.isNotEmpty ? imageUrls.first : '', // First image as primary
         imageUrls: imageUrls,
+        imageMetadata: imageMetadataMap,
         createdAt: DateTime.now(),
         status: 'active',
         views: 0,
@@ -216,23 +235,40 @@ class ProductService {
         // Continue with upload but log warnings
       }
       
-      // Watermarking is now handled in the preview screen
-      // Images are already watermarked when they reach this point
-      imageBytes = fileBytes;
-      print('📸 Using pre-watermarked image');
+      // Always auto-watermark with the user's username before upload
+      String tagUsername;
+      if (username == null || username.isEmpty) {
+        final userData = await getUserData(productId.split('_').last);
+        final extracted = (userData != null) ? (userData['username']?.toString() ?? '') : '';
+        tagUsername = extracted.isNotEmpty ? extracted : 'user';
+      } else {
+        tagUsername = username;
+      }
+      imageBytes = await WatermarkingService.applyUsernameWatermark(
+        imageBytes: fileBytes,
+        username: tagUsername,
+      );
+      print('📸 Applied automated username watermark');
       
       final ref = _storage.ref().child('products').child('$productId.jpg');
       print('📁 Storage reference: ${ref.fullPath}');
       
+      // Prepare comprehensive metadata for Firebase Storage
+      final deviceInfo = await _getDeviceInfo();
+      final metadataMap = ImageExifMetadataService.prepareMetadata(
+        username: tagUsername,
+        userId: productId.split('_').last,
+        productId: productId,
+        deviceInfo: deviceInfo,
+      );
+      
+      // Add watermark info
+      metadataMap['watermarked'] = 'true';
+      
       // Set metadata to help with upload
       final metadata = SettableMetadata(
         contentType: 'image/jpeg',
-        customMetadata: {
-          'productId': productId,
-          'uploadedAt': DateTime.now().toIso8601String(),
-          'watermarked': username != null ? 'true' : 'false',
-          'username': username ?? 'unknown',
-        },
+        customMetadata: metadataMap,
       );
       print('📁 Metadata set for upload');
       
@@ -1007,6 +1043,88 @@ class ProductService {
     } catch (e) {
       print('❌ Error fetching all products for admin: $e');
       return [];
+    }
+  }
+
+  // Helper method to get device information
+  static Future<String> _getDeviceInfo() async {
+    try {
+      print('🔍 Starting device info detection...');
+      final deviceInfo = DeviceInfoPlugin();
+      
+      if (Platform.isAndroid) {
+        print('📱 Detected Android platform');
+        try {
+          final androidInfo = await deviceInfo.androidInfo;
+          final brand = androidInfo.brand.isNotEmpty ? androidInfo.brand : 'Unknown Brand';
+          final model = androidInfo.model.isNotEmpty ? androidInfo.model : 'Unknown Model';
+          final version = androidInfo.version.release.isNotEmpty ? androidInfo.version.release : 'Unknown Version';
+          final deviceString = '$brand $model (Android $version)';
+          print('✅ Android device info: $deviceString');
+          return deviceString;
+        } catch (e) {
+          print('❌ Error getting Android device info: $e');
+          // Fallback for Android
+          return 'Android Device (Details unavailable)';
+        }
+      } else if (Platform.isIOS) {
+        print('🍎 Detected iOS platform');
+        try {
+          final iosInfo = await deviceInfo.iosInfo;
+          final name = iosInfo.name.isNotEmpty ? iosInfo.name : 'Unknown Name';
+          final model = iosInfo.model.isNotEmpty ? iosInfo.model : 'Unknown Model';
+          final version = iosInfo.systemVersion.isNotEmpty ? iosInfo.systemVersion : 'Unknown Version';
+          final deviceString = '$name $model (iOS $version)';
+          print('✅ iOS device info: $deviceString');
+          return deviceString;
+        } catch (e) {
+          print('❌ Error getting iOS device info: $e');
+          // Fallback for iOS
+          return 'iOS Device (Details unavailable)';
+        }
+      } else if (Platform.isWindows) {
+        print('🪟 Detected Windows platform');
+        try {
+          final windowsInfo = await deviceInfo.windowsInfo;
+          final deviceString = '${windowsInfo.computerName} (Windows ${windowsInfo.releaseId})';
+          print('✅ Windows device info: $deviceString');
+          return deviceString;
+        } catch (e) {
+          print('❌ Error getting Windows device info: $e');
+          return 'Windows Device';
+        }
+      } else if (Platform.isLinux) {
+        print('🐧 Detected Linux platform');
+        try {
+          final linuxInfo = await deviceInfo.linuxInfo;
+          final deviceString = '${linuxInfo.name} (Linux ${linuxInfo.prettyName})';
+          print('✅ Linux device info: $deviceString');
+          return deviceString;
+        } catch (e) {
+          print('❌ Error getting Linux device info: $e');
+          return 'Linux Device';
+        }
+      } else if (Platform.isMacOS) {
+        print('🍎 Detected macOS platform');
+        try {
+          final macInfo = await deviceInfo.macOsInfo;
+          final computerName = macInfo.computerName.isNotEmpty ? macInfo.computerName : 'Mac';
+          final version = macInfo.osRelease.isNotEmpty ? macInfo.osRelease : 'Unknown Version';
+          final deviceString = '$computerName (macOS $version)';
+          print('✅ macOS device info: $deviceString');
+          return deviceString;
+        } catch (e) {
+          print('❌ Error getting macOS device info: $e');
+          return 'macOS Device';
+        }
+      } else {
+        print('⚠️ Unknown platform detected');
+        return 'Unknown Platform Device';
+      }
+    } catch (e, stackTrace) {
+      print('❌ Critical error getting device info: $e');
+      print('📋 Stack trace: $stackTrace');
+      return 'Device Info Unavailable';
     }
   }
 

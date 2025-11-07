@@ -1,10 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:async';
 import '../services/notification_service.dart';
-import '../services/badge_update_service.dart';
 
 class NotificationsScreen extends StatefulWidget {
   const NotificationsScreen({super.key});
@@ -14,271 +14,51 @@ class NotificationsScreen extends StatefulWidget {
 }
 
 class _NotificationsScreenState extends State<NotificationsScreen> {
+  String? _currentUserId;
   List<Map<String, dynamic>> _notifications = [];
   bool _isLoading = true;
-  String? _currentUserId;
+  StreamSubscription<QuerySnapshot>? _notificationSubscription;
   Set<String> _deletedProductIds = {};
-  StreamSubscription<QuerySnapshot>? _notificationsSubscription;
 
   @override
   void initState() {
     super.initState();
-    print('🔔 NotificationsScreen: initState called');
-    _loadNotifications();
+    _loadUserData();
   }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    // Refresh badge count when screen becomes active
-    BadgeUpdateService.notifyBadgeUpdate();
-  }
-
-
-  /// Check for notifications created by admin (safe method)
-  Future<void> _checkForAdminNotifications() async {
-    if (_currentUserId == null) return;
-    
-    print('🔔 Checking for admin-created notifications...');
-    
-    // Just reload existing notifications (admin creates them directly)
-    await _loadNotifications();
-    
-    print('🔔 Admin notification check completed');
-  }
-
 
   @override
   void dispose() {
-    _notificationsSubscription?.cancel();
+    _notificationSubscription?.cancel();
     super.dispose();
   }
 
-  @override
-  Widget build(BuildContext context) {
-    print('🔔 NotificationsScreen: build called with ${_notifications.length} notifications');
+  Future<void> _loadUserData() async {
+    final prefs = await SharedPreferences.getInstance();
+    _currentUserId = prefs.getString('current_user_id') ?? 
+                     prefs.getString('signup_user_id');
     
-    return Scaffold(
-      backgroundColor: const Color(0xFF1A1A1A),
-      appBar: AppBar(
-        title: const Text(
-          'Notifications',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-        ),
-        backgroundColor: const Color(0xFF2E0000),
-        foregroundColor: Colors.white,
-        centerTitle: true,
-        elevation: 0,
-        automaticallyImplyLeading: false,
-        actions: [
-          if (_notifications.isNotEmpty)
-            PopupMenuButton<String>(
-              onSelected: (value) async {
-                if (value == 'mark_all_read') {
-                  await _markAllAsRead();
-                } else if (value == 'delete_all') {
-                  await _deleteAllNotifications();
-                } else if (value == 'force_check') {
-                  await _checkForAdminNotifications();
-                }
-              },
-              itemBuilder: (context) => [
-                if (_notifications.any((n) => !n['isRead']))
-                  const PopupMenuItem(
-                    value: 'mark_all_read',
-                    child: Row(
-                      children: [
-                        Icon(Icons.mark_email_read, color: Colors.white),
-                        SizedBox(width: 8),
-                        Text('Mark All as Read'),
-                      ],
-                    ),
-                  ),
-                const PopupMenuItem(
-                  value: 'delete_all',
-                  child: Row(
-                    children: [
-                      Icon(Icons.delete_forever, color: Colors.red),
-                      SizedBox(width: 8),
-                      Text('Delete All Notifications', style: TextStyle(color: Colors.red)),
-                    ],
-                  ),
-                ),
-                const PopupMenuItem(
-                  value: 'force_check',
-                  child: Row(
-                    children: [
-                      Icon(Icons.refresh, color: Colors.green),
-                      SizedBox(width: 8),
-                      Text('Check for New Notifications'),
-                    ],
-                  ),
-                ),
-              ],
-              child: const Icon(Icons.more_vert, color: Colors.white),
-            ),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  CircularProgressIndicator(color: Colors.red),
-                  SizedBox(height: 16),
-                  Text(
-                    'Loading notifications...',
-                    style: TextStyle(color: Colors.white, fontSize: 16),
-                  ),
-                ],
-              ),
-            )
-          : _notifications.isEmpty
-              ? const Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        Icons.notifications_none,
-                        size: 80,
-                        color: Colors.grey,
-                      ),
-                      SizedBox(height: 16),
-                      Text(
-                        'No notifications yet',
-                        style: TextStyle(color: Colors.grey, fontSize: 18),
-                      ),
-                      SizedBox(height: 8),
-                      Text(
-                        'You\'ll receive notifications when your products are reviewed',
-                        style: TextStyle(color: Colors.grey, fontSize: 14),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                )
-              : RefreshIndicator(
-                  onRefresh: () async {
-                    print('🔄 Pull to refresh triggered');
-                    // Just reload existing notifications - real-time listener will handle updates
-                    await _loadNotifications();
-                  },
-                  color: Colors.red,
-                  child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
-                    itemCount: _notifications.length,
-                    itemBuilder: (context, index) {
-                    final notification = _notifications[index];
-                    final isRead = notification['isRead'] ?? false;
-                    final status = notification['status'] ?? '';
-                    final productId = notification['productId'] ?? '';
-                    final isProductDeleted = _deletedProductIds.contains(productId);
-                    
-                    return Container(
-                      margin: const EdgeInsets.only(bottom: 8),
-                      child: GestureDetector(
-                        onTap: () {
-                          // Mark as read if unread
-                          if (!isRead) {
-                            _markAsRead(notification['id']);
-                          }
-                          // Show product preview
-                          _showProductPreview(notification);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          decoration: BoxDecoration(
-                            color: isRead ? Colors.transparent : Colors.red.withOpacity(0.1),
-                            borderRadius: BorderRadius.circular(8),
-                            border: isRead 
-                                ? Border.all(color: Colors.grey.withOpacity(0.2), width: 1)
-                                : null,
-                          ),
-                          child: Row(
-                            children: [
-                              // Status indicator dot
-                              Container(
-                                width: 8,
-                                height: 8,
-                                decoration: BoxDecoration(
-                                  color: isProductDeleted 
-                                      ? Colors.orange
-                                      : _getStatusColor(status),
-                                  shape: BoxShape.circle,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              // Content
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      isProductDeleted 
-                                          ? '${notification['title'] ?? 'No title'} (Deleted)'
-                                          : (notification['title'] ?? 'No title'),
-                                      style: TextStyle(
-                                        color: isProductDeleted ? Colors.orange : Colors.white,
-                                        fontWeight: isRead ? FontWeight.normal : FontWeight.w500,
-                                        fontSize: 15,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    Text(
-                                      isProductDeleted 
-                                          ? 'Product no longer available'
-                                          : (notification['message'] ?? 'No message'),
-                                      style: TextStyle(
-                                        color: isProductDeleted ? Colors.orange : Colors.grey[400],
-                                        fontSize: 13,
-                                      ),
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                    const SizedBox(height: 6),
-                                    Text(
-                                      _formatDate(notification['createdAt']),
-                                      style: TextStyle(
-                                        color: Colors.grey[500],
-                                        fontSize: 11,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Arrow
-                              Icon(
-                                Icons.arrow_forward_ios,
-                                color: Colors.grey[400],
-                                size: 14,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-    );
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      _setupRealtimeListener();
+      _loadNotifications();
+    } else {
+      setState(() {
+        _isLoading = false;
+      });
+    }
   }
 
-  // Removed _checkForNewNotifications to prevent notification spam
-
   void _setupRealtimeListener() {
-    if (_currentUserId == null) return;
+    if (_currentUserId == null || _currentUserId!.isEmpty) return;
     
     // Cancel existing listener if any
-    _notificationsSubscription?.cancel();
-    
-    print('🔔 Setting up real-time listener for user: $_currentUserId');
-    
+    _notificationSubscription?.cancel();
+
     final firestore = FirebaseFirestore.instanceFor(
       app: Firebase.app(),
       databaseId: 'marketsafe',
     );
-    
-    _notificationsSubscription = firestore
+
+    _notificationSubscription = firestore
         .collection('notifications')
         .where('userId', isEqualTo: _currentUserId)
         .snapshots()
@@ -309,13 +89,15 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                 _isLoading = false;
               });
               print('🔔 Updated notifications list with ${notifications.length} items');
-              
-              // Notify badge service to update count
-              BadgeUpdateService.notifyBadgeUpdate();
             }
           },
           onError: (error) {
             print('❌ Real-time listener error: $error');
+            if (mounted) {
+              setState(() {
+                _isLoading = false;
+              });
+            }
           },
         );
   }
@@ -331,8 +113,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                       prefs.getString('current_user_id') ?? '';
       
       print('👤 NotificationsScreen user ID: $_currentUserId');
-      print('👤 User ID length: ${_currentUserId?.length}');
-      print('👤 User ID type: ${_currentUserId.runtimeType}');
       
       if (_currentUserId == null || _currentUserId!.isEmpty) {
         print('❌ No user ID found - cannot load notifications');
@@ -354,16 +134,440 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       // Check which products still exist
       await _checkProductExistence(notifications);
       
-      setState(() {
-        _notifications = notifications;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _notifications = notifications;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       print('❌ Error loading notifications: $e');
-      setState(() {
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
     }
+  }
+
+  Future<void> _markAsRead(String notificationId) async {
+    await NotificationService.markAsRead(notificationId);
+    // Real-time listener will update the UI
+    await _loadNotifications(); // Refresh the list
+  }
+
+  Future<void> _markAllAsRead() async {
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      await NotificationService.markAllAsRead(_currentUserId!);
+      // Real-time listener will update the UI
+      await _loadNotifications(); // Refresh the list
+    }
+  }
+
+  Future<void> _deleteAllNotifications() async {
+    if (_currentUserId == null || _currentUserId!.isEmpty) return;
+
+    // Show confirmation dialog
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Row(
+          children: [
+            Icon(Icons.warning, color: Colors.red),
+            SizedBox(width: 8),
+            Text('Delete All Notifications'),
+          ],
+        ),
+        content: const Text(
+          'Are you sure you want to delete all notifications? This action cannot be undone.',
+          style: TextStyle(fontSize: 16),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete All', style: TextStyle(color: Colors.red)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed == true) {
+      try {
+        // Show loading indicator
+        showDialog(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => const Center(
+            child: CircularProgressIndicator(color: Colors.red),
+          ),
+        );
+
+        // Delete all notifications
+        await NotificationService.deleteAllNotifications(_currentUserId!);
+        
+        // Clear local state immediately
+        setState(() {
+          _notifications.clear();
+        });
+        
+        // Close loading dialog
+        if (mounted) Navigator.of(context).pop();
+        
+        // Show success message
+        _showSnackBar('All notifications deleted successfully');
+      } catch (e) {
+        // Close loading dialog
+        if (mounted) Navigator.of(context).pop();
+        
+        // Show error message
+        _showSnackBar('Error deleting notifications: $e');
+      }
+    }
+  }
+
+  void _showSnackBar(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
+  }
+
+  String _formatTimestamp(dynamic timestamp) {
+    try {
+      DateTime dateTime;
+      if (timestamp is Timestamp) {
+        dateTime = timestamp.toDate();
+      } else if (timestamp is String) {
+        dateTime = DateTime.parse(timestamp);
+      } else {
+        return 'Just now';
+      }
+
+      final now = DateTime.now();
+      final difference = now.difference(dateTime);
+
+      if (difference.inDays > 7) {
+        return '${dateTime.day}/${dateTime.month}/${dateTime.year}';
+      } else if (difference.inDays > 0) {
+        return '${difference.inDays} day${difference.inDays > 1 ? 's' : ''} ago';
+      } else if (difference.inHours > 0) {
+        return '${difference.inHours} hour${difference.inHours > 1 ? 's' : ''} ago';
+      } else if (difference.inMinutes > 0) {
+        return '${difference.inMinutes} minute${difference.inMinutes > 1 ? 's' : ''} ago';
+      } else {
+        return 'Just now';
+      }
+    } catch (e) {
+      return 'Just now';
+    }
+  }
+
+  Color _getStatusColor(String? status) {
+    switch (status) {
+      case 'approved':
+        return Colors.green;
+      case 'rejected':
+        return Colors.red;
+      case 'pending':
+        return Colors.orange;
+      case 'deleted':
+        return Colors.grey;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  IconData _getStatusIcon(String? status) {
+    switch (status) {
+      case 'approved':
+        return Icons.check_circle;
+      case 'rejected':
+        return Icons.cancel;
+      case 'pending':
+        return Icons.hourglass_empty;
+      case 'deleted':
+        return Icons.delete;
+      default:
+        return Icons.info;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+        child: Column(
+          children: [
+            // Top bar (transparent like message screen)
+            Padding(
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 30, bottom: 10),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const SizedBox(width: 24), // Spacer to balance the layout
+                  const Text(
+                    'Notifications',
+                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                  ),
+                  Row(
+                    children: [
+                      if (_notifications.any((n) => (n['isRead'] ?? false) == false))
+                        TextButton(
+                          onPressed: _markAllAsRead,
+                          child: const Text(
+                            'Mark All Read',
+                            style: TextStyle(color: Colors.white),
+                          ),
+                        ),
+                      if (_notifications.isNotEmpty)
+                        PopupMenuButton<String>(
+                          onSelected: (value) async {
+                            if (value == 'mark_all_read') {
+                              await _markAllAsRead();
+                            } else if (value == 'delete_all') {
+                              await _deleteAllNotifications();
+                            }
+                          },
+                          itemBuilder: (context) => [
+                            if (_notifications.any((n) => (n['isRead'] ?? false) == false))
+                              const PopupMenuItem(
+                                value: 'mark_all_read',
+                                child: Row(
+                                  children: [
+                                    Icon(Icons.mark_email_read, color: Colors.white),
+                                    SizedBox(width: 8),
+                                    Text('Mark All as Read'),
+                                  ],
+                                ),
+                              ),
+                            const PopupMenuItem(
+                              value: 'delete_all',
+                              child: Row(
+                                children: [
+                                  Icon(Icons.delete_forever, color: Colors.red),
+                                  SizedBox(width: 8),
+                                  Text('Delete All Notifications', style: TextStyle(color: Colors.red)),
+                                ],
+                              ),
+                            ),
+                          ],
+                          icon: const Icon(Icons.more_vert, color: Colors.white),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            // Notifications content
+            Expanded(
+              child: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [Colors.black, Color(0xFF1a1a1a), Color(0xFF2B0000)],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: _currentUserId == null || _currentUserId!.isEmpty
+            ? const Center(
+                child: Text(
+                  'Please log in to view notifications',
+                  style: TextStyle(color: Colors.white),
+                ),
+              )
+            : _isLoading
+                ? const Center(
+                    child: CircularProgressIndicator(
+                      color: Colors.red,
+                    ),
+                  )
+                : _notifications.isEmpty
+                    ? Center(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.notifications_none,
+                              size: 64,
+                              color: Colors.grey[600],
+                            ),
+                            const SizedBox(height: 16),
+                            Text(
+                              'No notifications yet',
+                              style: TextStyle(
+                                color: Colors.grey[400],
+                                fontSize: 18,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : RefreshIndicator(
+                        onRefresh: _loadNotifications,
+                        color: Colors.red,
+                        child: ListView.builder(
+                          padding: const EdgeInsets.all(8),
+                          itemCount: _notifications.length,
+                          itemBuilder: (context, index) {
+                            final notification = _notifications[index];
+                            final isRead = notification['isRead'] ?? false;
+                            final title = notification['title'] ?? 'Notification';
+                            final message = notification['message'] ?? '';
+                            final status = notification['status'] as String?;
+                            final timestamp = notification['createdAt'];
+                            final productId = notification['productId']?.toString() ?? '';
+                            final isProductDeleted = _deletedProductIds.contains(productId);
+
+                            return Card(
+                              margin: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              color: isRead 
+                                  ? Colors.grey[900] 
+                                  : Colors.grey[850]?.withOpacity(0.9),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                              child: InkWell(
+                                onTap: () {
+                                  if (!isRead) {
+                                    _markAsRead(notification['id'] ?? '');
+                                  }
+                                  // Show product preview
+                                  _showProductPreview(notification);
+                                },
+                                borderRadius: BorderRadius.circular(12),
+                                child: Padding(
+                                  padding: const EdgeInsets.all(16),
+                                  child: Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      // Status icon
+                                      Container(
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: _getStatusColor(status)
+                                              .withOpacity(0.2),
+                                          shape: BoxShape.circle,
+                                        ),
+                                        child: Icon(
+                                          _getStatusIcon(status),
+                                          color: _getStatusColor(status),
+                                          size: 24,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      // Notification content
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment:
+                                              CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                // Status indicator dot
+                                                Container(
+                                                  width: 8,
+                                                  height: 8,
+                                                  decoration: BoxDecoration(
+                                                    color: isProductDeleted 
+                                                        ? Colors.orange
+                                                        : _getStatusColor(status),
+                                                    shape: BoxShape.circle,
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 12),
+                                                Expanded(
+                                                  child: Text(
+                                                    isProductDeleted 
+                                                        ? '$title (Deleted)'
+                                                        : title,
+                                                    style: TextStyle(
+                                                      color: isProductDeleted ? Colors.orange : Colors.white,
+                                                      fontSize: 16,
+                                                      fontWeight: isRead
+                                                          ? FontWeight.normal
+                                                          : FontWeight.bold,
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (!isRead)
+                                                  Container(
+                                                    width: 8,
+                                                    height: 8,
+                                                    decoration: const BoxDecoration(
+                                                      color: Colors.red,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              isProductDeleted 
+                                                  ? 'Product no longer available'
+                                                  : message,
+                                              style: TextStyle(
+                                                color: isProductDeleted ? Colors.orange : Colors.grey[300],
+                                                fontSize: 14,
+                                              ),
+                                              maxLines: 3,
+                                              overflow: TextOverflow.ellipsis,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Text(
+                                              _formatTimestamp(timestamp),
+                                              style: TextStyle(
+                                                color: Colors.grey[500],
+                                                fontSize: 12,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            // Arrow indicator
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.end,
+                                              children: [
+                                                Icon(
+                                                  Icons.arrow_forward_ios,
+                                                  color: Colors.grey[400],
+                                                  size: 14,
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
+                      ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      ),
+    );
   }
 
   Future<void> _checkProductExistence(List<Map<String, dynamic>> notifications) async {
@@ -396,156 +600,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
       print('🔍 Found ${deletedIds.length} deleted products: $deletedIds');
     } catch (e) {
       print('❌ Error checking product existence: $e');
-    }
-  }
-
-  Future<void> _markAsRead(String notificationId) async {
-    await NotificationService.markAsRead(notificationId);
-    _loadNotifications(); // Refresh the list
-  }
-
-  Future<void> _markAllAsRead() async {
-    if (_currentUserId != null) {
-      await NotificationService.markAllAsRead(_currentUserId!);
-      _loadNotifications(); // Refresh the list
-    }
-  }
-
-  Future<void> _deleteAllNotifications() async {
-    if (_currentUserId == null) return;
-
-    // Show confirmation dialog
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Row(
-          children: [
-            Icon(Icons.warning, color: Colors.red),
-            SizedBox(width: 8),
-            Text('Delete All Notifications'),
-          ],
-        ),
-        content: Text(
-          'Are you sure you want to delete all notifications? This action cannot be undone.',
-          style: TextStyle(fontSize: 16),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text('Cancel', style: TextStyle(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text('Delete All', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      try {
-        // Show loading indicator
-        showDialog(
-          context: context,
-          barrierDismissible: false,
-          builder: (context) => const Center(
-            child: CircularProgressIndicator(color: Colors.red),
-          ),
-        );
-
-        // Delete all notifications
-        
-        // Check current count before deletion
-        final countBefore = await NotificationService.getCurrentNotificationCount(_currentUserId!);
-        print('📊 Notifications before deletion: $countBefore');
-        
-        // Disable notification creation temporarily
-        await NotificationService.disableNotificationCreation(_currentUserId!);
-        
-        // Delete all notifications
-        await NotificationService.deleteAllNotifications(_currentUserId!);
-        
-        // Check count after deletion
-        final countAfter = await NotificationService.getCurrentNotificationCount(_currentUserId!);
-        print('📊 Notifications after deletion: $countAfter');
-        
-        // Clear local state immediately
-        setState(() {
-          _notifications.clear();
-          // Deletion complete
-        });
-        
-        // Notify badge service to update count
-        BadgeUpdateService.notifyBadgeUpdate();
-        
-        // Re-enable notification creation after a delay
-        Future.delayed(const Duration(seconds: 5), () async {
-          await NotificationService.enableNotificationCreation(_currentUserId!);
-        });
-        
-        // Close loading dialog
-        if (mounted) Navigator.of(context).pop();
-        
-        // Show success message
-        _showSnackBar('All notifications deleted successfully');
-      } catch (e) {
-        // Close loading dialog
-        if (mounted) Navigator.of(context).pop();
-        
-        // Error handling complete
-        
-        // Show error message
-        _showSnackBar('Error deleting notifications: $e');
-      }
-    }
-  }
-
-  Color _getStatusColor(String status) {
-    switch (status) {
-      case 'pending':
-        return Colors.orange;
-      case 'approved':
-        return Colors.green;
-      case 'rejected':
-        return Colors.red;
-      default:
-        return Colors.grey;
-    }
-  }
-
-  IconData _getStatusIcon(String status) {
-    switch (status) {
-      case 'pending':
-        return Icons.schedule;
-      case 'approved':
-        return Icons.check_circle;
-      case 'rejected':
-        return Icons.cancel;
-      default:
-        return Icons.info;
-    }
-  }
-
-  String _formatDate(dynamic timestamp) {
-    try {
-      if (timestamp is Timestamp) {
-        final date = timestamp.toDate();
-        final now = DateTime.now();
-        final difference = now.difference(date);
-        
-        if (difference.inDays > 0) {
-          return '${difference.inDays} day${difference.inDays == 1 ? '' : 's'} ago';
-        } else if (difference.inHours > 0) {
-          return '${difference.inHours} hour${difference.inHours == 1 ? '' : 's'} ago';
-        } else if (difference.inMinutes > 0) {
-          return '${difference.inMinutes} minute${difference.inMinutes == 1 ? '' : 's'} ago';
-        } else {
-          return 'Just now';
-        }
-      }
-      return 'Unknown time';
-    } catch (e) {
-      return 'Unknown time';
     }
   }
 
@@ -711,17 +765,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  void _showSnackBar(String message) {
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
-        ),
-      );
-    }
-  }
-
   void _showProductNotFoundDialog(Map<String, dynamic> notification) {
     final productTitle = notification['productTitle'] ?? 'Unknown Product';
     final status = notification['status'] ?? 'unknown';
@@ -827,9 +870,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
           _notifications.removeWhere((n) => n['id'] == notificationId);
           // Deletion complete
         });
-        
-        // Notify badge service to update count
-        BadgeUpdateService.notifyBadgeUpdate();
         
         _showSnackBar('Notification deleted');
         print('✅ Notification deleted successfully');
@@ -1067,7 +1107,6 @@ class _ProductPreviewDialog extends StatelessWidget {
         return Icons.info;
     }
   }
-
   String _getStatusText(String status) {
     switch (status) {
       case 'pending':

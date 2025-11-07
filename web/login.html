@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MarketSafe Admin Login</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-red: #dc3545;
+            --dark-red: #b02a37;
+            --pure-white: #ffffff;
+            --pure-black: #000000;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, var(--primary-red) 0%, var(--pure-black) 50%, var(--dark-red) 100%);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .login-container {
+            background-color: var(--pure-white);
+            border-radius: 15px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 450px;
+            width: 100%;
+        }
+
+        .logo-container {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .logo-container img {
+            height: 60px;
+            width: auto;
+            margin-bottom: 15px;
+        }
+
+        .logo-container h1 {
+            color: var(--pure-black);
+            font-size: 2rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            margin: 0;
+        }
+
+        .login-title {
+            text-align: center;
+            color: var(--pure-black);
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 30px;
+        }
+
+        .form-label {
+            color: var(--pure-black);
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .form-control {
+            padding: 12px;
+            border: 2px solid #ccc;
+            border-radius: 8px;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .form-control:focus {
+            border-color: var(--primary-red);
+            box-shadow: 0 0 0 0.2rem rgba(220, 53, 69, 0.25);
+            outline: none;
+        }
+
+        .btn-login {
+            width: 100%;
+            padding: 12px;
+            background-color: var(--primary-red);
+            border: none;
+            border-radius: 8px;
+            color: var(--pure-white);
+            font-weight: 600;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            margin-top: 10px;
+        }
+
+        .btn-login:hover {
+            background-color: var(--dark-red);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(220, 53, 69, 0.4);
+        }
+
+        .btn-login:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .alert {
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 20px;
+        }
+
+        .alert-danger {
+            background-color: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .input-group {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .input-icon {
+            position: absolute;
+            left: 15px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #6c757d;
+            z-index: 10;
+        }
+
+        .form-control.with-icon {
+            padding-left: 45px;
+        }
+
+        .loading-spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-radius: 50%;
+            border-top-color: var(--pure-white);
+            animation: spin 0.8s linear infinite;
+            margin-right: 8px;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="logo-container">
+            <img src="logo.png" alt="MarketSafe Logo" onerror="this.style.display='none'">
+            <h1>MARKETSAFE</h1>
+        </div>
+        
+        <h2 class="login-title">
+            <i class="fas fa-lock me-2"></i>Admin Login
+        </h2>
+
+        <div id="loginError" class="alert alert-danger" style="display: none;"></div>
+
+        <form id="loginForm">
+            <div class="input-group">
+                <i class="fas fa-envelope input-icon"></i>
+                <input 
+                    type="email" 
+                    class="form-control with-icon" 
+                    id="loginEmail" 
+                    placeholder="Email address"
+                    required
+                    autocomplete="email"
+                >
+            </div>
+
+            <div class="input-group">
+                <i class="fas fa-lock input-icon"></i>
+                <input 
+                    type="password" 
+                    class="form-control with-icon" 
+                    id="loginPassword" 
+                    placeholder="Password"
+                    required
+                    autocomplete="current-password"
+                >
+            </div>
+
+            <button type="submit" class="btn-login" id="loginButton">
+                <i class="fas fa-sign-in-alt me-2"></i>Login
+            </button>
+        </form>
+    </div>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+        import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js';
+        import { getAuth, signInWithEmailAndPassword, onAuthStateChanged } from 'https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js';
+        
+        const firebaseConfig = {
+            apiKey: 'AIzaSyAa-268Fx-XfJTsJLGznwcztd82r2vdf3Q',
+            authDomain: 'marketsafe-e57cf.firebaseapp.com',
+            projectId: 'marketsafe-e57cf'
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+        
+        window.firebaseAuth = auth;
+        window.signInWithEmailAndPassword = signInWithEmailAndPassword;
+        window.onAuthStateChanged = onAuthStateChanged;
+        
+        // Signal that Firebase Auth is ready
+        window.firebaseAuthReady = true;
+        window.dispatchEvent(new Event('firebaseAuthReady'));
+    </script>
+
+    <script>
+        const FIREBASE_CONFIG = {
+            projectId: 'marketsafe-e57cf',
+            databaseId: 'marketsafe',
+            apiKey: 'AIzaSyAa-268Fx-XfJTsJLGznwcztd82r2vdf3Q'
+        };
+
+        const FIREBASE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents`;
+
+        // Wait for Firebase Auth to be ready
+        function waitForFirebaseAuth() {
+            return new Promise((resolve) => {
+                if (window.firebaseAuth && window.firebaseAuthReady) {
+                    resolve();
+                } else {
+                    window.addEventListener('firebaseAuthReady', () => {
+                        resolve();
+                    }, { once: true });
+                    
+                    // Fallback: check periodically
+                    const checkInterval = setInterval(() => {
+                        if (window.firebaseAuth && window.firebaseAuthReady) {
+                            clearInterval(checkInterval);
+                            resolve();
+                        }
+                    }, 100);
+                    
+                    // Timeout after 5 seconds
+                    setTimeout(() => {
+                        clearInterval(checkInterval);
+                        resolve(); // Resolve anyway to prevent infinite wait
+                    }, 5000);
+                }
+            });
+        }
+
+        // Check if already logged in (after Firebase Auth is ready)
+        waitForFirebaseAuth().then(() => {
+            if (window.firebaseAuth && window.onAuthStateChanged) {
+                window.onAuthStateChanged(window.firebaseAuth, async (user) => {
+                    if (user) {
+                        // Check if user is admin/manager
+                        const isAdmin = await checkAdminRole(user.uid);
+                        if (isAdmin) {
+                            // Redirect to admin panel
+                            window.location.replace('admin.html');
+                        }
+                    }
+                });
+            }
+        });
+
+        async function checkAdminRole(userId) {
+            try {
+                const response = await fetch(`${FIREBASE_REST_BASE}/adminUsers/${userId}?key=${FIREBASE_CONFIG.apiKey}`);
+                return response.ok;
+            } catch (error) {
+                console.error('Error checking admin role:', error);
+                return false;
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('loginError');
+            if (errorDiv) {
+                errorDiv.textContent = message;
+                errorDiv.style.display = 'block';
+            }
+        }
+
+        function hideError() {
+            const errorDiv = document.getElementById('loginError');
+            if (errorDiv) {
+                errorDiv.style.display = 'none';
+            }
+        }
+
+        // Login form handler
+        document.getElementById('loginForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            hideError();
+
+            const email = document.getElementById('loginEmail').value.trim();
+            const password = document.getElementById('loginPassword').value;
+            const loginButton = document.getElementById('loginButton');
+
+            if (!email || !password) {
+                showError('Please enter both email and password');
+                return;
+            }
+
+            // Disable button and show loading
+            loginButton.disabled = true;
+            loginButton.innerHTML = '<span class="loading-spinner"></span>Logging in...';
+
+            try {
+                console.log('🔐 Attempting to sign in...');
+                // Sign in with Firebase Auth
+                const userCredential = await window.signInWithEmailAndPassword(window.firebaseAuth, email, password);
+                console.log('✅ Sign in successful, user ID:', userCredential.user.uid);
+                
+                // Wait for auth state to be fully updated
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+                // Check admin role
+                const user = window.firebaseAuth.currentUser;
+                console.log('👤 Current user:', user ? user.uid : 'none');
+                
+                if (user) {
+                    console.log('🔍 Checking admin role for user:', user.uid);
+                    const response = await fetch(`${FIREBASE_REST_BASE}/adminUsers/${user.uid}?key=${FIREBASE_CONFIG.apiKey}`);
+                    console.log('📊 Admin check response status:', response.status);
+                    
+                    if (response.ok) {
+                        console.log('✅ User is admin/manager, redirecting to admin panel...');
+                        // User is admin/manager, redirect to admin panel
+                        window.location.replace('admin.html');
+                    } else {
+                        // User is not an admin
+                        console.log('❌ User is not an admin');
+                        await window.firebaseAuth.signOut();
+                        showError('Access Denied: You are not authorized to access this panel.');
+                        loginButton.disabled = false;
+                        loginButton.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Login';
+                    }
+                } else {
+                    console.error('❌ No user found after sign in');
+                    showError('Login failed. Please try again.');
+                    loginButton.disabled = false;
+                    loginButton.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Login';
+                }
+            } catch (error) {
+                console.error('❌ Login error:', error);
+                let errorMessage = 'Login failed. Please check your credentials.';
+                
+                if (error.code === 'auth/user-not-found') {
+                    errorMessage = 'No account found with this email.';
+                } else if (error.code === 'auth/wrong-password') {
+                    errorMessage = 'Incorrect password.';
+                } else if (error.code === 'auth/invalid-email') {
+                    errorMessage = 'Invalid email address.';
+                } else if (error.message) {
+                    errorMessage = error.message;
+                }
+                
+                showError(errorMessage);
+                loginButton.disabled = false;
+                loginButton.innerHTML = '<i class="fas fa-sign-in-alt me-2"></i>Login';
+            }
+        });
+    </script>
+</body>
+</html>
+

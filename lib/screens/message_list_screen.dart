@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'conversation_screen.dart';
@@ -222,9 +223,26 @@ class _MessageListScreenState extends State<MessageListScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF2C0000),
-      body: SafeArea(
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
+      ),
+      child: Scaffold(
+        body: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              Color(0xFF0A0A0A),
+              Color(0xFF1A0000),
+              Color(0xFF2B0000),
+            ],
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            stops: [0.0, 0.5, 1.0],
+          ),
+        ),
+        child: SafeArea(
         child: Column(
           children: [
             // Top bar
@@ -233,24 +251,15 @@ class _MessageListScreenState extends State<MessageListScreen> {
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const Icon(Icons.menu, color: Colors.white),
+                  const SizedBox(width: 24), // Spacer to balance the layout
                   const Text(
                     "Messages",
                     style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
-                  Row(
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.person_add, color: Colors.white),
-                        onPressed: _showStartConversationDialog,
-                        tooltip: 'Start Conversation',
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.refresh, color: Colors.white),
-                        onPressed: _loadConversations,
-                        tooltip: 'Refresh',
-                      ),
-                    ],
+                  IconButton(
+                    icon: const Icon(Icons.person_add, color: Colors.white),
+                    onPressed: _showStartConversationDialog,
+                    tooltip: 'Start Conversation',
                   ),
                 ],
               ),
@@ -258,42 +267,57 @@ class _MessageListScreenState extends State<MessageListScreen> {
 
             // Conversations list
             Expanded(
-              child: _isLoading
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                        color: Colors.red,
-                      ),
-                    )
-                  : _conversations.isEmpty
-                      ? Center(
-                          child: Column(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              Icon(
-                                Icons.chat_bubble_outline,
-                                size: 64,
-                                color: Colors.white.withOpacity(0.5),
-                              ),
-                              const SizedBox(height: 16),
-                              Text(
-                                'No conversations yet',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.7),
-                                  fontSize: 18,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                'Start a conversation with other users',
-                                style: TextStyle(
-                                  color: Colors.white.withOpacity(0.5),
-                                  fontSize: 14,
-                                ),
-                              ),
-                            ],
+              child: RefreshIndicator(
+                onRefresh: _loadConversations,
+                color: Colors.red,
+                child: _isLoading
+                    ? const SingleChildScrollView(
+                        physics: AlwaysScrollableScrollPhysics(),
+                        child: SizedBox(
+                          height: 600,
+                          child: Center(
+                            child: CircularProgressIndicator(
+                              color: Colors.red,
+                            ),
                           ),
-                        )
-                      : ListView.builder(
+                        ),
+                      )
+                    : _conversations.isEmpty
+                        ? SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: SizedBox(
+                              height: MediaQuery.of(context).size.height - 200,
+                              child: Center(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      Icons.chat_bubble_outline,
+                                      size: 64,
+                                      color: Colors.white.withOpacity(0.5),
+                                    ),
+                                    const SizedBox(height: 16),
+                                    Text(
+                                      'No conversations yet',
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.7),
+                                        fontSize: 18,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      'Start a conversation with other users',
+                                      style: TextStyle(
+                                        color: Colors.white.withOpacity(0.5),
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          )
+                        : ListView.builder(
                           itemCount: _conversations.length,
                           itemBuilder: (context, index) {
                             final conversation = _conversations[index];
@@ -389,9 +413,12 @@ class _MessageListScreenState extends State<MessageListScreen> {
                             );
                           },
                         ),
+              ),
             ),
           ],
         ),
+        ),
+      ),
       ),
     );
   }

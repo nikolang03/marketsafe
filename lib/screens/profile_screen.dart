@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'dart:ui';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -487,43 +489,72 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF5C0000), // Maroon color
-        elevation: 0,
-        leading: Container(
-          margin: const EdgeInsets.all(8),
-          child: Image.asset(
-            'assets/logo.png',
-            width: 24,
-            height: 24,
-            color: Colors.white,
-          ),
-        ),
-        actions: [],
+    return AnnotatedRegion<SystemUiOverlayStyle>(
+      value: SystemUiOverlayStyle.light.copyWith(
+        statusBarColor: Colors.transparent,
+        statusBarIconBrightness: Brightness.light,
       ),
-      body: isLoading
-          ? const Center(
-              child: CircularProgressIndicator(color: Colors.white),
-            )
-          : error != null
-              ? Center(
-                  child: Text(
-                    error!,
-                    style: const TextStyle(color: Colors.white),
+      child: Scaffold(
+        body: Container(
+          decoration: const BoxDecoration(
+            gradient: LinearGradient(
+              colors: [
+                Color(0xFF0A0A0A),
+                Color(0xFF1A0000),
+                Color(0xFF2B0000),
+              ],
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              stops: [0.0, 0.5, 1.0],
+            ),
+          ),
+          child: SafeArea(
+            child: Column(
+              children: [
+                // Top bar (transparent like message screen)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const SizedBox(), // Spacer for centering
+                      const SizedBox(), // Spacer for balance
+                    ],
                   ),
-                )
-              : RefreshIndicator(
-                  onRefresh: _refreshUserData,
-                  color: Colors.white,
-                  backgroundColor: const Color(0xFF5C0000),
-                  child: SingleChildScrollView(
+                ),
+                // Profile content
+                Expanded(
+                  child: RefreshIndicator(
+                    onRefresh: _refreshUserData,
+                    color: Colors.red,
+                    child: isLoading
+                        ? const SingleChildScrollView(
+                            physics: AlwaysScrollableScrollPhysics(),
+                            child: SizedBox(
+                              height: 600,
+                              child: Center(
+                                child: CircularProgressIndicator(color: Colors.white),
+                              ),
+                            ),
+                          )
+                        : error != null
+                            ? SingleChildScrollView(
+                                physics: const AlwaysScrollableScrollPhysics(),
+                                child: SizedBox(
+                                  height: MediaQuery.of(context).size.height - 200,
+                                  child: Center(
+                                    child: Text(
+                                      error!,
+                                      style: const TextStyle(color: Colors.white),
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : SingleChildScrollView(
                     child: Column(
                       children: [
                         // Profile Information Section
                         Container(
-                        color: Colors.black,
                         padding: const EdgeInsets.all(20),
                         child: Column(
                           children: [
@@ -575,10 +606,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   child: _buildActionButton("Edit profile"),
                                 ),
                                 const SizedBox(width: 10),
-                                Expanded(
-                                  child: _buildActionButton("Share profile"),
-                                ),
-                                const SizedBox(width: 10),
                                 // Logout Button
                                 GestureDetector(
                                   onTap: _logout,
@@ -603,7 +630,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
                       ),
                       // Content Display Area
                       Container(
-                        color: Colors.black,
                         child: Column(
                           children: [
                             // Content Type Selector
@@ -691,7 +717,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     ],
                   ),
                 ),
-              ),
+                            ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -746,23 +778,283 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Widget _buildActionButton(String text) {
-    return Container(
-      height: 40,
-      decoration: BoxDecoration(
-        border: Border.all(color: Colors.white, width: 1),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Center(
-        child: Text(
-          text,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 14,
-            fontWeight: FontWeight.w500,
+    return GestureDetector(
+      onTap: text == "Edit profile" ? _showEditProfileDialog : null,
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          border: Border.all(color: Colors.white, width: 1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Center(
+          child: Text(
+            text,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _showEditProfileDialog() async {
+    final prefs = await SharedPreferences.getInstance();
+    final userId = prefs.getString('current_user_id') ?? prefs.getString('signup_user_id');
+    
+    if (userId == null) {
+      _showErrorDialog('Error', 'No user logged in');
+      return;
+    }
+
+    // Get current user data
+    final firestore = FirebaseFirestore.instanceFor(
+      app: Firebase.app(),
+      databaseId: 'marketsafe',
+    );
+    
+    final userDoc = await firestore.collection('users').doc(userId).get();
+    if (!userDoc.exists) {
+      _showErrorDialog('Error', 'User data not found');
+      return;
+    }
+
+    final currentData = userDoc.data()!;
+    
+    // Initialize controllers with current values
+    final firstNameController = TextEditingController(
+      text: currentData['firstName'] ?? '',
+    );
+    final lastNameController = TextEditingController(
+      text: currentData['lastName'] ?? '',
+    );
+    final usernameController = TextEditingController(
+      text: currentData['username'] ?? '',
+    );
+    String? selectedGender = currentData['gender']?.toString();
+
+    await showDialog(
+      context: context,
+      barrierColor: Colors.black.withOpacity(0.5),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
+          child: Dialog(
+            backgroundColor: Colors.transparent,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            child: Container(
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                colors: [
+                  Color(0xFF0A0A0A),
+                  Color(0xFF1A0000),
+                  Color(0xFF2B0000),
+                ],
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                stops: [0.0, 0.5, 1.0],
+              ),
+              borderRadius: BorderRadius.all(Radius.circular(16)),
+            ),
+            padding: const EdgeInsets.all(24),
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  const Text(
+                    'Edit Profile',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 24,
+                      fontWeight: FontWeight.bold,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // First Name field
+                  _buildEditField(
+                    label: 'First Name',
+                    controller: firstNameController,
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Last Name field
+                  _buildEditField(
+                    label: 'Last Name',
+                    controller: lastNameController,
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Username field
+                  _buildEditField(
+                    label: 'Username',
+                    controller: usernameController,
+                  ),
+                  const SizedBox(height: 16),
+                  
+                  // Gender field
+                  Container(
+                    decoration: BoxDecoration(
+                      color: Colors.grey[900],
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.grey[800]!),
+                    ),
+                    child: DropdownButtonFormField<String>(
+                      value: selectedGender,
+                      decoration: InputDecoration(
+                        labelText: 'Gender',
+                        labelStyle: const TextStyle(color: Colors.grey),
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                        border: InputBorder.none,
+                      ),
+                      dropdownColor: Colors.grey[900],
+                      style: const TextStyle(color: Colors.white),
+                      items: ['Male', 'Female', 'Other']
+                          .map((gender) => DropdownMenuItem(
+                                value: gender,
+                                child: Text(gender, style: const TextStyle(color: Colors.white)),
+                              ))
+                          .toList(),
+                      onChanged: (value) {
+                        setDialogState(() {
+                          selectedGender = value;
+                        });
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  
+                  // Save button
+                  ElevatedButton(
+                    onPressed: () async {
+                      await _saveProfileChanges(
+                        userId: userId,
+                        firstName: firstNameController.text.trim(),
+                        lastName: lastNameController.text.trim(),
+                        username: usernameController.text.trim(),
+                        gender: selectedGender,
+                      );
+                      if (context.mounted) {
+                        Navigator.pop(context);
+                        _refreshUserData();
+                      }
+                    },
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.red,
+                      padding: const EdgeInsets.symmetric(vertical: 16),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                    ),
+                    child: const Text(
+                      'Save',
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  
+                  // Cancel button
+                  TextButton(
+                    onPressed: () => Navigator.pop(context),
+                    child: const Text(
+                      'Cancel',
+                      style: TextStyle(color: Colors.grey),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildEditField({
+    required String label,
+    required TextEditingController controller,
+    int maxLines = 1,
+  }) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.grey[900],
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey[800]!),
+      ),
+      child: TextField(
+        controller: controller,
+        style: const TextStyle(color: Colors.white),
+        maxLines: maxLines,
+        decoration: InputDecoration(
+          labelText: label,
+          labelStyle: const TextStyle(color: Colors.grey),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+          border: InputBorder.none,
+          enabledBorder: InputBorder.none,
+          focusedBorder: InputBorder.none,
+        ),
+      ),
+    );
+  }
+
+  Future<void> _saveProfileChanges({
+    required String userId,
+    required String firstName,
+    required String lastName,
+    required String username,
+    String? gender,
+  }) async {
+    try {
+      setState(() {
+        isLoading = true;
+      });
+
+      final firestore = FirebaseFirestore.instanceFor(
+        app: Firebase.app(),
+        databaseId: 'marketsafe',
+      );
+
+      // Update user data
+      await firestore.collection('users').doc(userId).update({
+        'firstName': firstName,
+        'lastName': lastName,
+        'fullName': '$firstName $lastName'.trim(),
+        'username': username.trim(),
+        if (gender != null) 'gender': gender,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Profile updated successfully'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      print('❌ Error updating profile: $e');
+      if (mounted) {
+        _showErrorDialog('Error', 'Failed to update profile: $e');
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          isLoading = false;
+        });
+      }
+    }
   }
 
   Widget _buildProfileImage() {

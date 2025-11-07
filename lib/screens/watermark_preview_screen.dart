@@ -81,16 +81,9 @@ class _WatermarkPreviewScreenState extends State<WatermarkPreviewScreen> {
       print('📏 Original image size: ${_originalImageBytes!.length} bytes');
       print('🔍 This should work for both camera and gallery photos');
       
-      _previewImageBytes = await WatermarkingService.addWatermarkToImage(
+      _previewImageBytes = await WatermarkingService.applyUsernameWatermark(
         imageBytes: _originalImageBytes!,
         username: widget.username,
-        userId: widget.userId,
-        customText: '@${widget.username}',
-        customPositionX: _positionX,
-        customPositionY: _positionY,
-        customSize: _size, // Custom size
-        customOpacity: _opacity, // Custom opacity
-        customColor: WatermarkColor.yellow, // Fixed color - yellow
       );
       
       print('✅ Preview generated successfully: ${_previewImageBytes!.length} bytes');
@@ -127,16 +120,9 @@ class _WatermarkPreviewScreenState extends State<WatermarkPreviewScreen> {
       print('  - Size: ${(_size * 100).round()}%');
       print('  - Opacity: ${(_opacity * 100).round()}%');
       
-      final watermarkedBytes = await WatermarkingService.addWatermarkToImage(
+      final watermarkedBytes = await WatermarkingService.applyUsernameWatermark(
         imageBytes: _originalImageBytes!,
         username: widget.username,
-        userId: widget.userId,
-        customText: '@${widget.username}',
-        customPositionX: _positionX,
-        customPositionY: _positionY,
-        customSize: _size, // Use custom size
-        customOpacity: _opacity, // Use custom opacity
-        customColor: WatermarkColor.yellow,
       );
 
       final tempFile = File('${widget.imagePath}_watermarked.jpg');

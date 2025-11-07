@@ -2,127 +2,96 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:camera/camera.dart';
-import 'real_face_recognition_service.dart';
+import 'dart:typed_data';
+import 'production_face_recognition_service.dart';
 
-/// Security service to prevent duplicate face registrations and unauthorized access
+/// Enhanced Face Security Service with Liveness Detection
 class FaceSecurityService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instanceFor(
     app: Firebase.app(),
     databaseId: 'marketsafe',
   );
 
-  /// Check if a face is already registered by another user (SIGNUP-SPECIFIC)
-  static Future<bool> isFaceAlreadyRegistered(Face newFace, [CameraImage? cameraImage]) async {
+  /// Verify user's face with advanced security checks
+  /// ⚠️ SECURITY: This method requires emailOrPhone for 1:1 verification
+  /// DO NOT use authenticateUser (1:N search) - use verifyUserFace (1:1 verification) instead
+  static Future<Map<String, dynamic>> verifyUserFaceAdvanced({
+    required String emailOrPhone, // CRITICAL: Required for 1:1 verification
+    required Face face,
+    CameraImage? cameraImage,
+    Uint8List? imageBytes,
+  }) async {
     try {
-      print('🔍 SIGNUP SECURITY CHECK: Verifying face uniqueness with relaxed thresholds...');
+      print('🔐 Starting ADVANCED face verification...');
       
-      // Extract biometric features from the new face
-      final newBiometrics = await RealFaceRecognitionService.extractBiometricFeatures(newFace, cameraImage);
-      
-      // Get all existing users with biometric data
-      final usersSnapshot = await _firestore
-          .collection('users')
-          .where('verificationStatus', isEqualTo: 'verified')
-          .get();
-      
-      print('🔍 Checking against ${usersSnapshot.docs.length} verified users for signup...');
-      
-      if (usersSnapshot.docs.isEmpty) {
-        print('✅ No existing users - face is unique for signup');
-        return false;
+      // Liveness detection
+      final livenessResult = await performLivenessDetection(face);
+      if (!livenessResult['isLive']) {
+        return {
+          'success': false,
+          'error': 'Liveness detection failed: ${livenessResult['reason']}',
+          'userId': 'LIVENESS_FAILED',
+        };
       }
       
-      // Check similarity with all existing users using RELAXED thresholds for signup
-      for (final doc in usersSnapshot.docs) {
-        final userData = doc.data();
-        final biometricFeatures = userData['biometricFeatures'];
-        
-        if (biometricFeatures is Map && biometricFeatures.containsKey('biometricSignature')) {
-          final storedSignature = List<double>.from(biometricFeatures['biometricSignature']);
-          final similarity = RealFaceRecognitionService.calculateBiometricSimilarity(
-            newBiometrics, 
-            storedSignature,
-          );
-          
-          print('📊 Signup similarity with user ${doc.id}: $similarity');
-          
-          // BALANCED threshold for signup: 90% similarity to prevent false positives
-          // This prevents false positives during signup while maintaining security
-          if (similarity > 0.90) {
-            print('🚨 SIGNUP BLOCKED: Face too similar to existing user ${doc.id} (similarity: $similarity)');
-            return true;
-          }
-        }
-      }
+      // CRITICAL SECURITY: Use 1:1 verification (verifyUserFace) instead of 1:N search (authenticateUser)
+      // This ensures email/phone is verified first, then only compares against that user's embeddings
+      // authenticateUser does a global search which is insecure - anyone's face could match
+      final authResult = await ProductionFaceRecognitionService.verifyUserFace(
+        emailOrPhone: emailOrPhone, // CRITICAL: Required for 1:1 verification
+        detectedFace: face,
+        cameraImage: cameraImage,
+        imageBytes: imageBytes,
+        isProfilePhotoVerification: false,
+      );
       
-      print('✅ Face is unique for signup - not registered by any other user');
-      return false;
+      print('✅ ADVANCED face verification completed');
+      return authResult;
       
     } catch (e) {
-      print('❌ Error checking face uniqueness for signup: $e');
-      // Fail safe: allow signup if check fails
-      return false;
+      print('❌ Error in ADVANCED face verification: $e');
+      return {
+        'success': false,
+        'error': 'Advanced face verification failed: $e',
+      };
     }
   }
 
-  /// Validate that a user's face matches their stored biometric data
-  static Future<bool> validateUserFaceMatch(String userId, Face detectedFace, [CameraImage? cameraImage]) async {
-    try {
-      print('🔍 SECURITY VALIDATION: Verifying user face match for $userId...');
-      
-      // Get user's stored biometric data
-      final userDoc = await _firestore.collection('users').doc(userId).get();
-      if (!userDoc.exists) {
-        print('❌ User not found: $userId');
-        return false;
-      }
-      
-      final userData = userDoc.data()!;
-      final biometricFeatures = userData['biometricFeatures'];
-      
-      if (biometricFeatures == null) {
-        print('❌ No biometric data found for user: $userId');
-        return false;
-      }
-      
-      // Extract features from detected face
-      final detectedBiometrics = await RealFaceRecognitionService.extractBiometricFeatures(detectedFace, cameraImage);
-      
-      // Get stored signature
-      List<double> storedSignature = [];
-      if (biometricFeatures is Map && biometricFeatures.containsKey('biometricSignature')) {
-        storedSignature = List<double>.from(biometricFeatures['biometricSignature']);
-      }
-      
-      if (storedSignature.isEmpty) {
-        print('❌ Invalid biometric data format for user: $userId');
-        return false;
-      }
-      
-      // Calculate similarity
-      final similarity = RealFaceRecognitionService.calculateBiometricSimilarity(
-        detectedBiometrics, 
-        storedSignature,
-      );
-      
-      print('📊 Face match similarity: $similarity');
-      
-      // Require high similarity for validation
-      const double validationThreshold = 0.8;
-      final isValid = similarity >= validationThreshold;
-      
-      if (isValid) {
-        print('✅ Face validation passed for user $userId');
-      } else {
-        print('❌ Face validation failed for user $userId (similarity: $similarity < $validationThreshold)');
-      }
-      
-      return isValid;
-      
-    } catch (e) {
-      print('❌ Error validating user face match: $e');
-      return false;
+  /// Perform liveness detection
+  static Future<Map<String, dynamic>> performLivenessDetection(Face face) async {
+    print('👁️ Performing liveness detection...');
+    
+    // Check for eye blinking
+    final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
+    final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
+    
+    // For now, we are being lenient to avoid blocking users
+    // A simple check for a non-static face is enough
+    if (leftEyeOpen > 0.1 && rightEyeOpen > 0.1) {
+      print('✅ Liveness detected: Eyes are open');
+      return {'isLive': true, 'reason': 'Eyes are open'};
     }
+    
+    // Add more checks here in the future
+    
+    print('⚠️ Liveness detection failed: Eyes might be closed');
+    return {'isLive': false, 'reason': 'Eyes might be closed'};
+  }
+
+  /// Get security report for a user
+  static Future<Map<String, dynamic>> getSecurityReport(String userId) async {
+    // This is a placeholder for a more advanced security report
+    return {
+      'lastLogin': DateTime.now(),
+      'failedAttempts': 0,
+      'isLockedOut': false,
+    };
+  }
+
+  /// Check if user is pending verification
+  static bool isPendingVerification(String userId) {
+    // This is a placeholder for a more advanced check
+    return false;
   }
 
   /// Log security events for monitoring

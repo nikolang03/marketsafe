@@ -42,47 +42,88 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
       final moveCloserCompletedAt = prefs.getString('face_verification_moveCloserCompletedAt') ?? '';
       final headMovementCompletedAt = prefs.getString('face_verification_headMovementCompletedAt') ?? '';
       
-      // Get image paths
-      final blinkImagePath = prefs.getString('face_verification_blinkImagePath') ?? '';
-      final moveCloserImagePath = prefs.getString('face_verification_moveCloserImagePath') ?? '';
-      final headMovementImagePath = prefs.getString('face_verification_headMovementImagePath') ?? '';
+      // Get image paths (only if they exist and are not empty)
+      final blinkImagePath = prefs.getString('face_verification_blinkImagePath');
+      final moveCloserImagePath = prefs.getString('face_verification_moveCloserImagePath');
+      final headMovementImagePath = prefs.getString('face_verification_headMovementImagePath');
       
-      // Get metrics
-      final blinkMetrics = prefs.getString('face_verification_blinkMetrics') ?? '{}';
-      final moveCloserMetrics = prefs.getString('face_verification_moveCloserMetrics') ?? '{}';
-      final headMovementMetrics = prefs.getString('face_verification_headMovementMetrics') ?? '{}';
+      // Get metrics (only if they exist and are not empty)
+      final blinkMetrics = prefs.getString('face_verification_blinkMetrics');
+      final moveCloserMetrics = prefs.getString('face_verification_moveCloserMetrics');
+      final headMovementMetrics = prefs.getString('face_verification_headMovementMetrics');
       
-      // Get face features
-      final blinkFeatures = prefs.getString('face_verification_blinkFeatures') ?? '';
-      final moveCloserFeatures = prefs.getString('face_verification_moveCloserFeatures') ?? '';
-      final headMovementFeatures = prefs.getString('face_verification_headMovementFeatures') ?? '';
+      // Get face features (only if they exist and are not empty)
+      final blinkFeatures = prefs.getString('face_verification_blinkFeatures');
+      final moveCloserFeatures = prefs.getString('face_verification_moveCloserFeatures');
+      final headMovementFeatures = prefs.getString('face_verification_headMovementFeatures');
       
       print('📊 Retrieved face verification data:');
       print('  - Blink completed: $blinkCompleted');
       print('  - Move closer completed: $moveCloserCompleted');
       print('  - Head movement completed: $headMovementCompleted');
-      print('  - Blink image path: $blinkImagePath');
-      print('  - Move closer image path: $moveCloserImagePath');
-      print('  - Head movement image path: $headMovementImagePath');
+      if (blinkImagePath != null && blinkImagePath.isNotEmpty) {
+        print('  - Blink image path: $blinkImagePath');
+      }
+      if (moveCloserImagePath != null && moveCloserImagePath.isNotEmpty) {
+        print('  - Move closer image path: $moveCloserImagePath');
+      }
+      if (headMovementImagePath != null && headMovementImagePath.isNotEmpty) {
+        print('  - Head movement image path: $headMovementImagePath');
+      }
       
-      return {
+      // Build return map - only include fields that have actual values
+      final Map<String, dynamic> faceData = {
         'blinkCompleted': blinkCompleted,
         'moveCloserCompleted': moveCloserCompleted,
         'headMovementCompleted': headMovementCompleted,
-        'blinkCompletedAt': blinkCompletedAt,
-        'moveCloserCompletedAt': moveCloserCompletedAt,
-        'headMovementCompletedAt': headMovementCompletedAt,
-        'blinkImagePath': blinkImagePath,
-        'moveCloserImagePath': moveCloserImagePath,
-        'headMovementImagePath': headMovementImagePath,
-        'blinkMetrics': blinkMetrics,
-        'moveCloserMetrics': moveCloserMetrics,
-        'headMovementMetrics': headMovementMetrics,
-        'blinkFeatures': blinkFeatures,
-        'moveCloserFeatures': moveCloserFeatures,
-        'headMovementFeatures': headMovementFeatures,
         'verificationTimestamp': DateTime.now().toIso8601String(),
       };
+      
+      // Only add completion timestamps if they exist
+      if (blinkCompletedAt.isNotEmpty) {
+        faceData['blinkCompletedAt'] = blinkCompletedAt;
+      }
+      if (moveCloserCompletedAt.isNotEmpty) {
+        faceData['moveCloserCompletedAt'] = moveCloserCompletedAt;
+      }
+      if (headMovementCompletedAt.isNotEmpty) {
+        faceData['headMovementCompletedAt'] = headMovementCompletedAt;
+      }
+      
+      // Only add image paths if they exist and are not empty
+      if (blinkImagePath != null && blinkImagePath.isNotEmpty) {
+        faceData['blinkImagePath'] = blinkImagePath;
+      }
+      if (moveCloserImagePath != null && moveCloserImagePath.isNotEmpty) {
+        faceData['moveCloserImagePath'] = moveCloserImagePath;
+      }
+      if (headMovementImagePath != null && headMovementImagePath.isNotEmpty) {
+        faceData['headMovementImagePath'] = headMovementImagePath;
+      }
+      
+      // Only add metrics if they exist and are not empty (and not just '{}')
+      if (blinkMetrics != null && blinkMetrics.isNotEmpty && blinkMetrics != '{}') {
+        faceData['blinkMetrics'] = blinkMetrics;
+      }
+      if (moveCloserMetrics != null && moveCloserMetrics.isNotEmpty && moveCloserMetrics != '{}') {
+        faceData['moveCloserMetrics'] = moveCloserMetrics;
+      }
+      if (headMovementMetrics != null && headMovementMetrics.isNotEmpty && headMovementMetrics != '{}') {
+        faceData['headMovementMetrics'] = headMovementMetrics;
+      }
+      
+      // Only add face features if they exist and are not empty
+      if (blinkFeatures != null && blinkFeatures.isNotEmpty) {
+        faceData['blinkFeatures'] = blinkFeatures;
+      }
+      if (moveCloserFeatures != null && moveCloserFeatures.isNotEmpty) {
+        faceData['moveCloserFeatures'] = moveCloserFeatures;
+      }
+      if (headMovementFeatures != null && headMovementFeatures.isNotEmpty) {
+        faceData['headMovementFeatures'] = headMovementFeatures;
+      }
+      
+      return faceData;
     } catch (e) {
       print('❌ Error retrieving face verification data: $e');
       // Return basic completion status if data retrieval fails
@@ -159,11 +200,9 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         // Get face verification data
         final faceData = await _getFaceVerificationDataWithoutUpload();
         
-        // Store real biometric features for authentication
-        final realBiometricFeatures = await _extractRealBiometricFeatures(faceData);
-        print('🔍 Real biometric features extracted:');
-        print('  - Biometric feature count: ${realBiometricFeatures['featureCount']}');
-        print('  - Biometric type: ${realBiometricFeatures['biometricType']}');
+        // NOTE: biometricFeatures is DEPRECATED - new system uses face_embeddings collection
+        // Face embeddings are stored separately in face_embeddings/{userId} collection
+        // This is handled by ProductionFaceRecognitionService during registration
         
         // Get profile picture URL from SharedPreferences if available
         final profilePhotoUrl = prefs.getString('profile_photo_url') ?? '';
@@ -184,7 +223,9 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           'signupCompleted': true, // Mark signup as completed
           'createdAt': FieldValue.serverTimestamp(),
           'faceData': faceData,
-          'biometricFeatures': realBiometricFeatures, // For real biometric authentication
+          // REMOVED: 'biometricFeatures' - DEPRECATED (old 64D format)
+          // New system uses face_embeddings collection with 512D real embeddings
+          // Stored by ProductionFaceRecognitionService during registration
           'isSignupUser': true, // Mark as signup user (not authenticated yet)
           // Don't include isTemporaryUser field - it will be removed when we overwrite the document
         };
@@ -201,7 +242,8 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         print('  - Birthday: $_selectedDate');
         print('  - Gender: $gender');
         print('  - Face data keys: ${faceData.keys.toList()}');
-        print('  - Biometric features keys: ${realBiometricFeatures.keys.toList()}');
+        print('  - Face embeddings: Stored in face_embeddings collection (new system)');
+        print('  - NOTE: biometricFeatures removed (deprecated - old 64D format)');
         
         // Save the complete user data (this will overwrite the document and remove isTemporaryUser)
         await FirebaseFirestore.instanceFor(
@@ -213,7 +255,7 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
             .set(userData);
 
         print('✅ User data saved successfully to Firestore with signup ID: $userId');
-        
+
         // Update the temporary user ID to the final user ID for face embedding
         final tempUserId = prefs.getString('signup_user_id');
         if (tempUserId != null && tempUserId.startsWith('temp_')) {
@@ -510,6 +552,13 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
     );
   }
 
+  // REMOVED: _extractRealBiometricFeatures method
+  // This method was creating old biometricFeatures format (64D simulated)
+  // New system uses face_embeddings collection with 512D real embeddings
+  // Handled by ProductionFaceRecognitionService during registration
+  // No longer needed - embeddings are stored separately in face_embeddings/{userId}
+}
+
   /// Extract real biometric features for authentication
   Future<Map<String, dynamic>> _extractRealBiometricFeatures(Map<String, dynamic> faceData) async {
     try {
@@ -562,4 +611,4 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
       };
     }
   }
-}
+
