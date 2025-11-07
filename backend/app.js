@@ -295,17 +295,24 @@ app.post('/api/verify', async (req, res) => {
         });
       }
 
-      // SECURITY: Find candidate that matches the expected UUID
+      // SECURITY: Find candidate that matches the expected user
+      // Note: Luxand search returns 'id' (numeric) and 'name' (email), not UUID
+      // We match by email (name field) since that's what we used for enrollment
       let matchingCandidate = null;
       let bestScore = 0;
-      const expectedUuid = luxandUuid.trim();
+      const expectedEmail = email.toLowerCase().trim();
 
       console.log(`📊 Found ${candidates.length} candidate(s) in search results`);
-      console.log(`🔍 Looking for UUID match: ${expectedUuid}`);
+      console.log(`🔍 Looking for email match: ${expectedEmail}`);
+      console.log(`🔍 Stored UUID (for reference): ${luxandUuid.trim()}`);
 
       for (const candidate of candidates) {
-        // Try different UUID field names
+        // Try different name/email field names (Luxand search returns 'name' which is the email)
+        const candidateName = (candidate.name || candidate.email || candidate.subject || '').toString().toLowerCase().trim();
+        
+        // Also try UUID/ID fields for additional validation
         const candidateUuid = (candidate.uuid || candidate.id || candidate.person_uuid || candidate.personId || '').toString().trim();
+        const candidateId = candidate.id?.toString() || '';
         
         // Try different score field names
         let score = 0;
@@ -327,18 +334,21 @@ app.post('/api/verify', async (req, res) => {
           normalizedScore = score / 1000.0;
         }
         
-        console.log(`📊 Candidate UUID: ${candidateUuid}, Score: ${normalizedScore.toFixed(3)}, Matches expected: ${candidateUuid === expectedUuid}`);
+        console.log(`📊 Candidate: name="${candidateName}", id="${candidateId}", uuid="${candidateUuid}", Score: ${normalizedScore.toFixed(3)}`);
+        console.log(`📊 Email match: ${candidateName === expectedEmail ? '✅ MATCH' : '❌ NO MATCH'}`);
         
-        // CRITICAL SECURITY: Only accept if UUID matches AND score is high enough
-        if (candidateUuid === expectedUuid && normalizedScore > bestScore) {
+        // CRITICAL SECURITY: Only accept if email/name matches AND score is high enough
+        // This ensures the face belongs to the user with this email
+        if (candidateName === expectedEmail && normalizedScore > bestScore) {
           bestScore = normalizedScore;
           matchingCandidate = candidate;
+          console.log(`✅ Found matching candidate for email: ${expectedEmail}`);
         }
       }
 
-      // SECURITY: Must find a match with the expected UUID
+      // SECURITY: Must find a match with the expected email
       if (!matchingCandidate) {
-        console.error(`🚨 SECURITY: No candidate found matching expected UUID: ${expectedUuid}`);
+        console.error(`🚨 SECURITY: No candidate found matching expected email: ${expectedEmail}`);
         console.error(`🚨 SECURITY: This face does not belong to this user - REJECTING`);
         return res.json({
           ok: false,
@@ -346,12 +356,12 @@ app.post('/api/verify', async (req, res) => {
           threshold: SIMILARITY_THRESHOLD,
           message: 'not_verified',
           error: 'Face does not match this account. Please use the face registered with this email.',
-          security: 'UUID mismatch - face belongs to different user'
+          security: 'Email mismatch - face belongs to different user'
         });
       }
 
       console.log(`📊 Secure verification similarity: ${bestScore.toFixed(3)} (threshold: ${SIMILARITY_THRESHOLD})`);
-      console.log(`✅ UUID match confirmed: ${expectedUuid}`);
+      console.log(`✅ Email match confirmed: ${expectedEmail}`);
       
       if (bestScore >= SIMILARITY_THRESHOLD) {
         console.log(`✅ Verification PASSED for: ${email}`);
