@@ -268,23 +268,96 @@ app.post('/api/verify', async (req, res) => {
       });
     }
     
-    // Use 1:1 verification with person UUID (SECURE - only compares to specific user's face)
-    console.log('🔍 Using 1:1 verification with person UUID (SECURE MODE)...');
+    // Use secure search with UUID validation (SECURE - only accepts if result matches expected UUID)
+    // Note: Luxand verify endpoint may not be available in all plans, so we use search + UUID validation
+    console.log('🔍 Using secure search with UUID validation (SECURE MODE)...');
     console.log(`🔍 Verifying face against UUID: ${luxandUuid.trim()}`);
+    console.log(`🔍 Security: Will only accept if search result matches this specific UUID`);
     
     try {
-      const searchRes = await verifyPersonPhoto(luxandUuid.trim(), photoBase64);
-      // 1:1 verification returns direct similarity score
-      const similarity = parseFloat(searchRes.similarity || searchRes.score || searchRes.confidence || 0);
-      const normalizedSimilarity = similarity > 1.0 ? (similarity / 100.0) : similarity;
+      // Use search endpoint (available in all plans)
+      const searchRes = await searchPhoto(photoBase64);
       
-      console.log(`📊 1:1 Verification similarity: ${normalizedSimilarity.toFixed(3)} (threshold: ${SIMILARITY_THRESHOLD})`);
+      // Check response structure
+      const candidates = searchRes.candidates 
+                    || searchRes.matches 
+                    || searchRes.results
+                    || (Array.isArray(searchRes) ? searchRes : []);
+
+      if (candidates.length === 0) {
+        console.log(`❌ No faces found in search results`);
+        return res.json({
+          ok: false,
+          similarity: 0,
+          threshold: SIMILARITY_THRESHOLD,
+          message: 'not_verified',
+          error: 'Face not recognized'
+        });
+      }
+
+      // SECURITY: Find candidate that matches the expected UUID
+      let matchingCandidate = null;
+      let bestScore = 0;
+      const expectedUuid = luxandUuid.trim();
+
+      console.log(`📊 Found ${candidates.length} candidate(s) in search results`);
+      console.log(`🔍 Looking for UUID match: ${expectedUuid}`);
+
+      for (const candidate of candidates) {
+        // Try different UUID field names
+        const candidateUuid = (candidate.uuid || candidate.id || candidate.person_uuid || candidate.personId || '').toString().trim();
+        
+        // Try different score field names
+        let score = 0;
+        if (candidate.probability !== undefined) {
+          score = parseFloat(candidate.probability);
+        } else if (candidate.similarity !== undefined) {
+          score = parseFloat(candidate.similarity);
+        } else if (candidate.confidence !== undefined) {
+          score = parseFloat(candidate.confidence);
+        } else if (candidate.score !== undefined) {
+          score = parseFloat(candidate.score);
+        }
+        
+        // Normalize score
+        let normalizedScore = score;
+        if (score > 1.0 && score <= 100) {
+          normalizedScore = score / 100.0;
+        } else if (score > 100) {
+          normalizedScore = score / 1000.0;
+        }
+        
+        console.log(`📊 Candidate UUID: ${candidateUuid}, Score: ${normalizedScore.toFixed(3)}, Matches expected: ${candidateUuid === expectedUuid}`);
+        
+        // CRITICAL SECURITY: Only accept if UUID matches AND score is high enough
+        if (candidateUuid === expectedUuid && normalizedScore > bestScore) {
+          bestScore = normalizedScore;
+          matchingCandidate = candidate;
+        }
+      }
+
+      // SECURITY: Must find a match with the expected UUID
+      if (!matchingCandidate) {
+        console.error(`🚨 SECURITY: No candidate found matching expected UUID: ${expectedUuid}`);
+        console.error(`🚨 SECURITY: This face does not belong to this user - REJECTING`);
+        return res.json({
+          ok: false,
+          similarity: 0,
+          threshold: SIMILARITY_THRESHOLD,
+          message: 'not_verified',
+          error: 'Face does not match this account. Please use the face registered with this email.',
+          security: 'UUID mismatch - face belongs to different user'
+        });
+      }
+
+      console.log(`📊 Secure verification similarity: ${bestScore.toFixed(3)} (threshold: ${SIMILARITY_THRESHOLD})`);
+      console.log(`✅ UUID match confirmed: ${expectedUuid}`);
       
-      if (normalizedSimilarity >= SIMILARITY_THRESHOLD) {
+      if (bestScore >= SIMILARITY_THRESHOLD) {
         console.log(`✅ Verification PASSED for: ${email}`);
         return res.json({
           ok: true,
-          similarity: normalizedSimilarity,
+          similarity: bestScore,
           threshold: SIMILARITY_THRESHOLD,
           message: 'verified'
         });
@@ -292,18 +365,18 @@ app.post('/api/verify', async (req, res) => {
         console.log(`❌ Verification FAILED for: ${email} (score too low)`);
         return res.json({
           ok: false,
-          similarity: normalizedSimilarity,
+          similarity: bestScore,
           threshold: SIMILARITY_THRESHOLD,
           message: 'not_verified',
           error: 'Face similarity below threshold'
         });
       }
     } catch (verifyError) {
-      console.error(`❌ 1:1 verification failed: ${verifyError.message}`);
+      console.error(`❌ Secure verification failed: ${verifyError.message}`);
       return res.status(500).json({
         ok: false,
         error: `Verification failed: ${verifyError.message}`,
-        security: '1:1 verification required - global search disabled for security'
+        security: '1:1 verification required - UUID validation enforced'
       });
     }
     
