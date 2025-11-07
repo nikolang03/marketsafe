@@ -18,6 +18,21 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' })); // Allow large image payloads
 
+// Log all requests (especially health checks)
+app.use((req, res, next) => {
+  const start = Date.now();
+  if (req.path === '/' || req.path === '/api/health') {
+    console.log(`[${new Date().toISOString()}] 🏥 Health check: ${req.method} ${req.path}`);
+  }
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    if (req.path === '/' || req.path === '/api/health') {
+      console.log(`[${new Date().toISOString()}] ✅ Health check responded: ${res.statusCode} (${duration}ms)`);
+    }
+  });
+  next();
+});
+
 // Request logging
 app.use((req, res, next) => {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
