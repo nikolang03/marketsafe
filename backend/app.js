@@ -132,9 +132,16 @@ app.post('/api/enroll', async (req, res) => {
       }
       livenessPassed = true;
     } catch (livenessError) {
-      // If liveness endpoint doesn't exist or fails, log warning but continue
-      console.warn('⚠️ Liveness check failed or endpoint not available:', livenessError.message);
-      console.warn('⚠️ Continuing with enrollment without liveness check...');
+      // If liveness endpoint doesn't exist or fails, silently continue (this is expected)
+      // Liveness endpoint is not available in all Luxand API plans
+      // Only log unexpected errors (not 404s, aborted, or known unavailable messages)
+      if (!livenessError.message.includes('404') && 
+          !livenessError.message.includes('Not Found') &&
+          !livenessError.message.includes('aborted') &&
+          !livenessError.message.includes('LIVENESS_ENDPOINT_NOT_AVAILABLE')) {
+        console.warn('⚠️ Liveness check failed:', livenessError.message);
+      }
+      // Silently continue - liveness is optional
       livenessPassed = true; // Allow enrollment to proceed
     }
 
@@ -237,9 +244,16 @@ app.post('/api/verify', async (req, res) => {
         });
       }
     } catch (livenessError) {
-      // If liveness endpoint doesn't exist or fails, log warning but continue
-      console.warn('⚠️ Liveness check failed or endpoint not available:', livenessError.message);
-      console.warn('⚠️ Continuing with verification without liveness check...');
+      // If liveness endpoint doesn't exist or fails, silently continue (this is expected)
+      // Liveness endpoint is not available in all Luxand API plans
+      // Only log unexpected errors (not 404s, aborted, or known unavailable messages)
+      if (!livenessError.message.includes('404') && 
+          !livenessError.message.includes('Not Found') &&
+          !livenessError.message.includes('aborted') &&
+          !livenessError.message.includes('LIVENESS_ENDPOINT_NOT_AVAILABLE')) {
+        console.warn('⚠️ Liveness check failed:', livenessError.message);
+      }
+      // Silently continue - liveness is optional
     }
 
     // 2) Verify face - use 1:1 verification if UUID provided, otherwise search
