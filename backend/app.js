@@ -36,6 +36,18 @@ process.on('uncaughtException', (error) => {
 });
 
 // ==========================================
+// ROOT ENDPOINT (for Railway health checks)
+// ==========================================
+app.get('/', (req, res) => {
+  res.json({
+    ok: true,
+    service: 'MarketSafe Face Auth Backend',
+    status: 'running',
+    time: new Date().toISOString()
+  });
+});
+
+// ==========================================
 // HEALTH CHECK
 // ==========================================
 app.get('/api/health', (req, res) => {
