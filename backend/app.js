@@ -437,13 +437,19 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Face Auth Backend Server');
   console.log('🚀 ==========================================');
   console.log(`🚀 Server running on port ${PORT} (0.0.0.0)`);
+  console.log(`🚀 Health check: http://0.0.0.0:${PORT}/`);
   console.log(`🚀 Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log(`🚀 Luxand API Key: ${process.env.LUXAND_API_KEY ? '✅ Configured' : '❌ Missing'}`);
   console.log(`🚀 Similarity Threshold: ${SIMILARITY_THRESHOLD}`);
   console.log(`🚀 Liveness Threshold: ${LIVENESS_THRESHOLD}`);
   console.log('🚀 ==========================================');
   console.log('✅ Server is ready to accept connections');
+  console.log('✅ Railway health check endpoint: GET /');
 });
+
+// Keep the process alive - Railway needs the server to stay running
+server.keepAliveTimeout = 65000;
+server.headersTimeout = 66000;
 
 // Graceful shutdown handlers
 process.on('SIGTERM', () => {
