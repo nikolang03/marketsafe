@@ -39,26 +39,31 @@ process.on('uncaughtException', (error) => {
 // ROOT ENDPOINT (for Railway health checks)
 // ==========================================
 // This endpoint must respond quickly for Railway health checks
+// Railway expects a 200 OK response immediately
 app.get('/', (req, res) => {
-  res.status(200).json({
+  // Respond immediately with 200 OK - Railway needs this fast
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
     ok: true,
     service: 'MarketSafe Face Auth Backend',
     status: 'running',
     time: new Date().toISOString(),
     uptime: process.uptime()
-  });
+  }));
 });
 
 // ==========================================
 // HEALTH CHECK
 // ==========================================
 app.get('/api/health', (req, res) => {
-  res.json({
+  // Respond immediately - Railway needs fast responses
+  res.writeHead(200, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify({
     ok: true,
     time: new Date().toISOString(),
     service: 'Face Auth Backend',
     luxandConfigured: !!process.env.LUXAND_API_KEY
-  });
+  }));
 });
 
 // ==========================================
