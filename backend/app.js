@@ -417,15 +417,34 @@ app.use((err, req, res, next) => {
 // ==========================================
 // START SERVER
 // ==========================================
-app.listen(PORT, () => {
+// Bind to 0.0.0.0 (all interfaces) so Railway can reach it
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 ==========================================');
   console.log('🚀 Face Auth Backend Server');
   console.log('🚀 ==========================================');
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🚀 Health check: http://localhost:${PORT}/api/health`);
+  console.log(`🚀 Server running on port ${PORT} (0.0.0.0)`);
+  console.log(`🚀 Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log(`🚀 Luxand API Key: ${process.env.LUXAND_API_KEY ? '✅ Configured' : '❌ Missing'}`);
   console.log(`🚀 Similarity Threshold: ${SIMILARITY_THRESHOLD}`);
   console.log(`🚀 Liveness Threshold: ${LIVENESS_THRESHOLD}`);
   console.log('🚀 ==========================================');
+  console.log('✅ Server is ready to accept connections');
+});
+
+// Graceful shutdown handlers
+process.on('SIGTERM', () => {
+  console.log('⚠️ SIGTERM received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
+});
+
+process.on('SIGINT', () => {
+  console.log('⚠️ SIGINT received, shutting down gracefully...');
+  server.close(() => {
+    console.log('✅ Server closed');
+    process.exit(0);
+  });
 });
 
