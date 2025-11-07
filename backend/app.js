@@ -471,6 +471,19 @@ const server = app.listen(PORT, '0.0.0.0', () => {
 server.keepAliveTimeout = 65000;
 server.headersTimeout = 66000;
 
+// Log when server is actually listening and ready
+server.on('listening', () => {
+  console.log('✅ HTTP server is listening and ready for connections');
+});
+
+server.on('error', (error) => {
+  console.error('❌ Server error:', error);
+});
+
+server.on('connection', (socket) => {
+  console.log(`🔌 New connection from ${socket.remoteAddress}:${socket.remotePort}`);
+});
+
 // Graceful shutdown handlers
 process.on('SIGTERM', () => {
   console.log('⚠️ SIGTERM received, shutting down gracefully...');
