@@ -256,138 +256,60 @@ app.post('/api/verify', async (req, res) => {
       // Silently continue - liveness is optional
     }
 
-    // 2) Verify face - use 1:1 verification if UUID provided, otherwise search
-    let searchRes;
-    let candidates = [];
-    
-    if (luxandUuid && typeof luxandUuid === 'string' && luxandUuid.trim().length > 0) {
-      // Use 1:1 verification with person UUID (more reliable)
-      console.log('🔍 Using 1:1 verification with person UUID...');
-      try {
-        searchRes = await verifyPersonPhoto(luxandUuid.trim(), photoBase64);
-        // 1:1 verification returns direct similarity score
-        const similarity = parseFloat(searchRes.similarity || searchRes.score || searchRes.confidence || 0);
-        const normalizedSimilarity = similarity > 1.0 ? (similarity / 100.0) : similarity;
-        
-        console.log(`📊 1:1 Verification similarity: ${normalizedSimilarity.toFixed(3)} (threshold: ${SIMILARITY_THRESHOLD})`);
-        
-        if (normalizedSimilarity >= SIMILARITY_THRESHOLD) {
-          console.log(`✅ Verification PASSED for: ${email}`);
-          return res.json({
-            ok: true,
-            similarity: normalizedSimilarity,
-            threshold: SIMILARITY_THRESHOLD,
-            message: 'verified'
-          });
-        } else {
-          console.log(`❌ Verification FAILED for: ${email} (score too low)`);
-          return res.json({
-            ok: false,
-            similarity: normalizedSimilarity,
-            threshold: SIMILARITY_THRESHOLD,
-            message: 'not_verified',
-            error: 'Face similarity below threshold'
-          });
-        }
-      } catch (verifyError) {
-        console.warn(`⚠️ 1:1 verification failed, falling back to search: ${verifyError.message}`);
-        // Fall through to search-based verification
-      }
-    }
-    
-    // Fallback: Search for face among enrolled subjects
-    console.log('🔍 Searching for face...');
-    searchRes = await searchPhoto(photoBase64);
-    
-    // Check response structure - Luxand might return different formats
-    console.log(`📦 Search response structure:`, JSON.stringify(searchRes).substring(0, 300));
-    
-    // Try different response structures
-    candidates = searchRes.candidates 
-              || searchRes.matches 
-              || searchRes.results
-              || (Array.isArray(searchRes) ? searchRes : []);
-
-    if (candidates.length === 0) {
-      return res.json({
+    // 2) SECURITY: Always require UUID for 1:1 verification (never do global search for login)
+    // CRITICAL: Global search allows ANY enrolled face to access ANY account - this is a security vulnerability!
+    if (!luxandUuid || typeof luxandUuid !== 'string' || luxandUuid.trim().length === 0) {
+      console.error('🚨 SECURITY: No luxandUuid provided for verification');
+      console.error('🚨 SECURITY: Cannot do global search - this would allow any enrolled face to access any account!');
+      return res.status(400).json({
         ok: false,
-        similarity: 0,
-        threshold: SIMILARITY_THRESHOLD,
-        message: 'Face not found in enrolled subjects',
-        error: 'Face not recognized'
+        error: 'User UUID required for verification. Please ensure the user has completed face enrollment.',
+        security: 'Global face search is disabled for security - only 1:1 verification is allowed'
       });
     }
-
-    // 3) Find best match (highest similarity)
-    let bestMatch = null;
-    let bestScore = 0;
-
-    console.log(`📊 Found ${candidates.length} candidate(s)`);
-
-    for (const candidate of candidates) {
-      // Log full candidate object to see what fields are available
-      console.log(`📦 Full candidate object:`, JSON.stringify(candidate).substring(0, 200));
+    
+    // Use 1:1 verification with person UUID (SECURE - only compares to specific user's face)
+    console.log('🔍 Using 1:1 verification with person UUID (SECURE MODE)...');
+    console.log(`🔍 Verifying face against UUID: ${luxandUuid.trim()}`);
+    
+    try {
+      const searchRes = await verifyPersonPhoto(luxandUuid.trim(), photoBase64);
+      // 1:1 verification returns direct similarity score
+      const similarity = parseFloat(searchRes.similarity || searchRes.score || searchRes.confidence || 0);
+      const normalizedSimilarity = similarity > 1.0 ? (similarity / 100.0) : similarity;
       
-      // Try different score field names (Luxand might use different names)
-      let score = 0;
+      console.log(`📊 1:1 Verification similarity: ${normalizedSimilarity.toFixed(3)} (threshold: ${SIMILARITY_THRESHOLD})`);
       
-      // Try all possible field names (Luxand uses "probability" for similarity)
-      if (candidate.probability !== undefined) {
-        score = parseFloat(candidate.probability);
-      } else if (candidate.similarity !== undefined) {
-        score = parseFloat(candidate.similarity);
-      } else if (candidate.confidence !== undefined) {
-        score = parseFloat(candidate.confidence);
-      } else if (candidate.score !== undefined) {
-        score = parseFloat(candidate.score);
-      } else if (candidate.match_score !== undefined) {
-        score = parseFloat(candidate.match_score);
-      } else if (candidate.match !== undefined) {
-        // If match is boolean, use a default high score
-        score = candidate.match === true ? 0.95 : 0;
-      } else if (candidate.verified !== undefined) {
-        score = candidate.verified === true ? 0.95 : 0;
+      if (normalizedSimilarity >= SIMILARITY_THRESHOLD) {
+        console.log(`✅ Verification PASSED for: ${email}`);
+        return res.json({
+          ok: true,
+          similarity: normalizedSimilarity,
+          threshold: SIMILARITY_THRESHOLD,
+          message: 'verified'
+        });
+      } else {
+        console.log(`❌ Verification FAILED for: ${email} (score too low)`);
+        return res.json({
+          ok: false,
+          similarity: normalizedSimilarity,
+          threshold: SIMILARITY_THRESHOLD,
+          message: 'not_verified',
+          error: 'Face similarity below threshold'
+        });
       }
-      
-      // Normalize if score > 1 (percentage format) or if it's 0-100
-      let normalizedScore = score;
-      if (score > 1.0 && score <= 100) {
-        normalizedScore = score / 100.0;
-      } else if (score > 100) {
-        normalizedScore = score / 1000.0; // In case it's 0-1000
-      }
-      
-      console.log(`📊 Candidate: uuid=${candidate.uuid || candidate.id || candidate.person_uuid || 'unknown'}, raw_score=${score}, normalized=${normalizedScore.toFixed(3)}`);
-      
-      if (normalizedScore > bestScore) {
-        bestScore = normalizedScore;
-        bestMatch = candidate;
-      }
-    }
-
-    console.log(`📊 Best match similarity: ${bestScore.toFixed(3)} (threshold: ${SIMILARITY_THRESHOLD})`);
-
-    // 4) Check if similarity meets threshold
-    const passed = bestScore >= SIMILARITY_THRESHOLD;
-
-    if (passed) {
-      console.log(`✅ Verification PASSED for: ${email}`);
-      return res.json({
-        ok: true,
-        similarity: bestScore,
-        threshold: SIMILARITY_THRESHOLD,
-        message: 'verified'
-      });
-    } else {
-      console.log(`❌ Verification FAILED for: ${email} (score too low)`);
-      return res.json({
+    } catch (verifyError) {
+      console.error(`❌ 1:1 verification failed: ${verifyError.message}`);
+      return res.status(500).json({
         ok: false,
-        similarity: bestScore,
-        threshold: SIMILARITY_THRESHOLD,
-        message: 'not_verified',
-        error: 'Face similarity below threshold'
+        error: `Verification failed: ${verifyError.message}`,
+        security: '1:1 verification required - global search disabled for security'
       });
     }
+    
+    // REMOVED: Global search fallback - this was a security vulnerability!
+    // Never do global search for login verification - it allows any enrolled face to access any account
+    // Only 1:1 verification is allowed for security
 
   } catch (error) {
     console.error('❌ Verification error:', error);
