@@ -38,12 +38,14 @@ process.on('uncaughtException', (error) => {
 // ==========================================
 // ROOT ENDPOINT (for Railway health checks)
 // ==========================================
+// This endpoint must respond quickly for Railway health checks
 app.get('/', (req, res) => {
-  res.json({
+  res.status(200).json({
     ok: true,
     service: 'MarketSafe Face Auth Backend',
     status: 'running',
-    time: new Date().toISOString()
+    time: new Date().toISOString(),
+    uptime: process.uptime()
   });
 });
 
