@@ -235,27 +235,38 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
  * @returns {Promise<Object>} - { liveness: 'real'|'fake', score: number }
  */
 export async function livenessCheck(base64Image) {
+  // Note: Luxand liveness endpoint may not be available in all API plans
+  // This is optional and failures are handled gracefully
   console.log(`📤 Calling Luxand: POST ${LUXAND_BASE}/liveness`);
   
-  const res = await fetch(`${LUXAND_BASE}/liveness`, {
-    method: 'POST',
-    headers,
-    body: JSON.stringify({
-      photo: base64Image
-    })
-  });
+  try {
+    const res = await fetch(`${LUXAND_BASE}/liveness`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        photo: base64Image
+      }),
+      timeout: 10000 // 10 second timeout
+    });
 
-  console.log(`📥 Luxand liveness response status: ${res.status} ${res.statusText}`);
+    console.log(`📥 Luxand liveness response status: ${res.status} ${res.statusText}`);
 
-  if (!res.ok) {
-    const errorText = await res.text();
-    console.error(`❌ Luxand liveness error response:`, errorText.substring(0, 500));
-    throw new Error(`Luxand liveness error (${res.status}): ${errorText.substring(0, 200)}`);
+    if (!res.ok) {
+      const errorText = await res.text();
+      console.error(`❌ Luxand liveness error response:`, errorText.substring(0, 500));
+      throw new Error(`Luxand liveness error (${res.status}): ${errorText.substring(0, 200)}`);
+    }
+
+    const responseData = await res.json();
+    console.log(`✅ Luxand liveness success:`, JSON.stringify(responseData).substring(0, 200));
+    return responseData;
+  } catch (error) {
+    // If endpoint doesn't exist (404) or times out, throw a specific error
+    if (error.message.includes('404') || error.message.includes('Not Found')) {
+      throw new Error('LIVENESS_ENDPOINT_NOT_AVAILABLE');
+    }
+    throw error;
   }
-
-  const responseData = await res.json();
-  console.log(`✅ Luxand liveness success:`, JSON.stringify(responseData).substring(0, 200));
-  return responseData;
 }
 
 /**
