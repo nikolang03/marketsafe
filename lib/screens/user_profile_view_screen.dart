@@ -5,6 +5,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/follow_service.dart';
 import '../services/product_service.dart';
+import '../services/report_service.dart';
 import '../models/product_model.dart';
 import 'product_preview_screen.dart';
 import 'followers_following_screen.dart';
@@ -31,6 +32,11 @@ class _UserProfileViewScreenState extends State<UserProfileViewScreen> {
   Map<String, int> _followCounts = {'followers': 0, 'following': 0};
   List<Product> _userProducts = [];
   bool _isLoadingProducts = false;
+  
+  // Report dialog state
+  final TextEditingController _reportReasonController = TextEditingController();
+  String? _selectedReportReason;
+  bool _isReporting = false;
 
   @override
   void initState() {
@@ -578,30 +584,187 @@ class _UserProfileViewScreenState extends State<UserProfileViewScreen> {
   }
 
   void _showReportDialog() {
+    _selectedReportReason = null;
+    _reportReasonController.clear();
+    
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text('Report User', style: TextStyle(color: Colors.white)),
-        content: const Text(
-          'Are you sure you want to report this user?',
-          style: TextStyle(color: Colors.white70),
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text('Report User', style: TextStyle(color: Colors.white)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Why are you reporting this user?',
+                  style: TextStyle(color: Colors.white70, fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+                // Predefined reasons
+                _buildReportOption(
+                  'Inappropriate Content',
+                  'inappropriate_content',
+                  _selectedReportReason,
+                  (value) => setDialogState(() => _selectedReportReason = value),
+                ),
+                _buildReportOption(
+                  'Spam or Scam',
+                  'spam_scam',
+                  _selectedReportReason,
+                  (value) => setDialogState(() => _selectedReportReason = value),
+                ),
+                _buildReportOption(
+                  'Harassment or Bullying',
+                  'harassment',
+                  _selectedReportReason,
+                  (value) => setDialogState(() => _selectedReportReason = value),
+                ),
+                _buildReportOption(
+                  'Fake Account',
+                  'fake_account',
+                  _selectedReportReason,
+                  (value) => setDialogState(() => _selectedReportReason = value),
+                ),
+                _buildReportOption(
+                  'Selling Prohibited Items',
+                  'prohibited_items',
+                  _selectedReportReason,
+                  (value) => setDialogState(() => _selectedReportReason = value),
+                ),
+                _buildReportOption(
+                  'Other',
+                  'other',
+                  _selectedReportReason,
+                  (value) => setDialogState(() => _selectedReportReason = value),
+                ),
+                const SizedBox(height: 16),
+                // Custom reason text field
+                if (_selectedReportReason == 'other' || _selectedReportReason != null)
+                  TextField(
+                    controller: _reportReasonController,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Please provide more details...',
+                      hintStyle: TextStyle(color: Colors.grey[600]),
+                      filled: true,
+                      fillColor: Colors.grey[800],
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide: BorderSide.none,
+                      ),
+                      contentPadding: const EdgeInsets.all(12),
+                    ),
+                    maxLines: 3,
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: _isReporting ? null : () {
+                Navigator.pop(context);
+                _selectedReportReason = null;
+                _reportReasonController.clear();
+              },
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: _isReporting ? null : () async {
+                if (_selectedReportReason == null) {
+                  _showErrorSnackBar('Please select a reason');
+                  return;
+                }
+                
+                if (_selectedReportReason == 'other' && _reportReasonController.text.trim().isEmpty) {
+                  _showErrorSnackBar('Please provide details for your report');
+                  return;
+                }
+                
+                setDialogState(() => _isReporting = true);
+                
+                final success = await ReportService.reportUser(
+                  reportedUserId: widget.targetUserId,
+                  reason: _selectedReportReason!,
+                  customReason: _reportReasonController.text.trim(),
+                );
+                
+                if (mounted) {
+                  Navigator.pop(context);
+                  _selectedReportReason = null;
+                  _reportReasonController.clear();
+                  
+                  if (success) {
+                    _showSuccessSnackBar('User reported successfully. Admin will review your report.');
+                  } else {
+                    _showErrorSnackBar('Failed to submit report. Please try again.');
+                  }
+                }
+                
+                setDialogState(() => _isReporting = false);
+              },
+              child: _isReporting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.red,
+                      ),
+                    )
+                  : const Text('Submit Report', style: TextStyle(color: Colors.red)),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.pop(context);
-              _showSuccessSnackBar('User reported successfully');
-            },
-            child: const Text('Report', style: TextStyle(color: Colors.red)),
-          ),
-        ],
       ),
     );
+  }
+
+  Widget _buildReportOption(String label, String value, String? selected, Function(String?) onChanged) {
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 8),
+      child: InkWell(
+        onTap: () => onChanged(value),
+        child: Container(
+          padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: selected == value ? Colors.red.withOpacity(0.2) : Colors.grey[800],
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(
+              color: selected == value ? Colors.red : Colors.transparent,
+              width: 2,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                selected == value ? Icons.radio_button_checked : Icons.radio_button_unchecked,
+                color: selected == value ? Colors.red : Colors.grey[400],
+                size: 20,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  style: TextStyle(
+                    color: selected == value ? Colors.white : Colors.grey[300],
+                    fontSize: 14,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  void dispose() {
+    _reportReasonController.dispose();
+    super.dispose();
   }
 
   String _formatProductDate(DateTime? date) {

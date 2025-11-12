@@ -4,7 +4,71 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MarketSafe Admin Panel</title>
+    <title>MarketSafe Admin Panel - Product Management & Moderation</title>
+    
+    <!-- SEO Meta Tags -->
+    <meta name="description" content="MarketSafe Admin Panel - Manage products, moderate listings, review user submissions, and oversee marketplace operations. Secure admin dashboard for MarketSafe marketplace platform. Global marketplace administration tool.">
+    <meta name="keywords" content="MarketSafe, admin panel, product management, marketplace admin, product moderation, admin dashboard, e-commerce admin, marketplace management, online marketplace, product administration, content moderation, seller management, global marketplace, business admin, marketplace platform">
+    <meta name="author" content="MarketSafe">
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1">
+    <meta name="language" content="English">
+    <meta name="revisit-after" content="1 days">
+    <meta name="rating" content="general">
+    <meta name="distribution" content="global">
+    <meta name="geo.region" content="US">
+    <meta name="geo.placename" content="Global">
+    
+    <!-- Open Graph / Facebook -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="MarketSafe Admin Panel - Product Management & Moderation">
+    <meta property="og:description" content="Manage products, moderate listings, and oversee marketplace operations with MarketSafe Admin Panel. Global marketplace administration dashboard.">
+    <meta property="og:url" content="https://marketsafe-e57cf.web.app/admin.html">
+    <meta property="og:site_name" content="MarketSafe Admin">
+    <meta property="og:locale" content="en_US">
+    <meta property="og:locale:alternate" content="en_GB">
+    <meta property="og:locale:alternate" content="es_ES">
+    <meta property="og:locale:alternate" content="fr_FR">
+    
+    <!-- Twitter Card -->
+    <meta name="twitter:card" content="summary_large_image">
+    <meta name="twitter:title" content="MarketSafe Admin Panel">
+    <meta name="twitter:description" content="Manage products, moderate listings, and oversee marketplace operations globally">
+    <meta name="twitter:site" content="@marketsafe">
+    
+    <!-- Canonical URL -->
+    <link rel="canonical" href="https://marketsafe-e57cf.web.app/admin.html">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/png" href="logo.png"/>
+    <link rel="apple-touch-icon" href="logo.png">
+    
+    <!-- Hreflang for International SEO -->
+    <link rel="alternate" hreflang="en" href="https://marketsafe-e57cf.web.app/admin.html">
+    <link rel="alternate" hreflang="x-default" href="https://marketsafe-e57cf.web.app/admin.html">
+    
+    <!-- Structured Data (JSON-LD) for Better Search Visibility -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "WebApplication",
+      "name": "MarketSafe Admin Panel",
+      "description": "Admin dashboard for managing products, moderating listings, and overseeing marketplace operations",
+      "url": "https://marketsafe-e57cf.web.app/admin.html",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web",
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      },
+      "aggregateRating": {
+        "@type": "AggregateRating",
+        "ratingValue": "5",
+        "ratingCount": "1"
+      }
+    }
+    </script>
+    
     <!-- 
     NOTE: For profile photos to display properly, open this file through a web server:
     - Option 1: Use http://localhost:8000/admin.html (recommended)
@@ -660,6 +724,54 @@
             </div>
         </div>
 
+        <!-- APK Download Section -->
+        <div class="row mb-4">
+            <div class="col-12">
+                <div class="card border-primary">
+                    <div class="card-header bg-primary text-white">
+                        <h5 class="mb-0">
+                            <i class="fas fa-download me-2"></i>Download MarketSafe App
+                        </h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row align-items-center">
+                            <div class="col-md-8">
+                                <h6 class="mb-2">
+                                    <i class="fas fa-mobile-alt me-2 text-primary"></i>Android APK
+                                </h6>
+                                <p class="text-muted mb-2">
+                                    Download the latest version of MarketSafe mobile app for Android devices.
+                                </p>
+                                <small class="text-muted">
+                                    <i class="fas fa-info-circle me-1"></i>
+                                    Version: 1.0.3 | Build: 4 | Size: ~450 MB
+                                </small>
+                            </div>
+                            <div class="col-md-4 text-end">
+                                <a href="https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fmarketsafe.apk?alt=media" 
+                                   download="MarketSafe-v1.0.3.apk" 
+                                   class="btn btn-primary btn-lg"
+                                   id="apkDownloadLink"
+                                   target="_blank">
+                                    <i class="fas fa-download me-2"></i>Download APK
+                                </a>
+                            </div>
+                        </div>
+                        <hr>
+                        <div class="alert alert-info mb-0">
+                            <i class="fas fa-exclamation-triangle me-2"></i>
+                            <strong>Installation Instructions:</strong>
+                            <ol class="mb-0 mt-2">
+                                <li>Download the APK file to your Android device</li>
+                                <li>Enable "Install from Unknown Sources" in your device settings</li>
+                                <li>Open the downloaded APK file and follow the installation prompts</li>
+                            </ol>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Navigation Tabs -->
         <div class="row mb-4">
             <div class="col-12">
@@ -677,6 +789,17 @@
                     <li class="nav-item" role="presentation" id="adminManagementTabItem" style="display: none;">
                         <button class="nav-link" id="adminManagement-tab" data-bs-toggle="tab" data-bs-target="#adminManagement" type="button" role="tab" aria-controls="adminManagement" aria-selected="false">
                             <i class="fas fa-user-shield me-2"></i>Admin Management
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="reports-tab" data-bs-toggle="tab" data-bs-target="#reports" type="button" role="tab" aria-controls="reports" aria-selected="false">
+                            <i class="fas fa-flag me-2"></i>User Reports
+                            <span class="badge bg-danger ms-2" id="pendingReportsBadge" style="display: none;">0</span>
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="messaging-tab" data-bs-toggle="tab" data-bs-target="#messaging" type="button" role="tab" aria-controls="messaging" aria-selected="false">
+                            <i class="fas fa-bullhorn me-2"></i>Message All Users
                         </button>
                     </li>
                 </ul>
@@ -787,6 +910,109 @@
                                         </tbody>
                                     </table>
                                 </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Reports Tab -->
+            <div class="tab-pane fade" id="reports" role="tabpanel" aria-labelledby="reports-tab">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header bg-white">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <h5 class="mb-0">
+                                        <i class="fas fa-flag me-2"></i>User Reports
+                                    </h5>
+                                    <div>
+                                        <select class="form-select d-inline-block" id="reportStatusFilter" style="width: auto;" onchange="loadReports()">
+                                            <option value="">All Reports</option>
+                                            <option value="pending">Pending</option>
+                                            <option value="reviewed">Reviewed</option>
+                                            <option value="resolved">Resolved</option>
+                                            <option value="dismissed">Dismissed</option>
+                                        </select>
+                                        <button class="btn btn-outline-primary ms-2" onclick="loadReports()">
+                                            <i class="fas fa-sync-alt me-1"></i>Refresh
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-hover mb-0">
+                                        <thead>
+                                            <tr>
+                                                <th>Reported User</th>
+                                                <th>Reporter</th>
+                                                <th>Reason</th>
+                                                <th>Details</th>
+                                                <th>Date</th>
+                                                <th>Status</th>
+                                                <th>Actions</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody id="reportsTableBody">
+                                            <tr>
+                                                <td colspan="7" class="text-center">
+                                                    <div class="loading-spinner">
+                                                        <div class="spinner-border text-primary" role="status">
+                                                            <span class="visually-hidden">Loading...</span>
+                                                        </div>
+                                                        <span class="ms-2">Loading reports...</span>
+                                                    </div>
+                                                </td>
+                                            </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Messaging Tab -->
+            <div class="tab-pane fade" id="messaging" role="tabpanel" aria-labelledby="messaging-tab">
+                <div class="row">
+                    <div class="col-12">
+                        <div class="card">
+                            <div class="card-header bg-white">
+                                <h5 class="mb-0">
+                                    <i class="fas fa-bullhorn me-2"></i>Send Message to All Users
+                                </h5>
+                            </div>
+                            <div class="card-body">
+                                <div class="alert alert-info">
+                                    <i class="fas fa-info-circle me-2"></i>
+                                    <strong>Note:</strong> This message will be sent as a notification to all users in the app. Use this for important warnings, announcements, or updates.
+                                </div>
+                                <form id="adminMessageForm" onsubmit="sendAdminMessage(event)">
+                                    <div class="mb-3">
+                                        <label for="messageType" class="form-label">Message Type</label>
+                                        <select class="form-select" id="messageType" required>
+                                            <option value="warning">⚠️ Warning</option>
+                                            <option value="announcement">📢 Announcement</option>
+                                            <option value="info">ℹ️ Information</option>
+                                        </select>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="adminMessage" class="form-label">Message</label>
+                                        <textarea class="form-control" id="adminMessage" rows="5" required placeholder="Enter your message here..."></textarea>
+                                        <small class="form-text text-muted">This message will be sent to all users as a notification.</small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <div class="alert alert-warning">
+                                            <i class="fas fa-exclamation-triangle me-2"></i>
+                                            <strong>Warning:</strong> This action will send a notification to <span id="totalUsersCount">...</span> users. Please review your message before sending.
+                                        </div>
+                                    </div>
+                                    <button type="submit" class="btn btn-primary" id="sendMessageBtn">
+                                        <i class="fas fa-paper-plane me-2"></i>Send Message to All Users
+                                    </button>
+                                </form>
                             </div>
                         </div>
                     </div>
@@ -1013,11 +1239,82 @@
                         <button type="button" class="btn btn-success" id="approveProductBtn" onclick="approveProduct()">
                             <i class="fas fa-check me-1"></i>Approve
                         </button>
-                        <button type="button" class="btn btn-danger" id="rejectProductBtn" onclick="showRejectModal()">
+                        <button type="button" class="btn btn-warning" id="rejectProductBtn" onclick="showRejectModal()">
                             <i class="fas fa-times me-1"></i>Reject
+                        </button>
+                        <button type="button" class="btn btn-danger" id="deleteProductBtn" onclick="showDeleteModal()">
+                            <i class="fas fa-trash me-1"></i>Delete
                         </button>
                     </div>
                     <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Product Media Preview Modal -->
+    <div class="modal fade" id="mediaPreviewModal" tabindex="-1">
+        <div class="modal-dialog modal-xl">
+            <div class="modal-content" style="background: #1a1a1a; color: white; border: none;">
+                <div class="modal-header" style="background: #2b2b2b; border-bottom: 1px solid rgba(255,255,255,0.1); padding: 1rem 1.5rem;">
+                    <h5 class="modal-title mb-0" style="font-weight: 600; letter-spacing: 0.5px;">
+                        <i class="fas fa-images me-2"></i>Product Media Preview
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" style="opacity: 0.8;"></button>
+                </div>
+                <div class="modal-body p-0" style="background: #000;">
+                    <div id="mediaPreviewCarousel" class="carousel slide">
+                        <div class="carousel-inner" id="mediaPreviewCarouselInner" style="min-height: 500px; background: #000;">
+                            <!-- Media items will be loaded here -->
+                        </div>
+                        <button class="carousel-control-prev" type="button" data-bs-target="#mediaPreviewCarousel" data-bs-slide="prev" style="width: 60px; opacity: 0.8;">
+                            <span class="carousel-control-prev-icon" aria-hidden="true" style="background-color: rgba(0,0,0,0.5); border-radius: 50%; width: 50px; height: 50px;"></span>
+                            <span class="visually-hidden">Previous</span>
+                        </button>
+                        <button class="carousel-control-next" type="button" data-bs-target="#mediaPreviewCarousel" data-bs-slide="next" style="width: 60px; opacity: 0.8;">
+                            <span class="carousel-control-next-icon" aria-hidden="true" style="background-color: rgba(0,0,0,0.5); border-radius: 50%; width: 50px; height: 50px;"></span>
+                            <span class="visually-hidden">Next</span>
+                        </button>
+                    </div>
+                    <div class="text-center py-3" style="background: #2b2b2b; border-top: 1px solid rgba(255,255,255,0.1);">
+                        <span class="badge bg-dark px-3 py-2" id="mediaPreviewCounter" style="font-size: 0.9rem; font-weight: 500; letter-spacing: 0.5px;">1 / 1</span>
+                    </div>
+                </div>
+                <div class="modal-footer" style="background: #2b2b2b; border-top: 1px solid rgba(255,255,255,0.1); padding: 1rem 1.5rem;">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" style="min-width: 100px;">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Delete Product Modal -->
+    <div class="modal fade" id="deleteProductModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content" style="background: #1a1a1a; color: white; border: 1px solid rgba(220, 53, 69, 0.3);">
+                <div class="modal-header" style="background: #2b2b2b; border-bottom: 1px solid rgba(220, 53, 69, 0.3);">
+                    <h5 class="modal-title">
+                        <i class="fas fa-exclamation-triangle text-danger me-2"></i>Delete Product
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="mb-3">Are you sure you want to delete this product? This action cannot be undone.</p>
+                    <div class="alert alert-danger mb-0" role="alert">
+                        <i class="fas fa-info-circle me-2"></i>
+                        <strong>Warning:</strong> This will permanently delete:
+                        <ul class="mb-0 mt-2">
+                            <li>The product from the database</li>
+                            <li>All product images/videos</li>
+                            <li>All associated comments</li>
+                            <li>All product data</li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="modal-footer" style="background: #2b2b2b; border-top: 1px solid rgba(220, 53, 69, 0.3);">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="button" class="btn btn-danger" onclick="confirmDeleteProduct()">
+                        <i class="fas fa-trash me-1"></i>Delete Permanently
+                    </button>
                 </div>
             </div>
         </div>
@@ -1836,8 +2133,16 @@
                 } else if (field.arrayValue !== undefined && field.arrayValue.values) {
                     value = field.arrayValue.values.map(v => {
                         if (v.stringValue !== undefined) return v.stringValue;
+                        if (v.integerValue !== undefined) return parseInt(v.integerValue);
+                        if (v.doubleValue !== undefined) return parseFloat(v.doubleValue);
+                        if (v.booleanValue !== undefined) return v.booleanValue;
                         return v;
                     });
+                    // Special handling for imageUrls to ensure it's always an array
+                    if (key === 'imageUrls') {
+                        console.log(`📸 Converting imageUrls array:`, value);
+                        console.log(`📸 imageUrls length:`, value.length);
+                    }
                 } else if (field.mapValue !== undefined && field.mapValue.fields) {
                     // Handle nested objects (like faceData)
                     console.log(`Converting mapValue for field ${key}:`, field.mapValue.fields);
@@ -2694,6 +2999,27 @@
                 // Created date with safe access
                 const createdAt = (product && product.createdAt) ? new Date(product.createdAt).toLocaleDateString() : 'Unknown';
                 
+                // Check if preview button should be shown
+                const hasImageUrls = product && product.imageUrls && Array.isArray(product.imageUrls) && product.imageUrls.length > 0;
+                const hasImageUrl = product && product.imageUrl;
+                const hasVideo = product && product.mediaType === 'video' && product.videoUrl;
+                const shouldShowPreview = hasImageUrls || hasImageUrl || hasVideo;
+                
+                if (shouldShowPreview) {
+                    console.log(`🔘 Preview button condition met for ${productId}:`, {
+                        hasImageUrls: hasImageUrls,
+                        imageUrlsLength: product.imageUrls ? product.imageUrls.length : 0,
+                        hasImageUrl: hasImageUrl,
+                        hasVideo: hasVideo
+                    });
+                }
+                
+                const previewButtonHtml = shouldShowPreview ? `
+                    <button class="btn btn-sm btn-outline-info me-1" onclick="console.log('🔘 Preview button clicked for:', '${productId}'); previewProductMedia('${productId}');" title="Preview all photos/videos">
+                        <i class="fas fa-images"></i>
+                    </button>
+                ` : '';
+                
                 row.innerHTML = `
                     <td>
                         <div class="d-flex align-items-center">
@@ -2710,17 +3036,21 @@
                     <td><span class="badge ${statusClass}">${statusText}</span></td>
                     <td>${createdAt}</td>
                     <td>
-                        <button class="btn btn-sm btn-outline-primary me-1" onclick="viewProduct('${productId}')">
+                        <button class="btn btn-sm btn-outline-primary me-1" onclick="viewProduct('${productId}')" title="View Details">
                             <i class="fas fa-eye"></i>
                         </button>
+                        ${previewButtonHtml}
                         ${status === 'pending' ? `
-                            <button class="btn btn-sm btn-success me-1" onclick="approveProduct('${productId}')">
+                            <button class="btn btn-sm btn-success me-1" onclick="approveProduct('${productId}')" title="Approve">
                                 <i class="fas fa-check"></i>
                             </button>
-                            <button class="btn btn-sm btn-danger" onclick="showRejectModal('${productId}')">
+                            <button class="btn btn-sm btn-warning me-1" onclick="showRejectModal('${productId}')" title="Reject">
                                 <i class="fas fa-times"></i>
                             </button>
                         ` : ''}
+                        <button class="btn btn-sm btn-danger" onclick="showDeleteModal('${productId}')" title="Delete Product">
+                            <i class="fas fa-trash"></i>
+                        </button>
                     </td>
                 `;
                 
@@ -2836,6 +3166,264 @@
         }
         
         new bootstrap.Modal(document.getElementById('productModal')).show();
+    }
+
+    // Preview product media (all photos/videos)
+    function previewProductMedia(productId) {
+        console.log('🚀 previewProductMedia CALLED with productId:', productId);
+        console.log('🚀 productsData keys:', Object.keys(productsData));
+        console.log('🚀 productsData length:', Object.keys(productsData).length);
+        
+        const product = productsData[productId];
+        if (!product) {
+            console.error('❌ Product not found:', productId);
+            console.error('❌ Available product IDs:', Object.keys(productsData));
+            return;
+        }
+
+        console.log('✅ Product found!');
+        console.log('🔍 Previewing media for product:', productId);
+        console.log('📦 Product data:', product);
+        console.log('🖼️ imageUrls:', product.imageUrls);
+        console.log('🖼️ imageUrls type:', typeof product.imageUrls);
+        console.log('🖼️ imageUrls isArray:', Array.isArray(product.imageUrls));
+        if (product.imageUrls) {
+            console.log('🖼️ imageUrls length:', product.imageUrls.length);
+            console.log('🖼️ imageUrls content:', product.imageUrls);
+        }
+        console.log('🖼️ imageUrl:', product.imageUrl);
+        console.log('🎥 videoUrl:', product.videoUrl);
+        console.log('📹 mediaType:', product.mediaType);
+
+        console.log('🔧 Getting DOM elements...');
+        const carouselInner = document.getElementById('mediaPreviewCarouselInner');
+        const counter = document.getElementById('mediaPreviewCounter');
+        
+        if (!carouselInner) {
+            console.error('❌ carouselInner element not found!');
+            alert('Error: Carousel element not found. Please refresh the page.');
+            return;
+        }
+        if (!counter) {
+            console.warn('⚠️ counter element not found!');
+        }
+        
+        console.log('✅ DOM elements found');
+        carouselInner.innerHTML = '';
+
+        let mediaItems = [];
+        let currentIndex = 0;
+        
+        console.log('📊 Starting media collection...');
+
+        // Collect all media items - prioritize imageUrls array
+        // First, add images from imageUrls array (this is the main source for multiple images)
+        if (product.imageUrls) {
+            // Handle both array and object cases
+            let imageUrlsArray = [];
+            if (Array.isArray(product.imageUrls)) {
+                imageUrlsArray = product.imageUrls;
+                console.log(`📋 imageUrls is an array with ${imageUrlsArray.length} items`);
+            } else if (typeof product.imageUrls === 'object' && product.imageUrls !== null) {
+                // Convert object to array if needed
+                imageUrlsArray = Object.values(product.imageUrls);
+                console.log(`📋 imageUrls is an object, converted to array with ${imageUrlsArray.length} items`);
+            } else {
+                console.warn(`⚠️ imageUrls is not an array or object:`, typeof product.imageUrls, product.imageUrls);
+            }
+            
+            if (imageUrlsArray.length > 0) {
+                console.log(`✅ Processing ${imageUrlsArray.length} images from imageUrls array`);
+                imageUrlsArray.forEach((url, index) => {
+                    console.log(`  📸 Image ${index + 1}:`, typeof url, url ? url.substring(0, 60) + '...' : 'null/undefined');
+                    if (url && typeof url === 'string' && url.trim() !== '') {
+                        mediaItems.push({
+                            type: 'image',
+                            url: url.trim(),
+                            index: index
+                        });
+                        console.log(`    ✅ Added image ${index + 1} to mediaItems`);
+                    } else {
+                        console.warn(`    ⚠️ Skipped invalid image ${index + 1}:`, url);
+                    }
+                });
+                console.log(`✅ Total images added from imageUrls: ${mediaItems.length}`);
+            } else {
+                console.warn(`⚠️ imageUrls array is empty`);
+            }
+        } else {
+            console.log(`ℹ️ No imageUrls field found in product`);
+        }
+        
+        // If no images from imageUrls, try single imageUrl
+        if (mediaItems.length === 0 && product.imageUrl) {
+            console.log('⚠️ No images in imageUrls, using single imageUrl');
+            mediaItems.push({
+                type: 'image',
+                url: product.imageUrl,
+                index: 0
+            });
+        }
+
+        // Add video if present
+        if (product.mediaType === 'video' && product.videoUrl) {
+            console.log('✅ Found video');
+            // Add video at the beginning
+            mediaItems.unshift({
+                type: 'video',
+                url: product.videoUrl,
+                thumbnail: product.videoThumbnailUrl || ''
+            });
+        }
+
+        console.log(`📊 Total media items collected: ${mediaItems.length}`);
+
+        if (mediaItems.length === 0) {
+            carouselInner.innerHTML = `
+                <div class="carousel-item active">
+                    <div class="d-flex align-items-center justify-content-center" style="min-height: 400px;">
+                        <div class="text-center">
+                            <i class="fas fa-image fa-3x text-muted mb-3"></i>
+                            <p class="text-muted">No media available</p>
+                        </div>
+                    </div>
+                </div>
+            `;
+            counter.textContent = '0 / 0';
+        } else {
+            console.log(`🎨 Creating ${mediaItems.length} carousel items`);
+            
+            // Build all carousel items HTML first
+            let carouselItemsHtml = '';
+            mediaItems.forEach((item, index) => {
+                const isActive = index === 0 ? 'active' : '';
+                let mediaHtml = '';
+
+                if (item.type === 'video') {
+                    mediaHtml = `
+                        <div class="carousel-item ${isActive}">
+                            <div class="d-flex align-items-center justify-content-center" style="min-height: 500px; background: #000; padding: 20px;">
+                                <video controls class="img-fluid" style="max-height: 600px; max-width: 100%; object-fit: contain; border-radius: 8px;">
+                                    <source src="${item.url}" type="video/mp4">
+                                    Your browser does not support the video tag.
+                                </video>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    console.log(`  📸 Adding image ${index + 1}: ${item.url.substring(0, 50)}...`);
+                    // Escape quotes in URL for HTML attribute
+                    const escapedUrl = item.url.replace(/'/g, "&#39;").replace(/"/g, "&quot;");
+                    mediaHtml = `
+                        <div class="carousel-item ${isActive}">
+                            <div class="d-flex align-items-center justify-content-center" style="min-height: 500px; background: #000; padding: 20px;">
+                                <img src="${escapedUrl}" class="img-fluid" style="max-height: 600px; max-width: 100%; object-fit: contain; border-radius: 8px;" alt="Product Image ${index + 1}" onerror="console.error('Failed to load image ${index + 1}'); this.src='data:image/svg+xml,%3Csvg xmlns=\'http://www.w3.org/2000/svg\' width=\'400\' height=\'400\'%3E%3Crect fill=\'%23ddd\' width=\'400\' height=\'400\'/%3E%3Ctext fill=\'%23999\' font-family=\'sans-serif\' font-size=\'20\' dy=\'10.5\' font-weight=\'bold\' x=\'50%25\' y=\'50%25\' text-anchor=\'middle\'%3EImage not found%3C/text%3E%3C/svg%3E';">
+                            </div>
+                        </div>
+                    `;
+                }
+
+                carouselItemsHtml += mediaHtml;
+            });
+
+            // Set all carousel items at once
+            carouselInner.innerHTML = carouselItemsHtml;
+            console.log(`✅ Created ${carouselInner.children.length} carousel items in DOM`);
+            console.log(`📊 Carousel items HTML length: ${carouselItemsHtml.length} characters`);
+            console.log(`📊 Expected ${mediaItems.length} items, got ${carouselInner.children.length} items`);
+            
+            // Verify all items are in DOM
+            const allItems = carouselInner.querySelectorAll('.carousel-item');
+            console.log(`🔍 Found ${allItems.length} carousel-item elements in DOM`);
+            
+            if (allItems.length !== mediaItems.length) {
+                console.error(`❌ CRITICAL: Mismatch! Expected ${mediaItems.length} items but found ${allItems.length} in DOM`);
+                console.error(`❌ Carousel HTML:`, carouselItemsHtml.substring(0, 500));
+            }
+            
+            allItems.forEach((item, idx) => {
+                const mediaElements = item.querySelectorAll('img, video');
+                console.log(`  Item ${idx + 1}: ${item.classList.contains('active') ? 'ACTIVE' : 'inactive'}, has ${mediaElements.length} media elements`);
+                if (mediaElements.length > 0) {
+                    const src = mediaElements[0].src || mediaElements[0].querySelector('source')?.src || 'no src';
+                    console.log(`    URL: ${src.substring(0, 80)}...`);
+                }
+            });
+
+            counter.textContent = `1 / ${mediaItems.length}`;
+
+            // Show modal first, then initialize carousel
+            const modalElement = document.getElementById('mediaPreviewModal');
+            const modal = new bootstrap.Modal(modalElement);
+            
+            // Show modal first
+            modal.show();
+            
+            // Initialize carousel after modal is fully shown
+            modalElement.addEventListener('shown.bs.modal', function() {
+                const carouselElement = document.getElementById('mediaPreviewCarousel');
+                const carouselInnerElement = document.getElementById('mediaPreviewCarouselInner');
+                
+                // Verify items are in DOM
+                const itemsInDOM = carouselInnerElement.querySelectorAll('.carousel-item');
+                console.log(`🔍 Verifying after modal shown: ${itemsInDOM.length} items in DOM, expected ${mediaItems.length}`);
+                
+                if (itemsInDOM.length !== mediaItems.length) {
+                    console.error(`❌ Mismatch! Expected ${mediaItems.length} items but found ${itemsInDOM.length} in DOM`);
+                    console.error(`❌ Re-setting carousel HTML...`);
+                    // Re-set the HTML if there's a mismatch
+                    carouselInnerElement.innerHTML = carouselItemsHtml;
+                    
+                    // Verify again
+                    const itemsAfterReset = carouselInnerElement.querySelectorAll('.carousel-item');
+                    console.log(`🔍 After reset: ${itemsAfterReset.length} items in DOM`);
+                }
+                
+                // Dispose existing carousel instance if any
+                const existingCarousel = bootstrap.Carousel.getInstance(carouselElement);
+                if (existingCarousel) {
+                    existingCarousel.dispose();
+                }
+                
+                // Initialize new carousel
+                const carousel = new bootstrap.Carousel(carouselElement, {
+                    interval: false, // Don't auto-advance
+                    wrap: true // Allow wrapping from last to first
+                });
+                
+                console.log('✅ Bootstrap carousel initialized');
+                const finalItems = carouselElement.querySelectorAll('.carousel-item');
+                console.log(`📊 Final carousel has ${finalItems.length} items`);
+                
+                // Log all items for debugging
+                finalItems.forEach((item, idx) => {
+                    const isActive = item.classList.contains('active');
+                    const hasMedia = item.querySelectorAll('img, video').length > 0;
+                    const isVisible = item.offsetParent !== null;
+                    const displayStyle = window.getComputedStyle(item).display;
+                    console.log(`  📸 Carousel item ${idx + 1}: active=${isActive}, hasMedia=${hasMedia}, visible=${isVisible}, display=${displayStyle}`);
+                    
+                    // Check if image is loaded
+                    const img = item.querySelector('img');
+                    if (img) {
+                        console.log(`    🖼️ Image src: ${img.src.substring(0, 80)}...`);
+                        console.log(`    🖼️ Image complete: ${img.complete}, naturalWidth: ${img.naturalWidth}`);
+                    }
+                });
+                
+                // Debug info removed for production
+                
+                // Update counter on slide change
+                carouselElement.addEventListener('slid.bs.carousel', function (event) {
+                    const allCarouselItems = carouselElement.querySelectorAll('.carousel-item');
+                    const activeIndex = Array.from(allCarouselItems).indexOf(event.relatedTarget);
+                    document.getElementById('mediaPreviewCounter').textContent = `${activeIndex + 1} / ${mediaItems.length}`;
+                    console.log(`🔄 Carousel slid to index ${activeIndex + 1}`);
+                });
+            }, { once: true });
+            
+            console.log('✅ Modal shown with', mediaItems.length, 'media items');
+        }
     }
 
     // Approve product
@@ -3032,6 +3620,170 @@
                 showRealTimeNotification(`Failed to reject product: ${error.message}`, 'danger');
             } else {
                 showAlert(`Failed to reject product: ${error.message}`, 'error');
+            }
+        }
+    }
+
+    // Show delete modal
+    function showDeleteModal(productId = null) {
+        selectedProductId = productId || selectedProductId;
+        new bootstrap.Modal(document.getElementById('deleteProductModal')).show();
+    }
+
+    // Confirm delete product
+    async function confirmDeleteProduct() {
+        if (!selectedProductId) return;
+        
+        try {
+            console.log('🗑️ Deleting product:', selectedProductId);
+            
+            // Get product data first to extract image URLs
+            const getResponse = await fetch(`${FIREBASE_REST_BASE}/products/${selectedProductId}?key=${FIREBASE_CONFIG.apiKey}`);
+            if (!getResponse.ok) {
+                throw new Error(`Failed to get product data: HTTP ${getResponse.status}`);
+            }
+            
+            const productData = await getResponse.json();
+            console.log('Product data to delete:', productData);
+            
+            // Extract image URLs and video URL
+            const imageUrls = [];
+            const fields = productData.fields || {};
+            
+            // Get single imageUrl
+            if (fields.imageUrl?.stringValue) {
+                imageUrls.push(fields.imageUrl.stringValue);
+            }
+            
+            // Get imageUrls array
+            if (fields.imageUrls?.arrayValue?.values) {
+                fields.imageUrls.arrayValue.values.forEach(item => {
+                    if (item.stringValue) {
+                        imageUrls.push(item.stringValue);
+                    }
+                });
+            }
+            
+            // Get video URL
+            if (fields.videoUrl?.stringValue) {
+                imageUrls.push(fields.videoUrl.stringValue);
+            }
+            
+            // Get video thumbnail
+            if (fields.videoThumbnailUrl?.stringValue) {
+                imageUrls.push(fields.videoThumbnailUrl.stringValue);
+            }
+            
+            console.log('📸 Found images/videos to delete:', imageUrls);
+            
+            // Delete all comments associated with this product
+            try {
+                console.log('🗑️ Deleting comments for product:', selectedProductId);
+                // Get all comments for this product using a query
+                // Note: Firestore REST API doesn't support queries directly, so we'll need to get all comments and filter
+                const commentsResponse = await fetch(`${FIREBASE_REST_BASE}/comments?key=${FIREBASE_CONFIG.apiKey}&pageSize=1000`);
+                if (commentsResponse.ok) {
+                    const commentsData = await commentsResponse.json();
+                    if (commentsData.documents) {
+                        const productComments = commentsData.documents.filter(doc => {
+                            const productIdField = doc.fields?.productId?.stringValue;
+                            return productIdField === selectedProductId;
+                        });
+                        
+                        console.log(`🗑️ Found ${productComments.length} comments to delete`);
+                        
+                        // Delete each comment
+                        const commentDeletePromises = productComments.map(async (commentDoc) => {
+                            const commentId = commentDoc.name.split('/').pop();
+                            try {
+                                const deleteResponse = await fetch(`${FIREBASE_REST_BASE}/comments/${commentId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'DELETE'
+                                });
+                                if (deleteResponse.ok) {
+                                    console.log('✅ Deleted comment:', commentId);
+                                } else {
+                                    console.error('❌ Failed to delete comment:', commentId);
+                                }
+                            } catch (error) {
+                                console.error('❌ Error deleting comment:', commentId, error);
+                            }
+                        });
+                        
+                        await Promise.allSettled(commentDeletePromises);
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Error deleting comments:', error);
+                // Continue with product deletion even if comment deletion fails
+            }
+            
+            // Delete the product document from Firestore
+            const deleteResponse = await fetch(`${FIREBASE_REST_BASE}/products/${selectedProductId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                method: 'DELETE'
+            });
+            
+            if (!deleteResponse.ok) {
+                throw new Error(`HTTP ${deleteResponse.status}: ${deleteResponse.statusText}`);
+            }
+            
+            console.log('✅ Product deleted successfully from database');
+            
+            // Note: Firebase Storage files will need to be deleted separately
+            // For now, the product is deleted from Firestore. Storage cleanup can be done via Cloud Functions
+            // or manually. The image URLs are logged above for reference.
+            if (imageUrls.length > 0) {
+                console.log('⚠️ Note: Product images/videos in Storage need to be deleted separately:', imageUrls);
+            }
+            
+            // Create notification for seller if sellerId exists
+            const sellerId = fields.sellerId?.stringValue;
+            if (sellerId) {
+                try {
+                    // Create a notification that product was deleted
+                    const notificationData = {
+                        fields: {
+                            userId: { stringValue: sellerId },
+                            type: { stringValue: 'product_status' },
+                            title: { stringValue: 'Product Deleted' },
+                            message: { stringValue: `Your product "${fields.title?.stringValue || 'Product'}" has been deleted by an administrator.` },
+                            productId: { stringValue: selectedProductId },
+                            isRead: { booleanValue: false },
+                            createdAt: { timestampValue: new Date().toISOString() }
+                        }
+                    };
+                    
+                    await fetch(`${FIREBASE_REST_BASE}/notifications?key=${FIREBASE_CONFIG.apiKey}`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify(notificationData)
+                    });
+                    console.log('✅ Notification created for product deletion');
+                } catch (notificationError) {
+                    console.error('❌ Failed to create notification:', notificationError);
+                    // Don't fail the deletion if notification creation fails
+                }
+            }
+            
+            // Show success message
+            if (realTimeNotifications) {
+                showRealTimeNotification('Product deleted successfully!', 'success');
+            } else {
+                showAlert('Product deleted successfully!', 'success');
+            }
+            
+            // Close modals and refresh data
+            bootstrap.Modal.getInstance(document.getElementById('deleteProductModal'))?.hide();
+            bootstrap.Modal.getInstance(document.getElementById('productModal'))?.hide();
+            loadProducts();
+            
+        } catch (error) {
+            console.error('❌ Error deleting product:', error);
+            if (realTimeNotifications) {
+                showRealTimeNotification(`Failed to delete product: ${error.message}`, 'danger');
+            } else {
+                showAlert(`Failed to delete product: ${error.message}`, 'error');
             }
         }
     }
@@ -3833,6 +4585,291 @@
             alert(`Failed to delete admin: ${error.message || 'Please try again.'}`);
         }
     }
+
+    // APK Download Function
+    function downloadAPK(event) {
+        event.preventDefault();
+        
+        // Direct download URL from Firebase Storage
+        // Format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{path}?alt=media
+        const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fmarketsafe.apk?alt=media';
+        
+        // Create temporary link and trigger download
+        const link = document.createElement('a');
+        link.href = downloadUrl;
+        link.download = 'MarketSafe-v1.0.3.apk';
+        link.target = '_blank';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        console.log('✅ APK download started');
+    }
+
+    // Reports Functions
+    let reportsData = {};
+
+    async function loadReports() {
+        try {
+            const tbody = document.getElementById('reportsTableBody');
+            if (tbody) {
+                tbody.innerHTML = '<tr><td colspan="7" class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
+            }
+
+            const db = firebase.firestore();
+            let query = db.collection('reports').orderBy('createdAt', 'desc');
+
+            const statusFilter = document.getElementById('reportStatusFilter')?.value;
+            if (statusFilter) {
+                query = query.where('status', '==', statusFilter);
+            }
+
+            const snapshot = await query.get();
+            reportsData = {};
+            snapshot.forEach(doc => {
+                reportsData[doc.id] = { id: doc.id, ...doc.data() };
+            });
+
+            displayReports();
+            updatePendingReportsBadge();
+        } catch (error) {
+            console.error('Error loading reports:', error);
+            showError('Failed to load reports: ' + error.message);
+        }
+    }
+
+    function displayReports() {
+        const tbody = document.getElementById('reportsTableBody');
+        if (!tbody) return;
+
+        if (Object.keys(reportsData).length === 0) {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No reports found</td></tr>';
+            return;
+        }
+
+        tbody.innerHTML = '';
+        Object.values(reportsData).forEach(report => {
+            const reasonLabels = {
+                'inappropriate_content': 'Inappropriate Content',
+                'spam_scam': 'Spam or Scam',
+                'harassment': 'Harassment or Bullying',
+                'fake_account': 'Fake Account',
+                'prohibited_items': 'Selling Prohibited Items',
+                'other': 'Other'
+            };
+
+            const statusBadges = {
+                'pending': '<span class="badge bg-warning">Pending</span>',
+                'reviewed': '<span class="badge bg-info">Reviewed</span>',
+                'resolved': '<span class="badge bg-success">Resolved</span>',
+                'dismissed': '<span class="badge bg-secondary">Dismissed</span>'
+            };
+
+            const row = document.createElement('tr');
+            row.innerHTML = `
+                <td>${report.reportedUsername || 'Unknown'}<br><small class="text-muted">${report.reportedEmail || ''}</small></td>
+                <td>${report.reporterUsername || 'Unknown'}<br><small class="text-muted">${report.reporterEmail || ''}</small></td>
+                <td>${reasonLabels[report.reason] || report.reason}</td>
+                <td>${report.customReason || '-'}</td>
+                <td>${formatDate(report.createdAt?.toDate())}</td>
+                <td>${statusBadges[report.status] || report.status}</td>
+                <td>
+                    ${report.status === 'pending' ? `
+                        <button class="btn btn-sm btn-success me-1" onclick="updateReportStatus('${report.id}', 'resolved')">
+                            <i class="fas fa-check"></i> Resolve
+                        </button>
+                        <button class="btn btn-sm btn-secondary" onclick="updateReportStatus('${report.id}', 'dismissed')">
+                            <i class="fas fa-times"></i> Dismiss
+                        </button>
+                    ` : ''}
+                    <button class="btn btn-sm btn-info" onclick="viewReportDetails('${report.id}')">
+                        <i class="fas fa-eye"></i> View
+                    </button>
+                </td>
+            `;
+            tbody.appendChild(row);
+        });
+    }
+
+    async function updateReportStatus(reportId, status) {
+        if (!confirm(`Are you sure you want to mark this report as ${status}?`)) return;
+
+        try {
+            const db = firebase.firestore();
+            await db.collection('reports').doc(reportId).update({
+                status: status,
+                reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
+                reviewedBy: currentAdminEmail || 'Admin'
+            });
+
+            showSuccess(`Report marked as ${status}`);
+            loadReports();
+        } catch (error) {
+            console.error('Error updating report status:', error);
+            showError('Failed to update report status: ' + error.message);
+        }
+    }
+
+    function viewReportDetails(reportId) {
+        const report = reportsData[reportId];
+        if (!report) return;
+
+        const reasonLabels = {
+            'inappropriate_content': 'Inappropriate Content',
+            'spam_scam': 'Spam or Scam',
+            'harassment': 'Harassment or Bullying',
+            'fake_account': 'Fake Account',
+            'prohibited_items': 'Selling Prohibited Items',
+            'other': 'Other'
+        };
+
+        const modal = `
+            <div class="modal fade" id="reportDetailsModal" tabindex="-1">
+                <div class="modal-dialog modal-lg">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h5 class="modal-title">Report Details</h5>
+                            <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                        </div>
+                        <div class="modal-body">
+                            <table class="table">
+                                <tr><th>Reported User:</th><td>${report.reportedUsername} (${report.reportedEmail})</td></tr>
+                                <tr><th>Reporter:</th><td>${report.reporterUsername} (${report.reporterEmail})</td></tr>
+                                <tr><th>Reason:</th><td>${reasonLabels[report.reason] || report.reason}</td></tr>
+                                <tr><th>Details:</th><td>${report.customReason || 'N/A'}</td></tr>
+                                <tr><th>Status:</th><td>${report.status}</td></tr>
+                                <tr><th>Date:</th><td>${formatDate(report.createdAt?.toDate())}</td></tr>
+                                ${report.reviewedAt ? `<tr><th>Reviewed At:</th><td>${formatDate(report.reviewedAt?.toDate())}</td></tr>` : ''}
+                                ${report.reviewedBy ? `<tr><th>Reviewed By:</th><td>${report.reviewedBy}</td></tr>` : ''}
+                                ${report.adminNotes ? `<tr><th>Admin Notes:</th><td>${report.adminNotes}</td></tr>` : ''}
+                            </table>
+                        </div>
+                        <div class="modal-footer">
+                            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+
+        const modalDiv = document.createElement('div');
+        modalDiv.innerHTML = modal;
+        document.body.appendChild(modalDiv);
+        const bsModal = new bootstrap.Modal(document.getElementById('reportDetailsModal'));
+        bsModal.show();
+        document.getElementById('reportDetailsModal').addEventListener('hidden.bs.modal', function() {
+            document.body.removeChild(modalDiv);
+        });
+    }
+
+    function updatePendingReportsBadge() {
+        const pendingCount = Object.values(reportsData).filter(r => r.status === 'pending').length;
+        const badge = document.getElementById('pendingReportsBadge');
+        if (badge) {
+            if (pendingCount > 0) {
+                badge.textContent = pendingCount;
+                badge.style.display = 'inline-block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+    }
+
+    // Admin Messaging Functions
+    async function loadTotalUsersCount() {
+        try {
+            const db = firebase.firestore();
+            const snapshot = await db.collection('users').get();
+            const count = snapshot.size;
+            const countElement = document.getElementById('totalUsersCount');
+            if (countElement) {
+                countElement.textContent = count;
+            }
+        } catch (error) {
+            console.error('Error loading user count:', error);
+        }
+    }
+
+    async function sendAdminMessage(event) {
+        event.preventDefault();
+        
+        const message = document.getElementById('adminMessage').value.trim();
+        const messageType = document.getElementById('messageType').value;
+        const sendBtn = document.getElementById('sendMessageBtn');
+
+        if (!message) {
+            showError('Please enter a message');
+            return;
+        }
+
+        if (!confirm(`Are you sure you want to send this message to all users? This action cannot be undone.`)) {
+            return;
+        }
+
+        sendBtn.disabled = true;
+        sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Sending...';
+
+        try {
+            const db = firebase.firestore();
+            const usersSnapshot = await db.collection('users').get();
+            
+            let batch = db.batch();
+            let batchCount = 0;
+            const maxBatchSize = 500;
+            let totalSent = 0;
+
+            for (const userDoc of usersSnapshot.docs) {
+                const notificationRef = db.collection('notifications').doc();
+                batch.set(notificationRef, {
+                    userId: userDoc.id,
+                    type: 'admin_message',
+                    title: messageType === 'warning' 
+                        ? '⚠️ Warning from Admin'
+                        : messageType === 'announcement'
+                            ? '📢 Announcement'
+                            : 'ℹ️ Important Notice',
+                    message: message,
+                    messageType: messageType,
+                    adminId: currentAdminEmail || 'admin',
+                    adminName: currentAdminName || 'Admin',
+                    read: false,
+                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
+                });
+
+                batchCount++;
+                if (batchCount >= maxBatchSize) {
+                    await batch.commit();
+                    totalSent += batchCount;
+                    batch = db.batch();
+                    batchCount = 0;
+                }
+            }
+
+            if (batchCount > 0) {
+                await batch.commit();
+                totalSent += batchCount;
+            }
+
+            showSuccess(`Message sent successfully to ${totalSent} users!`);
+            document.getElementById('adminMessageForm').reset();
+        } catch (error) {
+            console.error('Error sending admin message:', error);
+            showError('Failed to send message: ' + error.message);
+        } finally {
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '<i class="fas fa-paper-plane me-2"></i>Send Message to All Users';
+        }
+    }
+
+    // Load reports and user count when reports tab is shown
+    document.getElementById('reports-tab')?.addEventListener('shown.bs.tab', function() {
+        loadReports();
+    });
+
+    // Load user count when messaging tab is shown
+    document.getElementById('messaging-tab')?.addEventListener('shown.bs.tab', function() {
+        loadTotalUsersCount();
+    });
 
 </script>
 <!-- EXIF.js library for reading EXIF data -->
