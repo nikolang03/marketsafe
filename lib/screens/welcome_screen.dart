@@ -2,6 +2,7 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'face_login_screen.dart';
 import 'signup_screen.dart';
+import '../services/network_service.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -113,6 +114,113 @@ class _WelcomeScreenState extends State<WelcomeScreen>
         _buttonController.forward();
       }
     });
+    
+    // Check internet connectivity after animations start
+    _checkInternetConnection();
+  }
+  
+  Future<void> _checkInternetConnection() async {
+    // Wait a bit for the screen to render
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    if (!mounted) return;
+    
+    // Check if internet is available
+    final hasInternet = await NetworkService.checkConnectivity();
+    
+    if (!hasInternet && mounted) {
+      // Show dialog only if no internet
+      _showNoInternetDialog();
+    }
+    // If internet is available, do nothing - proceed normally
+  }
+  
+  void _showNoInternetDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => AlertDialog(
+        backgroundColor: const Color(0xFF1a1a1a),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              Icons.wifi_off_rounded,
+              color: Colors.red,
+              size: 28,
+            ),
+            const SizedBox(width: 12),
+            const Text(
+              "No Internet Connection",
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.bold,
+                fontSize: 18,
+              ),
+            ),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "MarketSafe requires an internet connection to function.",
+              style: TextStyle(color: Colors.white70, fontSize: 14),
+            ),
+            const SizedBox(height: 16),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: Colors.red.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
+              ),
+              child: const Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.red, size: 20),
+                  SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Please check your internet connection and try again.",
+                      style: TextStyle(color: Colors.red, fontSize: 13),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.of(context).pop();
+              // Retry connection check
+              final hasInternet = await NetworkService.checkConnectivity();
+              if (!hasInternet && mounted) {
+                _showNoInternetDialog();
+              }
+            },
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.refresh_rounded, color: Colors.white, size: 18),
+                SizedBox(width: 8),
+                Text(
+                  "Retry",
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   void _initializeParticles() {
@@ -214,11 +322,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
               return Opacity(
                 opacity: 0.3,
                 child: CustomPaint(
-                  painter: ParticlePainter(
-                    particles: _particles,
-                    progress: _particleController.value,
-                  ),
-                  child: Container(),
+                painter: ParticlePainter(
+                  particles: _particles,
+                  progress: _particleController.value,
+                ),
+                child: Container(),
                 ),
               );
             },
@@ -279,11 +387,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                             children: [
                               TextSpan(
                                 text: 'Market',
-                                style: TextStyle(
+                          style: TextStyle(
                                   fontFamily: 'Plank',
-                                  fontSize: 42,
+                                  fontSize: 32,
                                   fontWeight: FontWeight.w400,
-                                  color: Colors.white,
+                            color: Colors.white,
                                   letterSpacing: 2.0,
                                   height: 1.2,
                                 ),
@@ -292,7 +400,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                                 text: 'Safe',
                                 style: TextStyle(
                                   fontFamily: 'Plank',
-                                  fontSize: 42,
+                                  fontSize: 32,
                                   fontWeight: FontWeight.w400,
                                   color: Colors.red,
                                   letterSpacing: 2.0,
@@ -356,8 +464,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               child: const Center(
                                 child: Text(
                                   'Login',
-                                  style: TextStyle(
-                                    color: Colors.white,
+                              style: TextStyle(
+                                color: Colors.white,
                                     fontSize: 17,
                                     fontWeight: FontWeight.w600,
                                     letterSpacing: 1.0,
@@ -394,7 +502,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                               child: const Center(
                                 child: Text(
                                   'Create Account',
-                                  style: TextStyle(
+                              style: TextStyle(
                                     color: Colors.white,
                                     fontSize: 17,
                                     fontWeight: FontWeight.w600,
