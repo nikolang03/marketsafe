@@ -228,20 +228,8 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
   console.log(`📤 Calling Luxand: POST ${endpoints[0]} (will try alternatives if needed)`);
   console.log(`📤 Using 'token' header for authentication`);
   
-  // Convert base64 to buffer
+  // Convert base64 to buffer once (reuse for all endpoint attempts)
   const imageBuffer = Buffer.from(base64Image, 'base64');
-  
-  // Use multipart/form-data format
-  const formData = new FormData();
-  formData.append('photo', imageBuffer, {
-    filename: 'verify.jpg',
-    contentType: 'image/jpeg'
-  });
-  
-  const headers = {
-    'token': API_KEY,
-    ...formData.getHeaders()
-  };
   
   // Try each endpoint format
   for (const endpoint of endpoints) {
@@ -252,6 +240,18 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
       // Add timeout to prevent hanging (2 seconds per endpoint attempt - very short since this endpoint may not be available)
       const controller = new AbortController();
       timeoutId = setTimeout(() => controller.abort(), 2000);
+      
+      // Create new FormData for each attempt (prevents memory leak warning)
+      const formData = new FormData();
+      formData.append('photo', imageBuffer, {
+        filename: 'verify.jpg',
+        contentType: 'image/jpeg'
+      });
+      
+      const headers = {
+        'token': API_KEY,
+        ...formData.getHeaders()
+      };
       
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -284,15 +284,21 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
       // Success - parse and return
       let responseData;
       try {
-        // Fix unescaped quotes in response (Luxand API bug)
-        let cleanedResponse = responseText;
-        cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
-          return `"message": "${p1}\\"${p2}\\"${p3}"`;
-        });
-        responseData = JSON.parse(cleanedResponse);
+        // Try parsing directly first (most responses are valid JSON)
+        responseData = JSON.parse(responseText);
       } catch (parseError) {
-        console.error(`❌ Failed to parse verify response:`, parseError.message);
-        throw new Error(`Invalid JSON response from Luxand verify: ${responseText.substring(0, 200)}`);
+        // If parsing fails, try to fix unescaped quotes (Luxand API bug in some responses)
+        try {
+          let cleanedResponse = responseText;
+          cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+            return `"message": "${p1}\\"${p2}\\"${p3}"`;
+          });
+          responseData = JSON.parse(cleanedResponse);
+        } catch (secondParseError) {
+          console.error(`❌ Failed to parse verify response:`, parseError.message);
+          console.error(`❌ Response text:`, responseText.substring(0, 500));
+          throw new Error(`Invalid JSON response from Luxand verify: ${responseText.substring(0, 200)}`);
+        }
       }
       
       console.log(`✅ Luxand verify success:`, JSON.stringify(responseData).substring(0, 200));
