@@ -148,27 +148,66 @@ export async function enrollPhoto(base64Image, name) {
 }
 
 /**
- * Compare two face photos
+ * Compare two face photos using Luxand's Compare Facial Similarity API
  * @param {string} base64A - First photo (base64)
- * @param {string} base64B - Second photo (base64) or stored photo ID
- * @returns {Promise<Object>} - { match, similarity, confidence }
+ * @param {string} base64B - Second photo (base64)
+ * @returns {Promise<Object>} - { similarity, match, confidence }
  */
 export async function comparePhotos(base64A, base64B) {
-  const res = await fetch(`${LUXAND_BASE}/compare`, {
+  console.log(`📤 Calling Luxand: POST ${LUXAND_BASE}/photo/compare`);
+  console.log(`📤 Using 'token' header for authentication`);
+  
+  // Convert base64 to buffer
+  const imageBufferA = Buffer.from(base64A, 'base64');
+  const imageBufferB = Buffer.from(base64B, 'base64');
+  
+  // Use multipart/form-data format
+  const formData = new FormData();
+  formData.append('photo1', imageBufferA, {
+    filename: 'photo1.jpg',
+    contentType: 'image/jpeg'
+  });
+  formData.append('photo2', imageBufferB, {
+    filename: 'photo2.jpg',
+    contentType: 'image/jpeg'
+  });
+  
+  const headers = {
+    'token': API_KEY,
+    ...formData.getHeaders()
+  };
+  
+  const res = await fetch(`${LUXAND_BASE}/photo/compare`, {
     method: 'POST',
-    headers,
-    body: JSON.stringify({
-      photo1: base64A,
-      photo2: base64B
-    })
+    headers: headers,
+    body: formData
   });
 
+  console.log(`📥 Luxand compare response status: ${res.status} ${res.statusText}`);
+  
+  const responseText = await res.text();
+  console.log(`📥 Raw Luxand compare response (first 500 chars):`, responseText.substring(0, 500));
+
   if (!res.ok) {
-    const errorText = await res.text();
-    throw new Error(`Luxand compare error (${res.status}): ${errorText}`);
+    console.error(`❌ Luxand compare error response:`, responseText.substring(0, 500));
+    throw new Error(`Luxand compare error (${res.status}): ${responseText.substring(0, 200)}`);
   }
 
-  return await res.json();
+  // Handle JSON parsing
+  let responseData;
+  try {
+    let cleanedResponse = responseText;
+    cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+      return `"message": "${p1}\\"${p2}\\"${p3}"`;
+    });
+    responseData = JSON.parse(cleanedResponse);
+  } catch (parseError) {
+    console.error(`❌ Failed to parse compare response:`, parseError.message);
+    throw new Error(`Invalid JSON response from Luxand compare: ${responseText.substring(0, 200)}`);
+  }
+  
+  console.log(`✅ Luxand compare success:`, JSON.stringify(responseData).substring(0, 200));
+  return responseData;
 }
 
 /**
@@ -323,6 +362,52 @@ export async function searchPhoto(base64Image) {
   }
   
   console.log(`✅ Luxand search success:`, JSON.stringify(responseData).substring(0, 200));
+  return responseData;
+}
+
+/**
+ * Delete a person from Luxand by UUID
+ * @param {string} personUuid - Luxand person UUID
+ * @returns {Promise<Object>} - { success: boolean, message: string }
+ */
+export async function deletePerson(personUuid) {
+  console.log(`📤 Calling Luxand: DELETE ${LUXAND_BASE}/person/${personUuid}`);
+  console.log(`📤 Using 'token' header for authentication`);
+  
+  const headers = {
+    'token': API_KEY,
+  };
+  
+  const res = await fetch(`${LUXAND_BASE}/person/${personUuid}`, {
+    method: 'DELETE',
+    headers: headers
+  });
+
+  console.log(`📥 Luxand delete response status: ${res.status} ${res.statusText}`);
+  
+  const responseText = await res.text();
+  console.log(`📥 Raw Luxand delete response (first 500 chars):`, responseText.substring(0, 500));
+
+  if (!res.ok && res.status !== 204) {
+    console.error(`❌ Luxand delete error response:`, responseText.substring(0, 500));
+    throw new Error(`Luxand delete error (${res.status}): ${responseText.substring(0, 200)}`);
+  }
+
+  // Handle JSON parsing (some APIs return empty body on success)
+  let responseData = { success: true, message: 'Person deleted successfully' };
+  if (responseText && responseText.trim().length > 0) {
+    try {
+      let cleanedResponse = responseText;
+      cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+        return `"message": "${p1}\\"${p2}\\"${p3}"`;
+      });
+      responseData = JSON.parse(cleanedResponse);
+    } catch (parseError) {
+      console.warn(`⚠️ Failed to parse delete response, assuming success: ${parseError.message}`);
+    }
+  }
+  
+  console.log(`✅ Luxand delete success:`, JSON.stringify(responseData).substring(0, 200));
   return responseData;
 }
 
