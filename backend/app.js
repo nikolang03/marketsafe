@@ -431,11 +431,12 @@ app.post('/api/verify', async (req, res) => {
         try {
           console.log(`🔍 Attempting 1:1 verification with candidate ID: ${candidateId}`);
           
-          // Use Promise.race to timeout the 1:1 verify attempt quickly (5 seconds)
+          // Use Promise.race to timeout the 1:1 verify attempt quickly (3 seconds)
           // This prevents the entire request from timing out if the endpoint is slow/unavailable
+          // Note: This endpoint may not be available in all Luxand plans
           const verifyPromise = verifyPersonPhoto(candidateId, photoBase64);
           const timeoutPromise = new Promise((_, reject) => 
-            setTimeout(() => reject(new Error('1:1 verify timeout')), 5000)
+            setTimeout(() => reject(new Error('1:1 verify timeout')), 3000)
           );
           
           const verifyRes = await Promise.race([verifyPromise, timeoutPromise]);
@@ -464,8 +465,14 @@ app.post('/api/verify', async (req, res) => {
             });
           }
         } catch (verifyError) {
-          // If 1:1 verify fails or times out, just use search result (which already passed)
-          console.warn(`⚠️ 1:1 verification with ID failed or timed out, using search result: ${verifyError.message}`);
+          // If 1:1 verify fails, times out, or is not available, just use search result (which already passed)
+          // Search-based verification with email matching is secure and sufficient
+          const errorMsg = verifyError.message || 'Unknown error';
+          if (errorMsg.includes('not available') || errorMsg.includes('405')) {
+            console.log(`ℹ️ 1:1 verify endpoint not available in this Luxand plan - using secure search-based verification instead`);
+          } else {
+            console.warn(`⚠️ 1:1 verification with ID failed or timed out, using search result: ${errorMsg}`);
+          }
         }
       }
 

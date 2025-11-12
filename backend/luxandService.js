@@ -247,9 +247,9 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
     try {
       console.log(`📤 Trying endpoint: ${endpoint}`);
       
-      // Add timeout to prevent hanging (5 seconds per endpoint attempt)
+      // Add timeout to prevent hanging (2 seconds per endpoint attempt - very short since this endpoint may not be available)
       const controller = new AbortController();
-      timeoutId = setTimeout(() => controller.abort(), 5000);
+      timeoutId = setTimeout(() => controller.abort(), 2000);
       
       const res = await fetch(endpoint, {
         method: 'POST',
@@ -266,10 +266,14 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
       console.log(`📥 Raw Luxand verify response (first 500 chars):`, responseText.substring(0, 500));
 
       if (!res.ok) {
-        // If 404, try next endpoint format
-        if (res.status === 404 && endpoint !== endpoints[endpoints.length - 1]) {
-          console.warn(`⚠️ Endpoint ${endpoint} returned 404, trying next format...`);
+        // If 404 or 405, this endpoint format is not available - try next or give up
+        if ((res.status === 404 || res.status === 405) && endpoint !== endpoints[endpoints.length - 1]) {
+          console.warn(`⚠️ Endpoint ${endpoint} returned ${res.status}, trying next format...`);
           continue;
+        }
+        // If 405 on last endpoint, this feature is not available in this plan
+        if (res.status === 405) {
+          throw new Error(`1:1 verify endpoint not available in your Luxand plan (405 Method Not Allowed)`);
         }
         console.error(`❌ Luxand verify error response:`, responseText.substring(0, 500));
         throw new Error(`Luxand verify error (${res.status}): ${responseText.substring(0, 200)}`);
