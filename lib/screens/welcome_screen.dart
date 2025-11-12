@@ -368,17 +368,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           animation: _logoPulseAnimation,
                           builder: (context, child) {
                             return Container(
-                              padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                gradient: LinearGradient(
-                                  colors: [
-                                    Colors.red.withOpacity(0.1),
-                                    Colors.red.withOpacity(0.05),
-                                  ],
-                                  begin: Alignment.topLeft,
-                                  end: Alignment.bottomRight,
-                                ),
                                 boxShadow: [
                                   BoxShadow(
                                     color: Colors.red.withOpacity(0.2 + _logoPulseAnimation.value * 0.3),
