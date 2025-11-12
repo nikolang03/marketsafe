@@ -4616,24 +4616,65 @@
                 tbody.innerHTML = '<tr><td colspan="7" class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
             }
 
+            console.log('📋 Loading reports...');
+            
+            // Use the same Firestore instance as other queries (with marketsafe database)
             const db = firebase.firestore();
-            let query = db.collection('reports').orderBy('createdAt', 'desc');
-
-            const statusFilter = document.getElementById('reportStatusFilter')?.value;
-            if (statusFilter) {
-                query = query.where('status', '==', statusFilter);
+            
+            // Get all reports first, then filter and sort in memory to avoid index issues
+            let snapshot;
+            try {
+                // Try with orderBy first
+                console.log('📋 Attempting to query reports with orderBy...');
+                snapshot = await db.collection('reports').orderBy('createdAt', 'desc').get();
+                console.log('✅ Query with orderBy succeeded');
+            } catch (orderByError) {
+                console.warn('⚠️ OrderBy failed (likely missing index), trying without orderBy:', orderByError);
+                // If orderBy fails (no index), get all and sort in memory
+                snapshot = await db.collection('reports').get();
+                console.log('✅ Query without orderBy succeeded');
             }
 
-            const snapshot = await query.get();
             reportsData = {};
+            const reportsArray = [];
+            
             snapshot.forEach(doc => {
-                reportsData[doc.id] = { id: doc.id, ...doc.data() };
+                const data = { id: doc.id, ...doc.data() };
+                reportsArray.push(data);
             });
 
+            // Filter by status if needed
+            const statusFilter = document.getElementById('reportStatusFilter')?.value;
+            const filteredReports = statusFilter 
+                ? reportsArray.filter(r => r.status === statusFilter)
+                : reportsArray;
+
+            // Sort by createdAt if not already sorted
+            if (filteredReports.length > 0 && filteredReports[0].createdAt) {
+                filteredReports.sort((a, b) => {
+                    const aTime = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
+                    const bTime = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
+                    return bTime - aTime; // Descending order
+                });
+            }
+
+            // Convert to object
+            filteredReports.forEach(report => {
+                reportsData[report.id] = report;
+            });
+
+            console.log(`✅ Loaded ${Object.keys(reportsData).length} reports`);
             displayReports();
             updatePendingReportsBadge();
         } catch (error) {
-            console.error('Error loading reports:', error);
+            console.error('❌ Error loading reports:', error);
+            const tbody = document.getElementById('reportsTableBody');
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Error loading reports: ${error.message}
+                    <br><button class="btn btn-sm btn-primary mt-2" onclick="loadReports()">Retry</button>
+                </td></tr>`;
+            }
             showError('Failed to load reports: ' + error.message);
         }
     }
