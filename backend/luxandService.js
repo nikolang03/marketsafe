@@ -217,7 +217,13 @@ export async function comparePhotos(base64A, base64B) {
  * @returns {Promise<Object>} - { similarity, match, verified }
  */
 export async function verifyPersonPhoto(personUuid, base64Image) {
-  console.log(`📤 Calling Luxand: POST ${LUXAND_BASE}/v2/person/${personUuid}/verify`);
+  // Try different endpoint formats (similar to delete endpoint which works without /v2/)
+  const endpoints = [
+    `${LUXAND_BASE}/person/${personUuid}/verify`, // Without /v2/ (like delete endpoint)
+    `${LUXAND_BASE}/v2/person/${personUuid}/verify`, // With /v2/
+  ];
+  
+  console.log(`📤 Calling Luxand: POST ${endpoints[0]} (will try alternatives if needed)`);
   console.log(`📤 Using 'token' header for authentication`);
   
   // Convert base64 to buffer
@@ -235,37 +241,60 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
     ...formData.getHeaders()
   };
   
-  const res = await fetch(`${LUXAND_BASE}/v2/person/${personUuid}/verify`, {
-    method: 'POST',
-    headers: headers,
-    body: formData
-  });
+  // Try each endpoint format
+  for (const endpoint of endpoints) {
+    try {
+      console.log(`📤 Trying endpoint: ${endpoint}`);
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: headers,
+        body: formData
+      });
 
-  console.log(`📥 Luxand verify response status: ${res.status} ${res.statusText}`);
-  
-  const responseText = await res.text();
-  console.log(`📥 Raw Luxand verify response (first 500 chars):`, responseText.substring(0, 500));
+      console.log(`📥 Luxand verify response status: ${res.status} ${res.statusText}`);
+      
+      const responseText = await res.text();
+      console.log(`📥 Raw Luxand verify response (first 500 chars):`, responseText.substring(0, 500));
 
-  if (!res.ok) {
-    console.error(`❌ Luxand verify error response:`, responseText.substring(0, 500));
-    throw new Error(`Luxand verify error (${res.status}): ${responseText.substring(0, 200)}`);
+      if (!res.ok) {
+        // If 404, try next endpoint format
+        if (res.status === 404 && endpoint !== endpoints[endpoints.length - 1]) {
+          console.warn(`⚠️ Endpoint ${endpoint} returned 404, trying next format...`);
+          continue;
+        }
+        console.error(`❌ Luxand verify error response:`, responseText.substring(0, 500));
+        throw new Error(`Luxand verify error (${res.status}): ${responseText.substring(0, 200)}`);
+      }
+      
+      // Success - parse and return
+      let responseData;
+      try {
+        // Fix unescaped quotes in response (Luxand API bug)
+        let cleanedResponse = responseText;
+        cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+          return `"message": "${p1}\\"${p2}\\"${p3}"`;
+        });
+        responseData = JSON.parse(cleanedResponse);
+      } catch (parseError) {
+        console.error(`❌ Failed to parse verify response:`, parseError.message);
+        throw new Error(`Invalid JSON response from Luxand verify: ${responseText.substring(0, 200)}`);
+      }
+      
+      console.log(`✅ Luxand verify success:`, JSON.stringify(responseData).substring(0, 200));
+      return responseData;
+    } catch (fetchError) {
+      // If this is the last endpoint, throw the error
+      if (endpoint === endpoints[endpoints.length - 1]) {
+        throw fetchError;
+      }
+      // Otherwise, try next endpoint
+      console.warn(`⚠️ Endpoint ${endpoint} failed: ${fetchError.message}, trying next...`);
+      continue;
+    }
   }
-
-  // Handle JSON parsing with unescaped quotes (Luxand API bug)
-  let responseData;
-  try {
-    let cleanedResponse = responseText;
-    cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
-      return `"message": "${p1}\\"${p2}\\"${p3}"`;
-    });
-    responseData = JSON.parse(cleanedResponse);
-  } catch (parseError) {
-    console.error(`❌ Failed to parse verify response:`, parseError.message);
-    throw new Error(`Invalid JSON response from Luxand verify: ${responseText.substring(0, 200)}`);
-  }
   
-  console.log(`✅ Luxand verify success:`, JSON.stringify(responseData).substring(0, 200));
-  return responseData;
+  // If we get here, all endpoints failed
+  throw new Error('All verify endpoint formats failed');
 }
 
 /**
