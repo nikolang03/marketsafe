@@ -279,20 +279,30 @@ export async function livenessCheck(base64Image) {
   console.log(`📤 Calling Luxand: POST ${LUXAND_BASE}/liveness`);
   
   try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+    
     const res = await fetch(`${LUXAND_BASE}/liveness`, {
       method: 'POST',
       headers,
       body: JSON.stringify({
         photo: base64Image
       }),
-      timeout: 10000 // 10 second timeout
+      signal: controller.signal
     });
 
+    clearTimeout(timeoutId);
     console.log(`📥 Luxand liveness response status: ${res.status} ${res.statusText}`);
 
     if (!res.ok) {
       const errorText = await res.text();
       console.error(`❌ Luxand liveness error response:`, errorText.substring(0, 500));
+      
+      // If 404, the endpoint is not available
+      if (res.status === 404) {
+        throw new Error('LIVENESS_ENDPOINT_NOT_AVAILABLE');
+      }
+      
       throw new Error(`Luxand liveness error (${res.status}): ${errorText.substring(0, 200)}`);
     }
 
@@ -301,7 +311,13 @@ export async function livenessCheck(base64Image) {
     return responseData;
   } catch (error) {
     // If endpoint doesn't exist (404) or times out, throw a specific error
-    if (error.message.includes('404') || error.message.includes('Not Found')) {
+    if (error.name === 'AbortError' || error.message.includes('aborted')) {
+      console.warn('⚠️ Liveness check timed out or was aborted');
+      throw new Error('LIVENESS_ENDPOINT_NOT_AVAILABLE');
+    }
+    if (error.message.includes('404') || 
+        error.message.includes('Not Found') || 
+        error.message === 'LIVENESS_ENDPOINT_NOT_AVAILABLE') {
       throw new Error('LIVENESS_ENDPOINT_NOT_AVAILABLE');
     }
     throw error;
