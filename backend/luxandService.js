@@ -217,10 +217,12 @@ export async function comparePhotos(base64A, base64B) {
  * @returns {Promise<Object>} - { similarity, match, verified }
  */
 export async function verifyPersonPhoto(personUuid, base64Image) {
-  // Try different endpoint formats (similar to delete endpoint which works without /v2/)
+  // According to Luxand API docs: POST https://api.luxand.cloud/photo/verify/{uuid}
+  // This is the correct endpoint format for "Verify Person in a Photo"
   const endpoints = [
-    `${LUXAND_BASE}/person/${personUuid}/verify`, // Without /v2/ (like delete endpoint)
-    `${LUXAND_BASE}/v2/person/${personUuid}/verify`, // With /v2/
+    `${LUXAND_BASE}/photo/verify/${personUuid}`, // Correct endpoint from Luxand docs
+    `${LUXAND_BASE}/person/${personUuid}/verify`, // Fallback (old format)
+    `${LUXAND_BASE}/v2/person/${personUuid}/verify`, // Fallback (v2 format)
   ];
   
   console.log(`📤 Calling Luxand: POST ${endpoints[0]} (will try alternatives if needed)`);
@@ -301,10 +303,18 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
       
       // If this is the last endpoint, throw the error
       if (endpoint === endpoints[endpoints.length - 1]) {
+        // Provide clearer error message for aborted/timeout cases
+        if (fetchError.name === 'AbortError' || fetchError.message.includes('aborted')) {
+          throw new Error('1:1 verify endpoint timed out or not available in this Luxand plan');
+        }
         throw fetchError;
       }
       // Otherwise, try next endpoint
-      console.warn(`⚠️ Endpoint ${endpoint} failed: ${fetchError.message}, trying next...`);
+      if (fetchError.name === 'AbortError' || fetchError.message.includes('aborted')) {
+        console.warn(`⚠️ Endpoint ${endpoint} timed out (not available), trying next format...`);
+      } else {
+        console.warn(`⚠️ Endpoint ${endpoint} failed: ${fetchError.message}, trying next...`);
+      }
       continue;
     }
   }
