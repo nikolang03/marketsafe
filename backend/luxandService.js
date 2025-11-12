@@ -243,13 +243,22 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
   
   // Try each endpoint format
   for (const endpoint of endpoints) {
+    let timeoutId;
     try {
       console.log(`📤 Trying endpoint: ${endpoint}`);
+      
+      // Add timeout to prevent hanging (5 seconds per endpoint attempt)
+      const controller = new AbortController();
+      timeoutId = setTimeout(() => controller.abort(), 5000);
+      
       const res = await fetch(endpoint, {
         method: 'POST',
         headers: headers,
-        body: formData
+        body: formData,
+        signal: controller.signal
       });
+      
+      clearTimeout(timeoutId);
 
       console.log(`📥 Luxand verify response status: ${res.status} ${res.statusText}`);
       
@@ -283,6 +292,9 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
       console.log(`✅ Luxand verify success:`, JSON.stringify(responseData).substring(0, 200));
       return responseData;
     } catch (fetchError) {
+      // Clear timeout if it was set
+      if (timeoutId) clearTimeout(timeoutId);
+      
       // If this is the last endpoint, throw the error
       if (endpoint === endpoints[endpoints.length - 1]) {
         throw fetchError;

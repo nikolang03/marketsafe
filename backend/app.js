@@ -425,11 +425,20 @@ app.post('/api/verify', async (req, res) => {
 
       // Try 1:1 verification with the candidate's ID if available
       // This provides an additional security layer
+      // NOTE: This endpoint may not be available in all plans, so we use a short timeout
       const candidateId = matchingCandidate.id?.toString() || matchingCandidate.personId?.toString() || '';
       if (candidateId) {
         try {
           console.log(`🔍 Attempting 1:1 verification with candidate ID: ${candidateId}`);
-          const verifyRes = await verifyPersonPhoto(candidateId, photoBase64);
+          
+          // Use Promise.race to timeout the 1:1 verify attempt quickly (5 seconds)
+          // This prevents the entire request from timing out if the endpoint is slow/unavailable
+          const verifyPromise = verifyPersonPhoto(candidateId, photoBase64);
+          const timeoutPromise = new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('1:1 verify timeout')), 5000)
+          );
+          
+          const verifyRes = await Promise.race([verifyPromise, timeoutPromise]);
           
           const similarity = parseFloat(verifyRes?.similarity ?? verifyRes?.confidence ?? 0);
           const match = verifyRes?.match ?? verifyRes?.verified ?? false;
@@ -455,7 +464,8 @@ app.post('/api/verify', async (req, res) => {
             });
           }
         } catch (verifyError) {
-          console.warn(`⚠️ 1:1 verification with ID failed, using search result: ${verifyError.message}`);
+          // If 1:1 verify fails or times out, just use search result (which already passed)
+          console.warn(`⚠️ 1:1 verification with ID failed or timed out, using search result: ${verifyError.message}`);
         }
       }
 
