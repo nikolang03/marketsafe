@@ -370,8 +370,8 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                           ),
                           child: Image.asset(
                             'assets/logo.png',
-                            height: 80,
-                            width: 80,
+                            height: 120,
+                            width: 120,
                           ),
                         ),
                       ),
