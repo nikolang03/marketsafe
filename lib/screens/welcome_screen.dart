@@ -16,9 +16,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
   late AnimationController _textController;
   late AnimationController _buttonController;
   late AnimationController _particleController;
+  late AnimationController _logoPulseController;
 
   late Animation<double> _logoFadeAnimation;
   late Animation<double> _logoScaleAnimation;
+  late Animation<double> _logoPulseAnimation;
   late Animation<double> _textFadeAnimation;
   late Animation<Offset> _textSlideAnimation;
   late Animation<double> _buttonFadeAnimation;
@@ -51,6 +53,11 @@ class _WelcomeScreenState extends State<WelcomeScreen>
       vsync: this,
     )..repeat();
 
+    _logoPulseController = AnimationController(
+      duration: const Duration(milliseconds: 2000),
+      vsync: this,
+    )..repeat(reverse: true);
+
     // Logo animations
     _logoFadeAnimation = Tween<double>(
       begin: 0.0,
@@ -66,6 +73,14 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     ).animate(CurvedAnimation(
       parent: _logoController,
       curve: Curves.easeOutBack,
+    ));
+
+    _logoPulseAnimation = Tween<double>(
+      begin: 0.3,
+      end: 0.8,
+    ).animate(CurvedAnimation(
+      parent: _logoPulseController,
+      curve: Curves.easeInOut,
     ));
 
     // Text animations
@@ -242,6 +257,7 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     _textController.dispose();
     _buttonController.dispose();
     _particleController.dispose();
+    _logoPulseController.dispose();
     super.dispose();
   }
 
@@ -343,36 +359,46 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     SizedBox(height: screenHeight * 0.08),
-                    // Logo with professional animation
+                    // Logo with professional animation and pulsing glow effect
                     FadeTransition(
                       opacity: _logoFadeAnimation,
                       child: ScaleTransition(
                         scale: _logoScaleAnimation,
-                        child: Container(
-                          padding: const EdgeInsets.all(20),
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            gradient: LinearGradient(
-                              colors: [
-                                Colors.red.withOpacity(0.1),
-                                Colors.red.withOpacity(0.05),
-                              ],
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.red.withOpacity(0.2),
-                                blurRadius: 40,
-                                spreadRadius: 0,
+                        child: AnimatedBuilder(
+                          animation: _logoPulseAnimation,
+                          builder: (context, child) {
+                            return Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                gradient: LinearGradient(
+                                  colors: [
+                                    Colors.red.withOpacity(0.1),
+                                    Colors.red.withOpacity(0.05),
+                                  ],
+                                  begin: Alignment.topLeft,
+                                  end: Alignment.bottomRight,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.red.withOpacity(0.2 + _logoPulseAnimation.value * 0.3),
+                                    blurRadius: 40 + (_logoPulseAnimation.value * 20),
+                                    spreadRadius: _logoPulseAnimation.value * 10,
+                                  ),
+                                  BoxShadow(
+                                    color: Colors.red.withOpacity(0.1 + _logoPulseAnimation.value * 0.2),
+                                    blurRadius: 60 + (_logoPulseAnimation.value * 30),
+                                    spreadRadius: _logoPulseAnimation.value * 15,
+                                  ),
+                                ],
                               ),
-                            ],
-                          ),
-                          child: Image.asset(
-                            'assets/logo.png',
-                            height: 120,
-                            width: 120,
-                          ),
+                              child: Image.asset(
+                                'assets/logo.png',
+                                height: 120,
+                                width: 120,
+                              ),
+                            );
+                          },
                         ),
                       ),
                     ),
