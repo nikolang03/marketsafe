@@ -4760,7 +4760,7 @@
                 fields: {
                     status: { stringValue: status },
                     reviewedAt: { timestampValue: new Date().toISOString() },
-                    reviewedBy: { stringValue: currentAdminEmail || currentUser?.email || 'Admin' }
+                    reviewedBy: { stringValue: currentUser?.email || 'Admin' }
                 }
             };
 
@@ -4933,8 +4933,8 @@
                             title: { stringValue: title },
                             message: { stringValue: message },
                             messageType: { stringValue: messageType },
-                            adminId: { stringValue: currentAdminEmail || currentUser?.email || 'admin' },
-                            adminName: { stringValue: currentAdminName || currentUser?.name || 'Admin' },
+                            adminId: { stringValue: currentUser?.email || 'admin' },
+                            adminName: { stringValue: currentUser?.name || 'Admin' },
                             read: { booleanValue: false },
                             createdAt: { timestampValue: currentTime }
                         }
