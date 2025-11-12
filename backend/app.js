@@ -323,11 +323,11 @@ app.post('/api/verify', async (req, res) => {
       });
     }
     
-    // Use 1:1 verification with UUID (SECURE - directly verifies against the specific person)
-    // This is more secure than search + email matching, and works even if user changed their email
-    console.log('🔍 Using 1:1 verification with UUID (SECURE MODE)...');
+    // Use search + email matching for verification
+    // CRITICAL: We must verify the face belongs to the email entered
+    console.log('🔍 Using secure verification with UUID and email matching (SECURE MODE)...');
     console.log(`🔍 Verifying face against UUID: ${luxandUuid.trim()}`);
-    console.log(`🔍 Security: Direct 1:1 verification - no email matching required`);
+    console.log(`🔍 Security: Email matching is REQUIRED - face must match the entered email`);
     
     try {
       // First, try search to get the person ID (Luxand search returns ID, not UUID)
