@@ -4616,32 +4616,53 @@
                 tbody.innerHTML = '<tr><td colspan="7" class="text-center"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Loading...</span></div></td></tr>';
             }
 
-            console.log('📋 Loading reports...');
+            console.log('📋 Loading reports from Firestore via REST API...');
             
-            // Use the same Firestore instance as other queries (with marketsafe database)
-            const db = firebase.firestore();
+            // Use REST API like the rest of the admin panel
+            const response = await fetch(`${FIREBASE_REST_BASE}/reports?key=${FIREBASE_CONFIG.apiKey}`);
             
-            // Get all reports first, then filter and sort in memory to avoid index issues
-            let snapshot;
-            try {
-                // Try with orderBy first
-                console.log('📋 Attempting to query reports with orderBy...');
-                snapshot = await db.collection('reports').orderBy('createdAt', 'desc').get();
-                console.log('✅ Query with orderBy succeeded');
-            } catch (orderByError) {
-                console.warn('⚠️ OrderBy failed (likely missing index), trying without orderBy:', orderByError);
-                // If orderBy fails (no index), get all and sort in memory
-                snapshot = await db.collection('reports').get();
-                console.log('✅ Query without orderBy succeeded');
+            if (!response.ok) {
+                if (response.status === 404) {
+                    // Collection doesn't exist yet or is empty
+                    console.log('ℹ️ Reports collection not found or empty');
+                    reportsData = {};
+                    displayReports();
+                    updatePendingReportsBadge();
+                    return;
+                }
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
 
+            const data = await response.json();
             reportsData = {};
             const reportsArray = [];
-            
-            snapshot.forEach(doc => {
-                const data = { id: doc.id, ...doc.data() };
-                reportsArray.push(data);
-            });
+
+            // Parse REST API response
+            if (data.documents && Array.isArray(data.documents)) {
+                data.documents.forEach(doc => {
+                    const docId = doc.name.split('/').pop();
+                    const fields = doc.fields || {};
+                    
+                    const report = {
+                        id: docId,
+                        reporterId: convertFirestoreValue(fields.reporterId),
+                        reporterUsername: convertFirestoreValue(fields.reporterUsername) || 'Unknown',
+                        reporterEmail: convertFirestoreValue(fields.reporterEmail) || '',
+                        reportedUserId: convertFirestoreValue(fields.reportedUserId),
+                        reportedUsername: convertFirestoreValue(fields.reportedUsername) || 'Unknown',
+                        reportedEmail: convertFirestoreValue(fields.reportedEmail) || '',
+                        reason: convertFirestoreValue(fields.reason) || '',
+                        customReason: convertFirestoreValue(fields.customReason) || '',
+                        status: convertFirestoreValue(fields.status) || 'pending',
+                        createdAt: convertFirestoreValue(fields.createdAt),
+                        reviewedAt: convertFirestoreValue(fields.reviewedAt),
+                        reviewedBy: convertFirestoreValue(fields.reviewedBy),
+                        adminNotes: convertFirestoreValue(fields.adminNotes) || ''
+                    };
+                    
+                    reportsArray.push(report);
+                });
+            }
 
             // Filter by status if needed
             const statusFilter = document.getElementById('reportStatusFilter')?.value;
@@ -4649,14 +4670,12 @@
                 ? reportsArray.filter(r => r.status === statusFilter)
                 : reportsArray;
 
-            // Sort by createdAt if not already sorted
-            if (filteredReports.length > 0 && filteredReports[0].createdAt) {
-                filteredReports.sort((a, b) => {
-                    const aTime = a.createdAt?.toDate?.() || a.createdAt || new Date(0);
-                    const bTime = b.createdAt?.toDate?.() || b.createdAt || new Date(0);
-                    return bTime - aTime; // Descending order
-                });
-            }
+            // Sort by createdAt (descending)
+            filteredReports.sort((a, b) => {
+                const aTime = a.createdAt ? new Date(a.createdAt) : new Date(0);
+                const bTime = b.createdAt ? new Date(b.createdAt) : new Date(0);
+                return bTime - aTime; // Descending order
+            });
 
             // Convert to object
             filteredReports.forEach(report => {
@@ -4712,7 +4731,7 @@
                 <td>${report.reporterUsername || 'Unknown'}<br><small class="text-muted">${report.reporterEmail || ''}</small></td>
                 <td>${reasonLabels[report.reason] || report.reason}</td>
                 <td>${report.customReason || '-'}</td>
-                <td>${formatDate(report.createdAt?.toDate())}</td>
+                <td>${formatDate(report.createdAt instanceof Date ? report.createdAt : (report.createdAt ? new Date(report.createdAt) : null))}</td>
                 <td>${statusBadges[report.status] || report.status}</td>
                 <td>
                     ${report.status === 'pending' ? `
@@ -4736,12 +4755,24 @@
         if (!confirm(`Are you sure you want to mark this report as ${status}?`)) return;
 
         try {
-            const db = firebase.firestore();
-            await db.collection('reports').doc(reportId).update({
-                status: status,
-                reviewedAt: firebase.firestore.FieldValue.serverTimestamp(),
-                reviewedBy: currentAdminEmail || 'Admin'
+            // Use REST API to update report
+            const updateData = {
+                fields: {
+                    status: { stringValue: status },
+                    reviewedAt: { timestampValue: new Date().toISOString() },
+                    reviewedBy: { stringValue: currentAdminEmail || currentUser?.email || 'Admin' }
+                }
+            };
+
+            const response = await fetch(`${FIREBASE_REST_BASE}/reports/${reportId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(updateData)
             });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
 
             showSuccess(`Report marked as ${status}`);
             loadReports();
@@ -4779,8 +4810,8 @@
                                 <tr><th>Reason:</th><td>${reasonLabels[report.reason] || report.reason}</td></tr>
                                 <tr><th>Details:</th><td>${report.customReason || 'N/A'}</td></tr>
                                 <tr><th>Status:</th><td>${report.status}</td></tr>
-                                <tr><th>Date:</th><td>${formatDate(report.createdAt?.toDate())}</td></tr>
-                                ${report.reviewedAt ? `<tr><th>Reviewed At:</th><td>${formatDate(report.reviewedAt?.toDate())}</td></tr>` : ''}
+                                <tr><th>Date:</th><td>${formatDate(report.createdAt instanceof Date ? report.createdAt : (report.createdAt ? new Date(report.createdAt) : null))}</td></tr>
+                                ${report.reviewedAt ? `<tr><th>Reviewed At:</th><td>${formatDate(report.reviewedAt instanceof Date ? report.reviewedAt : (report.reviewedAt ? new Date(report.reviewedAt) : null))}</td></tr>` : ''}
                                 ${report.reviewedBy ? `<tr><th>Reviewed By:</th><td>${report.reviewedBy}</td></tr>` : ''}
                                 ${report.adminNotes ? `<tr><th>Admin Notes:</th><td>${report.adminNotes}</td></tr>` : ''}
                             </table>
@@ -4819,15 +4850,28 @@
     // Admin Messaging Functions
     async function loadTotalUsersCount() {
         try {
-            const db = firebase.firestore();
-            const snapshot = await db.collection('users').get();
-            const count = snapshot.size;
-            const countElement = document.getElementById('totalUsersCount');
-            if (countElement) {
-                countElement.textContent = count;
+            // Use REST API to get user count
+            const response = await fetch(`${FIREBASE_REST_BASE}/users?key=${FIREBASE_CONFIG.apiKey}`);
+            if (response.ok) {
+                const data = await response.json();
+                const count = data.documents ? data.documents.length : 0;
+                const countElement = document.getElementById('totalUsersCount');
+                if (countElement) {
+                    countElement.textContent = count;
+                }
+            } else if (response.status === 404) {
+                // Collection doesn't exist or is empty
+                const countElement = document.getElementById('totalUsersCount');
+                if (countElement) {
+                    countElement.textContent = '0';
+                }
             }
         } catch (error) {
             console.error('Error loading user count:', error);
+            const countElement = document.getElementById('totalUsersCount');
+            if (countElement) {
+                countElement.textContent = '?';
+            }
         }
     }
 
@@ -4851,44 +4895,63 @@
         sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Sending...';
 
         try {
-            const db = firebase.firestore();
-            const usersSnapshot = await db.collection('users').get();
-            
-            let batch = db.batch();
-            let batchCount = 0;
-            const maxBatchSize = 500;
-            let totalSent = 0;
-
-            for (const userDoc of usersSnapshot.docs) {
-                const notificationRef = db.collection('notifications').doc();
-                batch.set(notificationRef, {
-                    userId: userDoc.id,
-                    type: 'admin_message',
-                    title: messageType === 'warning' 
-                        ? '⚠️ Warning from Admin'
-                        : messageType === 'announcement'
-                            ? '📢 Announcement'
-                            : 'ℹ️ Important Notice',
-                    message: message,
-                    messageType: messageType,
-                    adminId: currentAdminEmail || 'admin',
-                    adminName: currentAdminName || 'Admin',
-                    read: false,
-                    createdAt: firebase.firestore.FieldValue.serverTimestamp()
-                });
-
-                batchCount++;
-                if (batchCount >= maxBatchSize) {
-                    await batch.commit();
-                    totalSent += batchCount;
-                    batch = db.batch();
-                    batchCount = 0;
-                }
+            // Get all users via REST API
+            const usersResponse = await fetch(`${FIREBASE_REST_BASE}/users?key=${FIREBASE_CONFIG.apiKey}`);
+            if (!usersResponse.ok) {
+                throw new Error(`Failed to fetch users: ${usersResponse.status}`);
             }
 
-            if (batchCount > 0) {
-                await batch.commit();
-                totalSent += batchCount;
+            const usersData = await usersResponse.json();
+            const users = usersData.documents || [];
+            
+            if (users.length === 0) {
+                showError('No users found');
+                return;
+            }
+
+            const title = messageType === 'warning' 
+                ? '⚠️ Warning from Admin'
+                : messageType === 'announcement'
+                    ? '📢 Announcement'
+                    : 'ℹ️ Important Notice';
+
+            let totalSent = 0;
+            const batchSize = 500; // Firestore REST API batch limit
+            const currentTime = new Date().toISOString();
+
+            // Send notifications in batches
+            for (let i = 0; i < users.length; i += batchSize) {
+                const batch = users.slice(i, i + batchSize);
+                
+                // Create notifications for this batch
+                const batchPromises = batch.map(userDoc => {
+                    const userId = userDoc.name.split('/').pop();
+                    const notificationData = {
+                        fields: {
+                            userId: { stringValue: userId },
+                            type: { stringValue: 'admin_message' },
+                            title: { stringValue: title },
+                            message: { stringValue: message },
+                            messageType: { stringValue: messageType },
+                            adminId: { stringValue: currentAdminEmail || currentUser?.email || 'admin' },
+                            adminName: { stringValue: currentAdminName || currentUser?.name || 'Admin' },
+                            read: { booleanValue: false },
+                            createdAt: { timestampValue: currentTime }
+                        }
+                    };
+
+                    return fetch(`${FIREBASE_REST_BASE}/notifications?key=${FIREBASE_CONFIG.apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(notificationData)
+                    });
+                });
+
+                await Promise.all(batchPromises);
+                totalSent += batch.length;
+                
+                // Update progress
+                sendBtn.innerHTML = `<i class="fas fa-spinner fa-spin me-2"></i>Sending... (${totalSent}/${users.length})`;
             }
 
             showSuccess(`Message sent successfully to ${totalSent} users!`);
