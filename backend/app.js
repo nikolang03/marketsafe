@@ -351,15 +351,21 @@ app.post('/api/verify', async (req, res) => {
         });
       }
 
-      // Find the best candidate (highest score)
-      // Since we have UUID from Firestore, we trust the user is authenticated
-      // We don't need to match by email - the UUID in Firestore is proof of authentication
-      let bestCandidate = null;
+      // CRITICAL SECURITY: Find candidate that matches the expected email
+      // This ensures the face belongs to the user with this email
+      // We cannot trust the UUID alone - we must verify email match
+      const expectedEmail = email.toLowerCase().trim();
+      let matchingCandidate = null;
       let bestScore = 0;
 
       console.log(`📊 Found ${candidates.length} candidate(s) in search results`);
+      console.log(`🔍 Looking for email match: ${expectedEmail}`);
+      console.log(`🔍 Stored UUID (for reference): ${luxandUuid.trim()}`);
 
       for (const candidate of candidates) {
+        // Get candidate's email/name from search result
+        const candidateName = (candidate.name || candidate.email || candidate.subject || '').toString().toLowerCase().trim();
+        
         // Try different score field names
         let score = 0;
         if (candidate.probability !== undefined) {
@@ -380,13 +386,33 @@ app.post('/api/verify', async (req, res) => {
           normalizedScore = score / 1000.0;
         }
         
-        if (normalizedScore > bestScore) {
+        console.log(`📊 Candidate: name="${candidateName}", id="${candidate.id}", Score: ${normalizedScore.toFixed(3)}`);
+        console.log(`📊 Email match: ${candidateName === expectedEmail ? '✅ MATCH' : '❌ NO MATCH'}`);
+        
+        // CRITICAL SECURITY: Only accept if email/name matches AND score is high enough
+        // This ensures the face belongs to the user with this email
+        if (candidateName === expectedEmail && normalizedScore > bestScore) {
           bestScore = normalizedScore;
-          bestCandidate = candidate;
+          matchingCandidate = candidate;
+          console.log(`✅ Found matching candidate for email: ${expectedEmail}`);
         }
       }
 
-      if (!bestCandidate || bestScore < SIMILARITY_THRESHOLD) {
+      // SECURITY: Must find a match with the expected email
+      if (!matchingCandidate) {
+        console.error(`🚨 SECURITY: No candidate found matching expected email: ${expectedEmail}`);
+        console.error(`🚨 SECURITY: This face does not belong to this user - REJECTING`);
+        return res.json({
+          ok: false,
+          similarity: 0,
+          threshold: SIMILARITY_THRESHOLD,
+          message: 'not_verified',
+          error: 'Face does not match this account. Please use the face registered with this email.',
+          security: 'Email mismatch - face belongs to different user'
+        });
+      }
+
+      if (bestScore < SIMILARITY_THRESHOLD) {
         console.log(`❌ Verification FAILED: Best score ${bestScore.toFixed(3)} < threshold ${SIMILARITY_THRESHOLD}`);
         return res.json({
           ok: false,
@@ -399,7 +425,7 @@ app.post('/api/verify', async (req, res) => {
 
       // Try 1:1 verification with the candidate's ID if available
       // This provides an additional security layer
-      const candidateId = bestCandidate.id?.toString() || bestCandidate.personId?.toString() || '';
+      const candidateId = matchingCandidate.id?.toString() || matchingCandidate.personId?.toString() || '';
       if (candidateId) {
         try {
           console.log(`🔍 Attempting 1:1 verification with candidate ID: ${candidateId}`);
@@ -419,6 +445,7 @@ app.post('/api/verify', async (req, res) => {
           
           if (normalizedSimilarity >= SIMILARITY_THRESHOLD || match === true) {
             console.log(`✅ Verification PASSED (1:1): similarity=${normalizedSimilarity.toFixed(3)}`);
+            console.log(`✅ Email match confirmed: ${expectedEmail}`);
             return res.json({
               ok: true,
               similarity: normalizedSimilarity,
@@ -434,13 +461,13 @@ app.post('/api/verify', async (req, res) => {
 
       // Use search result if 1:1 verification not available or failed
       console.log(`✅ Verification PASSED (search mode): similarity=${bestScore.toFixed(3)}`);
-      console.log(`✅ UUID from Firestore confirms user authentication`);
+      console.log(`✅ Email match confirmed: ${expectedEmail}`);
       return res.json({
         ok: true,
         similarity: bestScore,
         threshold: SIMILARITY_THRESHOLD,
         message: 'verified',
-        method: 'search_with_uuid_validation'
+        method: 'search_with_email_validation'
       });
     } catch (verifyError) {
       console.error(`❌ Secure verification failed: ${verifyError.message}`);
