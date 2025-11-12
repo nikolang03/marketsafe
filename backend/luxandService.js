@@ -276,18 +276,32 @@ export async function verifyPersonPhoto(personUuid, base64Image) {
 export async function livenessCheck(base64Image) {
   // Note: Luxand liveness endpoint may not be available in all API plans
   // This is optional and failures are handled gracefully
-  console.log(`📤 Calling Luxand: POST ${LUXAND_BASE}/liveness`);
+  // According to Luxand docs: POST https://api.luxand.cloud/photo/liveness/v2
+  console.log(`📤 Calling Luxand: POST ${LUXAND_BASE}/photo/liveness/v2`);
   
   try {
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
     
-    const res = await fetch(`${LUXAND_BASE}/liveness`, {
+    // Convert base64 to buffer for multipart/form-data
+    const imageBuffer = Buffer.from(base64Image, 'base64');
+    
+    // Use multipart/form-data format (as shown in Luxand docs)
+    const formData = new FormData();
+    formData.append('photo', imageBuffer, {
+      filename: 'liveness.jpg',
+      contentType: 'image/jpeg'
+    });
+    
+    const headers = {
+      'token': API_KEY,
+      ...formData.getHeaders()
+    };
+    
+    const res = await fetch(`${LUXAND_BASE}/photo/liveness/v2`, {
       method: 'POST',
-      headers,
-      body: JSON.stringify({
-        photo: base64Image
-      }),
+      headers: headers,
+      body: formData,
       signal: controller.signal
     });
 
@@ -298,7 +312,7 @@ export async function livenessCheck(base64Image) {
       const errorText = await res.text();
       console.error(`❌ Luxand liveness error response:`, errorText.substring(0, 500));
       
-      // If 404, the endpoint is not available
+      // If 404, the endpoint is not available (might not be in the plan)
       if (res.status === 404) {
         throw new Error('LIVENESS_ENDPOINT_NOT_AVAILABLE');
       }
@@ -306,7 +320,21 @@ export async function livenessCheck(base64Image) {
       throw new Error(`Luxand liveness error (${res.status}): ${errorText.substring(0, 200)}`);
     }
 
-    const responseData = await res.json();
+    // Handle JSON parsing
+    const responseText = await res.text();
+    let responseData;
+    try {
+      // Fix unescaped quotes in response (Luxand API bug)
+      let cleanedResponse = responseText;
+      cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+        return `"message": "${p1}\\"${p2}\\"${p3}"`;
+      });
+      responseData = JSON.parse(cleanedResponse);
+    } catch (parseError) {
+      console.error(`❌ Failed to parse liveness response:`, parseError.message);
+      throw new Error(`Invalid JSON response from Luxand liveness: ${responseText.substring(0, 200)}`);
+    }
+    
     console.log(`✅ Luxand liveness success:`, JSON.stringify(responseData).substring(0, 200));
     return responseData;
   } catch (error) {
