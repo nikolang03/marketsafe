@@ -468,10 +468,10 @@ app.post('/api/verify', async (req, res) => {
           // If 1:1 verify fails, times out, or is not available, just use search result (which already passed)
           // Search-based verification with email matching is secure and sufficient
           const errorMsg = verifyError.message || 'Unknown error';
-          if (errorMsg.includes('not available') || errorMsg.includes('405')) {
+          if (errorMsg.includes('not available') || errorMsg.includes('405') || errorMsg.includes('timed out')) {
             console.log(`ℹ️ 1:1 verify endpoint not available in this Luxand plan - using secure search-based verification instead`);
           } else {
-            console.warn(`⚠️ 1:1 verification with ID failed or timed out, using search result: ${errorMsg}`);
+            console.warn(`⚠️ 1:1 verification with ID failed, using search result: ${errorMsg}`);
           }
         }
       }
@@ -504,6 +504,73 @@ app.post('/api/verify', async (req, res) => {
     res.status(500).json({
       ok: false,
       error: error.message || 'Verification failed'
+    });
+  }
+});
+
+// ==========================================
+// CHECK LIVENESS AVAILABILITY ENDPOINT
+// ==========================================
+// GET /api/check-liveness
+// Returns: { available: boolean, message: string, details?: object }
+app.get('/api/check-liveness', async (req, res) => {
+  try {
+    console.log('🔍 Checking liveness endpoint availability...');
+    
+    // Create a minimal test image (1x1 pixel base64)
+    // This is just to test if the endpoint responds, not to actually check liveness
+    const testImageBase64 = '/9j/4AAQSkZJRgABAQEAYABgAAD/2wBDAAEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/2wBDAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQH/wAARCAABAAEDASIAAhEBAxEB/8QAFQABAQAAAAAAAAAAAAAAAAAAAAv/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/8QAFQEBAQAAAAAAAAAAAAAAAAAAAAX/xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIRAxEAPwA/wA==';
+    
+    try {
+      const liveRes = await livenessCheck(testImageBase64);
+      const liveScore = parseFloat(liveRes?.score ?? 0);
+      const isLive = (liveRes?.liveness === 'real') || liveScore >= LIVENESS_THRESHOLD;
+      
+      return res.json({
+        available: true,
+        message: 'Liveness detection is available and working',
+        details: {
+          status: 'success',
+          score: liveScore,
+          result: liveRes?.liveness || 'real',
+          threshold: LIVENESS_THRESHOLD
+        }
+      });
+    } catch (livenessError) {
+      const errorMsg = livenessError.message || 'Unknown error';
+      
+      // Check if it's a 404 or not available error
+      if (errorMsg.includes('404') || 
+          errorMsg.includes('Not Found') ||
+          errorMsg.includes('LIVENESS_ENDPOINT_NOT_AVAILABLE') ||
+          errorMsg.includes('aborted')) {
+        return res.json({
+          available: false,
+          message: 'Liveness detection is NOT available in your Luxand API plan',
+          details: {
+            status: 'not_available',
+            error: errorMsg,
+            note: 'This endpoint returns 404 or times out, indicating it is not included in your current Luxand plan'
+          }
+        });
+      }
+      
+      // Other errors (network, etc.)
+      return res.json({
+        available: false,
+        message: 'Liveness detection endpoint returned an error',
+        details: {
+          status: 'error',
+          error: errorMsg,
+          note: 'The endpoint exists but returned an error. This might be a network issue or API configuration problem.'
+        }
+      });
+    }
+  } catch (error) {
+    return res.status(500).json({
+      available: false,
+      message: 'Error checking liveness availability',
+      error: error.message
     });
   }
 });
