@@ -3,6 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/user_check_service.dart';
+import '../services/production_face_recognition_service.dart';
 import 'add_profile_photo_screen.dart';
 
 class FillInformationScreen extends StatefulWidget {
@@ -178,6 +179,19 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         
         print('✅ Final duplicate check passed - proceeding with user registration');
         
+        // Check username uniqueness
+        final username = usernameController.text.trim();
+        if (username.isEmpty) {
+          throw Exception('Username is required');
+        }
+        
+        final usernameTaken = await UserCheckService.isUsernameTaken(username);
+        if (usernameTaken) {
+          throw Exception('This username is already taken. Please choose a different username.');
+        }
+        
+        print('✅ Username check passed - username is available');
+        
         // Parse age safely
         final age = int.tryParse(ageController.text);
         if (age == null) {
@@ -211,7 +225,7 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           'uid': userId,
           'phoneNumber': userPhone,
           'email': userEmail,
-          'username': usernameController.text.trim(),
+          'username': username.trim().toLowerCase(), // Store username in lowercase for consistency
           'firstName': firstNameController.text.trim(),
           'lastName': lastNameController.text.trim(),
           'age': age,
@@ -256,29 +270,69 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
 
         print('✅ User data saved successfully to Firestore with signup ID: $userId');
 
-        // Update the temporary user ID to the final user ID for face embedding
-        final tempUserId = prefs.getString('signup_user_id');
-        if (tempUserId != null && tempUserId.startsWith('temp_')) {
-          // This logic should be moved to a backend function for security,
-          // but for now, we'll keep it here.
-        }
-        
-        // Ensure face registration is completed for the final user ID
-        print('🔄 Ensuring face registration for final user ID: $userId');
+        // CRITICAL: Enroll the 3 facial verification images to Luxand
+        // This must happen after the form is submitted and user document is created
+        // The profile photo upload will then verify against this enrolled face
+        print('🔄 Enrolling 3 facial verification images to Luxand...');
         try {
-          // Check if face embedding exists for this user
-          // final faceEmbedding = await FaceRegistrationService.getFaceEmbedding(userId); // This line is removed
-          // if (faceEmbedding == null) { // This line is removed
-          //   print('⚠️ No face embedding found for user: $userId'); // This line is removed
-          //   print('🔄 Creating face embedding for final user...'); // This line is removed
-          
-          //   // Create a face embedding for the final user // This line is removed
-          //   await _createFaceEmbeddingForUser(userId); // This line is removed
-          // } else { // This line is removed
-          //   print('✅ Face embedding already exists for user: $userId'); // This line is removed
-          // } // This line is removed
+          final identifier = userEmail.isNotEmpty ? userEmail : userPhone;
+          if (identifier.isNotEmpty) {
+            // Pass userId directly to ensure we update the correct document
+            final enrollResult = await ProductionFaceRecognitionService.enrollAllThreeFaces(
+              email: identifier,
+              userId: userId, // Pass userId directly to avoid query issues
+            );
+            
+            if (enrollResult['success'] == true) {
+              final luxandUuid = enrollResult['luxandUuid']?.toString();
+              final enrolledCount = enrollResult['enrolledCount'] as int? ?? 0;
+              print('✅ Enrolled $enrolledCount face(s) from 3 verification steps. UUID: $luxandUuid');
+              
+              // Verify the UUID was saved to Firestore
+              await Future.delayed(const Duration(milliseconds: 500));
+              final verifyDoc = await FirebaseFirestore.instanceFor(
+                app: Firebase.app(),
+                databaseId: 'marketsafe',
+              ).collection('users').doc(userId).get();
+              
+              if (verifyDoc.exists) {
+                final savedUuid = verifyDoc.data()?['luxandUuid']?.toString() ?? '';
+                if (savedUuid.isNotEmpty) {
+                  print('✅ Verified UUID saved to Firestore: $savedUuid');
+                } else {
+                  print('⚠️ WARNING: UUID not found in Firestore after enrollment');
+                }
+              }
+            } else {
+              final errorMessage = enrollResult['error']?.toString() ?? 'Unknown error';
+              final reason = enrollResult['reason']?.toString() ?? '';
+              print('⚠️ Failed to enroll faces from 3 verification steps: $errorMessage');
+              
+              // Check if this is a duplicate face error (by reason or message content)
+              final isDuplicateFace = reason == 'duplicate_face' ||
+                                      errorMessage.toLowerCase().contains('already registered') ||
+                                      errorMessage.toLowerCase().contains('duplicate') ||
+                                      errorMessage.toLowerCase().contains('different account');
+              
+              if (isDuplicateFace && mounted) {
+                // Show error dialog for duplicate face
+                _showErrorDialog(
+                  'Account Already Exists',
+                  errorMessage.isNotEmpty 
+                    ? errorMessage
+                    : 'This face is already registered with a different account. You cannot create multiple accounts with the same face. Please use your existing account or contact support if you believe this is an error.',
+                );
+              } else {
+                // For other errors, just log (don't block - enrollment can be retried later)
+                print('⚠️ Enrollment error (non-blocking): $errorMessage');
+              }
+            }
+          } else {
+            print('⚠️ Cannot enroll faces: No email or phone number');
+          }
         } catch (e) {
-          print('❌ Error ensuring face registration: $e');
+          print('❌ Error enrolling faces from 3 verification steps: $e');
+          // Don't block form submission - enrollment can be retried later
         }
 
         // Overwrite the temporary ID with the final ID
@@ -549,6 +603,34 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           border: const UnderlineInputBorder(),
         ),
       ),
+    );
+  }
+
+  void _showErrorDialog(String title, String message) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: Text(
+            title,
+            style: const TextStyle(color: Colors.red),
+          ),
+          content: Text(
+            message,
+            style: const TextStyle(color: Colors.white),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text(
+                'OK',
+                style: TextStyle(color: Colors.white),
+              ),
+            ),
+          ],
+        );
+      },
     );
   }
 

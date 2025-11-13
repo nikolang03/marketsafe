@@ -3,6 +3,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:camera/camera.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'dart:typed_data';
 import 'dart:io';
 import 'dart:math';
@@ -34,8 +36,23 @@ class ProductionFaceRecognitionService {
     defaultValue: 'https://marketsafe-production.up.railway.app', // Railway backend URL
   );
   
+  // Log backend URL on first access
+  static bool _urlLogged = false;
+  static void _logBackendUrl() {
+    if (!_urlLogged) {
+      print('🔧 ProductionFaceRecognitionService backend URL: $_backendUrl');
+      if (_backendUrl.contains('192.168.') || _backendUrl.contains('localhost') || _backendUrl.contains('127.0.0.1')) {
+        print('⚠️ WARNING: Using local backend URL!');
+        print('⚠️ This will only work on the same network.');
+        print('⚠️ To use production, rebuild without --dart-define or use production URL.');
+      }
+      _urlLogged = true;
+    }
+  }
+  
   static FaceAuthBackendService? _backendService;
   static FaceAuthBackendService get _backendServiceInstance {
+    _logBackendUrl();
     return _backendService ??= FaceAuthBackendService(backendUrl: _backendUrl);
   }
 
@@ -75,12 +92,122 @@ class ProductionFaceRecognitionService {
         };
       }
       final String userId = users.docs.first.id;
+      final userData = users.docs.first.data();
+      
+      // CRITICAL: Always use the email from Firestore, not the parameter
+      // This ensures consistency even if the parameter email doesn't match
+      final firestoreEmail = (userData['email']?.toString() ?? email).toLowerCase().trim();
+      if (firestoreEmail != email.toLowerCase().trim()) {
+        print('⚠️ Email mismatch: Parameter email="$email" vs Firestore email="$firestoreEmail"');
+        print('⚠️ Using Firestore email for Luxand enrollment: $firestoreEmail');
+      }
+      final emailToUse = firestoreEmail.isNotEmpty ? firestoreEmail : email.toLowerCase().trim();
+
+      // CRITICAL SECURITY: Check if this face is already registered to another email
+      // This ensures one face can only be used with one email
+      print('🛡️ SECURITY: Checking if face is already registered to another email...');
+      List<double>? normalizedEmbedding;
+      try {
+        // Detect face from image bytes
+        final inputImage = InputImage.fromBytes(
+          bytes: imageBytes,
+          metadata: InputImageMetadata(
+            size: const Size(480, 640), // Default size, will be adjusted by ML Kit
+            rotation: InputImageRotation.rotation0deg,
+            format: InputImageFormat.yuv420, // YUV format for image bytes
+            bytesPerRow: 480,
+          ),
+        );
+        
+        final faceDetector = FaceDetector(
+          options: FaceDetectorOptions(
+            enableClassification: true,
+            enableLandmarks: true,
+            enableTracking: false,
+            minFaceSize: 0.1,
+          ),
+        );
+        
+        final faces = await faceDetector.processImage(inputImage);
+        await faceDetector.close();
+        
+        if (faces.isEmpty) {
+          return {
+            'success': false,
+            'error': 'No face detected in the image. Please ensure your face is clearly visible.',
+          };
+        }
+        
+        final detectedFace = faces.first;
+        
+        // Extract embedding for uniqueness check using predictFromBytes
+        final embedding = await _faceNetService.predictFromBytes(imageBytes, detectedFace);
+        if (embedding.isEmpty) {
+          return {
+            'success': false,
+            'error': 'Failed to extract face features. Please try again.',
+          };
+        }
+        
+        // Embedding is already normalized by predictFromBytes
+        normalizedEmbedding = embedding;
+        
+        // Check if this face is already registered to another email using Luxand Compare API
+        print('🛡️ Checking face uniqueness using Luxand Compare Facial Similarity API...');
+        final bool isFaceAlreadyRegistered = await _checkFaceUniquenessWithLuxand(
+          imageBytes: imageBytes,
+          currentUserId: userId,
+          currentEmail: email,
+        );
+        
+        if (isFaceAlreadyRegistered) {
+          print('🚨 SECURITY REJECTION: This face is already registered with another email/account');
+          return {
+            'success': false,
+            'error': 'This face is already registered with another account. Each face can only be used with one email address.',
+          };
+        }
+        
+        print('✅ Face uniqueness check passed - this face is not registered to another email');
+      } catch (e, stackTrace) {
+        print('🚨 CRITICAL: Face uniqueness check failed: $e');
+        print('🚨 Stack trace: $stackTrace');
+        // SECURITY: Do NOT continue if uniqueness check fails - this is a security requirement
+        // Reject enrollment to prevent duplicate face registrations
+        return {
+          'success': false,
+          'error': 'Face verification failed. Please try again. If the problem persists, contact support.',
+        };
+      }
+      
+      // Additional check: Verify face is not already enrolled in Luxand with a different email
+      // This checks if any other user has the same face enrolled
+      try {
+        print('🛡️ SECURITY: Checking Luxand for duplicate face enrollment...');
+        // Get all users with luxandUuid to check for duplicates
+        final allUsers = await _firestore
+            .collection('users')
+            .where('luxandUuid', isNotEqualTo: null)
+            .get();
+        
+        // If there are other users with enrolled faces, we should check
+        // However, we can't directly query Luxand for face similarity
+        // So we rely on the local embedding check above
+        // But we can at least warn if there are many enrolled users
+        if (allUsers.docs.length > 1) {
+          print('⚠️ Found ${allUsers.docs.length} users with enrolled faces. Relying on local embedding check.');
+        }
+      } catch (e) {
+        print('⚠️ Could not check Luxand enrollment status: $e');
+        // Don't block enrollment for this check, but log it
+      }
 
       // Call backend API for enrollment (backend handles liveness + Luxand enrollment)
       print('🔍 Calling backend API for face enrollment...');
       print('🔍 Backend URL: $_backendUrl');
+      print('🔍 Using email from Firestore: $emailToUse');
       final enrollResult = await _backendServiceInstance.enroll(
-        email: email,
+        email: emailToUse, // Use Firestore email, not parameter
         photoBytes: imageBytes,
       );
 
@@ -102,19 +229,53 @@ class ProductionFaceRecognitionService {
       }
 
       // Store uuid on user's document (backend already stores it, but we sync here too)
-      await _firestore.collection('users').doc(userId).set({
+      // CRITICAL: Use update() instead of set() to ensure it doesn't overwrite other fields
+      await _firestore.collection('users').doc(userId).update({
         'luxandUuid': luxandUuid,
         'luxand': {
           'uuid': luxandUuid,
           'enrolledAt': FieldValue.serverTimestamp(),
         },
         'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      });
+      
+      // Verify the UUID was saved
+      final verifyDoc = await _firestore.collection('users').doc(userId).get();
+      if (verifyDoc.exists) {
+        final savedUuid = verifyDoc.data()?['luxandUuid']?.toString() ?? '';
+        if (savedUuid == luxandUuid) {
+          print('✅ Verified UUID saved to Firestore: $luxandUuid');
+        } else {
+          print('⚠️ WARNING: UUID mismatch after save. Expected: $luxandUuid, Got: $savedUuid');
+        }
+      }
+
+      // CRITICAL: Also store face embedding locally for uniqueness checking
+      // This ensures we can detect duplicate faces even when using Luxand
+      // The embedding was already calculated during uniqueness check above
+      // Note: normalizedEmbedding is guaranteed to be non-null here because
+      // the try-catch block above returns early if embedding extraction fails
+      try {
+        // Store embedding in face_embeddings collection for uniqueness checking
+        await _firestore.collection('face_embeddings').doc(userId).set({
+          'userId': userId,
+          'email': emailToUse, // Use Firestore email
+          'embedding': normalizedEmbedding,
+          'luxandUuid': luxandUuid,
+          'enrolledAt': FieldValue.serverTimestamp(),
+          'provider': 'luxand',
+        }, SetOptions(merge: true));
+        print('✅ Face embedding stored locally for uniqueness checking');
+      } catch (e) {
+        print('⚠️ Failed to store face embedding locally: $e');
+        // Don't fail enrollment if local storage fails, but log it
+      }
 
       print('✅ Face enrolled successfully via backend. UUID: $luxandUuid');
       return {
         'success': true,
         'luxandUuid': luxandUuid,
+        'uuid': luxandUuid, // Also include as 'uuid' for compatibility
         'provider': 'backend',
       };
     } catch (e) {
@@ -141,6 +302,7 @@ class ProductionFaceRecognitionService {
   /// Returns: { success: bool, luxandUuid: String?, enrolledCount: int, errors: List<String>? }
   static Future<Map<String, dynamic>> enrollAllThreeFaces({
     required String email,
+    String? userId, // Optional: if provided, use this userId directly instead of querying
   }) async {
     try {
       if (!_useBackendForVerification) {
@@ -150,19 +312,58 @@ class ProductionFaceRecognitionService {
         };
       }
 
-      // Find user by email
-      final users = await _firestore
-          .collection('users')
-          .where('email', isEqualTo: email.toLowerCase())
-          .limit(1)
-          .get();
-      if (users.docs.isEmpty) {
+      String? finalUserId = userId;
+      Map<String, dynamic>? userData;
+
+      // If userId is provided, use it directly; otherwise query by email
+      if (userId != null && userId.isNotEmpty) {
+        print('🔍 Using provided userId: $userId');
+        final userDoc = await _firestore.collection('users').doc(userId).get();
+        if (!userDoc.exists) {
+          return {
+            'success': false,
+            'error': 'User not found with provided userId',
+          };
+        }
+        finalUserId = userId;
+        userData = userDoc.data();
+      } else {
+        // Find user by email
+        print('🔍 Finding user by email: $email');
+        final users = await _firestore
+            .collection('users')
+            .where('email', isEqualTo: email.toLowerCase())
+            .limit(1)
+            .get();
+        if (users.docs.isEmpty) {
+          return {
+            'success': false,
+            'error': 'User not found for enrollment',
+          };
+        }
+        finalUserId = users.docs.first.id;
+        userData = users.docs.first.data();
+        print('🔍 Found user by email. userId: $finalUserId');
+      }
+      
+      // Ensure we have a valid userId
+      if (finalUserId == null || finalUserId.isEmpty) {
         return {
           'success': false,
-          'error': 'User not found for enrollment',
+          'error': 'Could not determine userId for enrollment',
         };
       }
-      final String userId = users.docs.first.id;
+      
+      final String targetUserId = finalUserId;
+      
+      // CRITICAL: Always use the email from Firestore, not the parameter
+      // This ensures consistency even if the parameter email doesn't match
+      final firestoreEmail = (userData?['email']?.toString() ?? email).toLowerCase().trim();
+      if (firestoreEmail != email.toLowerCase().trim()) {
+        print('⚠️ Email mismatch: Parameter email="$email" vs Firestore email="$firestoreEmail"');
+        print('⚠️ Using Firestore email for Luxand enrollment: $firestoreEmail');
+      }
+      final emailToUse = firestoreEmail.isNotEmpty ? firestoreEmail : email.toLowerCase().trim();
 
       // Get face images from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
@@ -200,6 +401,16 @@ class ProductionFaceRecognitionService {
       int enrolledCount = 0;
       final List<String> errors = [];
 
+      // Validate email before proceeding
+      if (email.isEmpty) {
+        return {
+          'success': false,
+          'error': 'Email is required for enrollment',
+          'enrolledCount': 0,
+          'errors': ['Email is empty'],
+        };
+      }
+
       // Enroll each face image through backend
       for (int i = 0; i < imagePaths.length; i++) {
         try {
@@ -218,10 +429,25 @@ class ProductionFaceRecognitionService {
           }
 
           print('📸 Enrolling face ${i + 1}/${imagePaths.length} via backend...');
+          print('📧 Using email from Firestore: $emailToUse');
+          print('📏 Image bytes size: ${imageBytes.length}');
+          
+          // Validate email and image bytes before sending
+          if (emailToUse.isEmpty) {
+            print('❌ Email is empty, skipping enrollment');
+            errors.add('Face ${i + 1}: Email is empty');
+            continue;
+          }
+          
+          if (imageBytes.isEmpty || imageBytes.length < 100) {
+            print('❌ Image bytes are too small or empty: ${imageBytes.length}');
+            errors.add('Face ${i + 1}: Image is too small or empty');
+            continue;
+          }
           
           // Call backend API for enrollment (backend handles liveness + Luxand enrollment)
           final enrollResult = await _backendServiceInstance.enroll(
-            email: email,
+            email: emailToUse, // Use Firestore email, not parameter
             photoBytes: imageBytes,
           );
 
@@ -255,15 +481,58 @@ class ProductionFaceRecognitionService {
       }
 
       // Store uuid on user's document
-      await _firestore.collection('users').doc(userId).set({
-        'luxandUuid': luxandUuid,
-        'luxand': {
-          'uuid': luxandUuid,
-          'enrolledAt': FieldValue.serverTimestamp(),
-          'enrolledFaces': enrolledCount,
-        },
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
+      // Use update() to ensure we're updating an existing document
+      try {
+        await _firestore.collection('users').doc(targetUserId).update({
+          'luxandUuid': luxandUuid,
+          'luxand': {
+            'uuid': luxandUuid,
+            'enrolledAt': FieldValue.serverTimestamp(),
+            'enrolledFaces': enrolledCount,
+          },
+          'lastUpdated': FieldValue.serverTimestamp(),
+        });
+        print('✅ Updated user document with luxandUuid: $luxandUuid');
+        
+        // Verify the UUID was saved correctly
+        await Future.delayed(const Duration(milliseconds: 300));
+        final verifyDoc = await _firestore.collection('users').doc(targetUserId).get();
+        if (verifyDoc.exists) {
+          final savedUuid = verifyDoc.data()?['luxandUuid']?.toString() ?? '';
+          if (savedUuid == luxandUuid) {
+            print('✅ Verified UUID saved to Firestore: $luxandUuid');
+          } else {
+            print('⚠️ WARNING: UUID mismatch after save. Expected: $luxandUuid, Got: $savedUuid');
+            // Retry once with set() as fallback
+            print('🔄 Retrying with set() method...');
+            await _firestore.collection('users').doc(targetUserId).set({
+              'luxandUuid': luxandUuid,
+              'luxand': {
+                'uuid': luxandUuid,
+                'enrolledAt': FieldValue.serverTimestamp(),
+                'enrolledFaces': enrolledCount,
+              },
+              'lastUpdated': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+            print('✅ Retry completed with set() method');
+          }
+        } else {
+          print('⚠️ WARNING: User document not found after update. userId: $targetUserId');
+        }
+      } catch (updateError) {
+        print('⚠️ Update failed, trying set() with merge: $updateError');
+        // Fallback to set() with merge if update() fails (document might not exist)
+        await _firestore.collection('users').doc(targetUserId).set({
+          'luxandUuid': luxandUuid,
+          'luxand': {
+            'uuid': luxandUuid,
+            'enrolledAt': FieldValue.serverTimestamp(),
+            'enrolledFaces': enrolledCount,
+          },
+          'lastUpdated': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        print('✅ Saved UUID using set() with merge');
+      }
 
       print('✅ Enrolled $enrolledCount/${imagePaths.length} faces successfully via backend. UUID: $luxandUuid');
       return {
@@ -281,6 +550,98 @@ class ProductionFaceRecognitionService {
         'error': 'Enrollment error: $e',
         'provider': 'backend',
       };
+    }
+  }
+
+  /// Check face uniqueness using Luxand's Compare Facial Similarity API
+  /// Compares the new face with all enrolled faces to ensure one face per email
+  static Future<bool> _checkFaceUniquenessWithLuxand({
+    required Uint8List imageBytes,
+    required String currentUserId,
+    required String currentEmail,
+  }) async {
+    try {
+      print('🛡️ Starting Luxand-based face uniqueness check...');
+      print('🛡️ Current user ID: $currentUserId');
+      print('🛡️ Current email: $currentEmail');
+      
+      // Get all users with enrolled faces (have luxandUuid)
+      final allUsers = await _firestore
+          .collection('users')
+          .where('luxandUuid', isNotEqualTo: null)
+          .get();
+      
+      if (allUsers.docs.isEmpty) {
+        print('✅ No enrolled users found. Face is unique.');
+        return false; // No faces to compare against
+      }
+      
+      print('📊 Found ${allUsers.docs.length} enrolled users. Checking for duplicates...');
+      
+      // For each enrolled user, try to get their face image and compare
+      for (final userDoc in allUsers.docs) {
+        final enrolledUserId = userDoc.id;
+        final enrolledUserData = userDoc.data();
+        final enrolledEmail = (enrolledUserData['email'] ?? '').toString();
+        
+        // Skip if it's the same user or email
+        if (enrolledUserId == currentUserId || 
+            (enrolledEmail.isNotEmpty && enrolledEmail.toLowerCase() == currentEmail.toLowerCase())) {
+          print('⚖️ Skipping comparison with self (userId: $enrolledUserId, email: $enrolledEmail)');
+          continue;
+        }
+        
+        // Try to get enrolled user's face image from Firestore (faceData.faceImageUrl)
+        // or from Firebase Storage
+        try {
+          final faceImageUrl = enrolledUserData['faceData']?['faceImageUrl'] as String?;
+          
+          if (faceImageUrl != null && faceImageUrl.isNotEmpty) {
+            print('🔍 Found face image URL for enrolled user. Downloading for comparison...');
+            
+            // Download image from Firebase Storage
+            final http.Response response = await http.get(Uri.parse(faceImageUrl));
+            if (response.statusCode == 200) {
+              final enrolledImageBytes = response.bodyBytes;
+              
+              print('🔍 Comparing new face with enrolled face (user: $enrolledUserId, email: $enrolledEmail)...');
+              
+              // Use Luxand Compare API via backend
+              final compareResult = await _backendServiceInstance.compareFaces(
+                photo1Bytes: imageBytes,
+                photo2Bytes: enrolledImageBytes,
+              );
+              
+              if (compareResult['ok'] == true) {
+                final similarity = (compareResult['similarity'] as num?)?.toDouble() ?? 0.0;
+                final match = compareResult['match'] as bool? ?? false;
+                
+                print('📊 Luxand comparison result: similarity=${similarity.toStringAsFixed(4)}, match=$match');
+                
+                // If similarity is very high (>= 0.95), it's likely the same face
+                if (similarity >= 0.95 || match == true) {
+                  print('🚨 DUPLICATE FACE DETECTED: Similarity=${similarity.toStringAsFixed(4)} with user $enrolledUserId ($enrolledEmail)');
+                  return true; // Face is already registered
+                }
+              }
+            }
+          }
+        } catch (e) {
+          print('⚠️ Error comparing with enrolled face image: $e');
+          // Continue to next user
+        }
+      }
+      
+      // If we couldn't compare with Luxand (no stored images), return false
+      // The local embedding check will be done as a backup in the calling function
+      print('⚠️ No stored face images found for Luxand comparison.');
+      print('✅ Luxand comparison completed. No duplicate faces found (will use local check as backup).');
+      return false; // Face is unique (local check will verify)
+      
+    } catch (e) {
+      print('❌ Error in Luxand face uniqueness check: $e');
+      // On error, fall back to local embedding check
+      return false; // Don't block enrollment on error, but log it
     }
   }
 

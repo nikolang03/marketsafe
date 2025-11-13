@@ -48,9 +48,14 @@ class FaceAuthBackendService {
 
       if (response.statusCode ~/ 100 != 2) {
         final errorBody = jsonDecode(response.body) as Map<String, dynamic>?;
+        // Prefer 'message' field if available, otherwise use 'error' field
+        final errorMessage = errorBody?['message']?.toString() ?? 
+                            errorBody?['error']?.toString() ?? 
+                            'Enrollment failed';
         return {
           'success': false,
-          'error': errorBody?['error']?.toString() ?? 'Enrollment failed',
+          'error': errorMessage,
+          'reason': errorBody?['reason']?.toString(), // Include reason for duplicate face detection
         };
       }
 

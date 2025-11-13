@@ -187,6 +187,143 @@ app.post('/api/enroll', async (req, res) => {
       console.warn(`⚠️ Failed to check/cleanup existing faces: ${cleanupError.message}. Continuing with enrollment...`);
     }
 
+    // 1.5) SECURITY: Check if this face already exists with a DIFFERENT email (prevent duplicate accounts)
+    // CRITICAL: This check MUST succeed - if it fails, we cannot allow enrollment
+    try {
+      console.log(`🔍 [DUPLICATE CHECK] Checking if this face already exists with a different email...`);
+      console.log(`🔍 [DUPLICATE CHECK] New email: ${email.toLowerCase().trim()}`);
+      
+      const emailToFind = email.toLowerCase().trim();
+      const DUPLICATE_THRESHOLD = 0.75; // Lowered threshold even more to catch duplicates (was 0.80)
+      
+      // Method 1: Search for the face
+      const searchRes = await searchPhoto(cleanBase64);
+      console.log(`🔍 [DUPLICATE CHECK] Search response:`, JSON.stringify(searchRes).substring(0, 500));
+      
+      // Check response structure
+      const candidates = searchRes.candidates 
+                    || searchRes.matches 
+                    || searchRes.results
+                    || (Array.isArray(searchRes) ? searchRes : []);
+
+      console.log(`🔍 [DUPLICATE CHECK] Found ${candidates.length} candidate(s) in search results`);
+
+      if (candidates.length > 0) {
+        console.log(`🔍 [DUPLICATE CHECK] Checking candidates against threshold: ${DUPLICATE_THRESHOLD}`);
+        
+        // Check each candidate for high similarity and different email
+        for (let i = 0; i < candidates.length; i++) {
+          const candidate = candidates[i];
+          
+          // Get candidate's email/name
+          const candidateEmail = (candidate.name || candidate.email || candidate.subject || '').toString().toLowerCase().trim();
+          
+          // Get similarity score
+          let score = 0;
+          if (candidate.probability !== undefined) {
+            score = parseFloat(candidate.probability);
+          } else if (candidate.similarity !== undefined) {
+            score = parseFloat(candidate.similarity);
+          } else if (candidate.confidence !== undefined) {
+            score = parseFloat(candidate.confidence);
+          } else if (candidate.score !== undefined) {
+            score = parseFloat(candidate.score);
+          }
+          
+          // Normalize score (Luxand returns 0-1 or 0-100)
+          if (score > 1.0 && score <= 100) {
+            score = score / 100.0;
+          }
+          
+          // Normalize emails for comparison (remove spaces, lowercase, trim)
+          const normalizedCandidateEmail = candidateEmail.replace(/\s+/g, '').toLowerCase().trim();
+          const normalizedNewEmail = emailToFind.replace(/\s+/g, '').toLowerCase().trim();
+          
+          console.log(`🔍 [DUPLICATE CHECK] Candidate ${i + 1}:`);
+          console.log(`   - Raw email: "${candidateEmail}"`);
+          console.log(`   - Normalized: "${normalizedCandidateEmail}"`);
+          console.log(`   - New email (normalized): "${normalizedNewEmail}"`);
+          console.log(`   - Score: ${score.toFixed(3)} (threshold: ${DUPLICATE_THRESHOLD})`);
+          console.log(`   - Emails match: ${normalizedCandidateEmail === normalizedNewEmail}`);
+          console.log(`   - Score meets threshold: ${score >= DUPLICATE_THRESHOLD}`);
+          
+          // If high similarity AND different email, this is a duplicate account attempt
+          if (score >= DUPLICATE_THRESHOLD && normalizedCandidateEmail !== normalizedNewEmail && normalizedCandidateEmail.length > 0) {
+            console.error(`🚨🚨🚨 SECURITY ALERT: Face already enrolled with different email!`);
+            console.error(`🚨 Existing email: ${candidateEmail}`);
+            console.error(`🚨 New email: ${emailToFind}`);
+            console.error(`🚨 Similarity score: ${score.toFixed(3)} (threshold: ${DUPLICATE_THRESHOLD})`);
+            
+            // Mask email for privacy (show only first 3 chars and domain)
+            const emailParts = normalizedCandidateEmail.split('@');
+            const maskedEmail = emailParts.length === 2 
+              ? `${emailParts[0].substring(0, 3)}***@${emailParts[1]}`
+              : '***@***';
+            
+            return res.status(403).json({
+              ok: false,
+              error: 'This face is already registered with a different account.',
+              reason: 'duplicate_face',
+              existingEmail: maskedEmail, // Masked for privacy
+              message: 'You cannot create multiple accounts with the same face. Please use your existing account or contact support if you believe this is an error.',
+              security: 'One face per account policy enforced',
+              similarity: score.toFixed(3)
+            });
+          }
+        }
+        
+        console.log(`✅ [DUPLICATE CHECK] No duplicate faces found with different emails. All candidates checked.`);
+      } else {
+        console.log(`⚠️ [DUPLICATE CHECK] Face search found no matches. Checking all enrolled persons as backup...`);
+        
+        // Method 2: Backup check - if search found nothing, check all enrolled persons
+        // This catches cases where search might miss a match
+        try {
+          const allPersons = await listPersons();
+          const persons = allPersons.persons || allPersons.data || allPersons || [];
+          
+          console.log(`🔍 [DUPLICATE CHECK] Found ${persons.length} total enrolled person(s) in Luxand`);
+          
+          // Check if there are any persons with different emails
+          const personsWithDifferentEmail = persons.filter(person => {
+            const personEmail = (person.name || person.email || '').toString().toLowerCase().trim();
+            return personEmail !== emailToFind && personEmail.length > 0;
+          });
+          
+          console.log(`🔍 [DUPLICATE CHECK] Found ${personsWithDifferentEmail.length} person(s) with different emails`);
+          
+          if (personsWithDifferentEmail.length > 0) {
+            // If search found nothing but there are enrolled persons with different emails,
+            // we should be more cautious. However, we can't compare without their face images.
+            // So we'll just log a warning and proceed, but the search should have caught it.
+            console.warn(`⚠️ [DUPLICATE CHECK] Search found no matches, but ${personsWithDifferentEmail.length} person(s) exist with different emails.`);
+            console.warn(`⚠️ [DUPLICATE CHECK] This might indicate the search didn't find a match that should exist.`);
+            console.warn(`⚠️ [DUPLICATE CHECK] Proceeding with enrollment, but this should be investigated.`);
+          } else {
+            console.log(`✅ [DUPLICATE CHECK] No persons found with different emails. This is a new face.`);
+          }
+        } catch (backupCheckError) {
+          console.warn(`⚠️ [DUPLICATE CHECK] Backup check failed: ${backupCheckError.message}`);
+          // Don't block enrollment for backup check failure
+        }
+      }
+    } catch (duplicateCheckError) {
+      // CRITICAL: If duplicate check fails, we MUST block enrollment for security
+      // This prevents bypassing the duplicate detection
+      console.error(`❌❌❌ CRITICAL: Duplicate face check failed!`);
+      console.error(`❌ Error: ${duplicateCheckError.message}`);
+      console.error(`❌ Stack: ${duplicateCheckError.stack}`);
+      console.error(`🚨 BLOCKING enrollment due to duplicate check failure - this is a security measure`);
+      
+      return res.status(500).json({
+        ok: false,
+        error: 'Face duplicate detection failed. Please try again or contact support.',
+        reason: 'duplicate_check_failed',
+        message: 'Unable to verify if this face is already registered. Please try again in a moment.',
+        security: 'Enrollment blocked for security - duplicate detection must succeed'
+      });
+    }
+
     // 2) Liveness check before enrollment (optional - skip if endpoint not available)
     let livenessPassed = true;
     try {
