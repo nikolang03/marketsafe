@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/user_check_service.dart';
 import '../services/production_face_recognition_service.dart';
+import '../services/face_auth_backend_service.dart';
 import 'add_profile_photo_screen.dart';
 
 class FillInformationScreen extends StatefulWidget {
@@ -201,6 +203,87 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         print('🔄 Starting to save user data to Firestore...');
         print('👤 Username: ${usernameController.text.trim()}');
         print('🏠 Address: ${addressController.text.trim()}');
+
+        // CRITICAL: Check for duplicate face BEFORE creating user account
+        // This prevents creating accounts when face is already registered
+        print('🔍 [PRE-CHECK] Checking for duplicate face before creating account...');
+        try {
+          final identifier = userEmail.isNotEmpty ? userEmail : userPhone;
+          if (identifier.isNotEmpty) {
+            // Get one face image to check for duplicates
+            final moveCloserImagePath = prefs.getString('face_verification_moveCloserImagePath');
+            
+            if (moveCloserImagePath != null && moveCloserImagePath.isNotEmpty) {
+              final imageFile = File(moveCloserImagePath);
+              if (await imageFile.exists()) {
+                final imageBytes = await imageFile.readAsBytes();
+                
+                // Try to enroll one face to check for duplicates
+                // This will fail if duplicate is detected, and we can block account creation
+                print('🔍 [PRE-CHECK] Testing enrollment with one face image to check for duplicates...');
+                // Call backend directly to check for duplicates (doesn't require user to exist)
+                // Use the same backend URL as ProductionFaceRecognitionService
+                const backendUrl = String.fromEnvironment(
+                  'FACE_AUTH_BACKEND_URL',
+                  defaultValue: 'https://marketsafe-production.up.railway.app',
+                );
+                final backendService = FaceAuthBackendService(backendUrl: backendUrl);
+                final testEnrollResult = await backendService.enroll(
+                  email: identifier,
+                  photoBytes: imageBytes,
+                );
+                
+                if (testEnrollResult['success'] != true) {
+                  final errorMessage = testEnrollResult['error']?.toString() ?? 'Unknown error';
+                  final reason = testEnrollResult['reason']?.toString() ?? '';
+                  
+                  // Check if this is a duplicate face error
+                  final isDuplicateFace = reason == 'duplicate_face' ||
+                                          errorMessage.toLowerCase().contains('already registered') ||
+                                          errorMessage.toLowerCase().contains('duplicate') ||
+                                          errorMessage.toLowerCase().contains('different account');
+                  
+                  if (isDuplicateFace && mounted) {
+                    print('🚨 [PRE-CHECK] Duplicate face detected! Blocking account creation.');
+                    _showErrorDialog(
+                      'Account Already Exists',
+                      errorMessage.isNotEmpty 
+                        ? errorMessage
+                        : 'This face is already registered with a different account. You cannot create multiple accounts with the same face. Please use your existing account or contact support if you believe this is an error.',
+                    );
+                    setState(() {
+                      _isLoading = false;
+                    });
+                    return; // BLOCK account creation
+                  }
+                } else {
+                  // If test enrollment succeeded, delete the test enrollment
+                  // (we'll enroll all 3 faces properly later)
+                  final testUuid = testEnrollResult['luxandUuid']?.toString();
+                  if (testUuid != null && testUuid.isNotEmpty) {
+                    print('🔍 [PRE-CHECK] Test enrollment succeeded. Will delete test UUID: $testUuid');
+                    // Note: We'll clean this up when we enroll all 3 faces (which deletes duplicates for same email)
+                  }
+                }
+              }
+            }
+          }
+        } catch (preCheckError) {
+          print('⚠️ [PRE-CHECK] Error during duplicate check: $preCheckError');
+          // If pre-check fails, we should still block to be safe
+          if (mounted) {
+            _showErrorDialog(
+              'Verification Error',
+              'Unable to verify face uniqueness. Please try again or contact support.',
+            );
+            setState(() {
+              _isLoading = false;
+            });
+            return;
+          }
+        }
+        
+        print('✅ [PRE-CHECK] Duplicate check passed. Proceeding with account creation...');
 
         // Generate a unique user ID for signup
         final userId = 'user_${DateTime.now().millisecondsSinceEpoch}_${userEmail.isNotEmpty ? userEmail.split('@')[0] : userPhone.replaceAll('+', '').replaceAll(' ', '')}';

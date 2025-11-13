@@ -194,7 +194,7 @@ app.post('/api/enroll', async (req, res) => {
       console.log(`🔍 [DUPLICATE CHECK] New email: ${email.toLowerCase().trim()}`);
       
       const emailToFind = email.toLowerCase().trim();
-      const DUPLICATE_THRESHOLD = 0.75; // Lowered threshold even more to catch duplicates (was 0.80)
+      const DUPLICATE_THRESHOLD = 0.90; // High threshold to only catch actual duplicates (same person), not false positives
       
       // Method 1: Search for the face
       const searchRes = await searchPhoto(cleanBase64);
