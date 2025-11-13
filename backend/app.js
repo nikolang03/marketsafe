@@ -2,7 +2,7 @@
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
-import { enrollPhoto, comparePhotos, livenessCheck, searchPhoto, verifyPersonPhoto, deletePerson } from './luxandService.js';
+import { enrollPhoto, comparePhotos, livenessCheck, searchPhoto, verifyPersonPhoto, deletePerson, listPersons } from './luxandService.js';
 
 // Load environment variables
 dotenv.config();
@@ -711,6 +711,51 @@ app.post('/api/delete-person', async (req, res) => {
     res.status(500).json({
       ok: false,
       error: error.message || 'Failed to delete person'
+    });
+  }
+});
+
+// ==========================================
+// LIST ALL PERSONS ENDPOINT
+// ==========================================
+// GET /api/list-persons
+// Returns: { ok: bool, persons: [...], count: number }
+app.get('/api/list-persons', async (req, res) => {
+  try {
+    console.log('📋 Listing all persons from Luxand...');
+    
+    const result = await listPersons();
+    
+    // Handle different response formats from Luxand
+    const persons = result.persons || result.data || result || [];
+    const count = Array.isArray(persons) ? persons.length : 0;
+    
+    console.log(`✅ Found ${count} person(s) in Luxand database`);
+    
+    // Log each person's details
+    if (Array.isArray(persons) && persons.length > 0) {
+      console.log('📋 Persons list:');
+      persons.forEach((person, index) => {
+        const uuid = person.uuid || person.id || 'N/A';
+        const name = person.name || 'N/A';
+        const faces = person.faces || person.face_count || 0;
+        console.log(`  ${index + 1}. Name: ${name}, UUID: ${uuid}, Faces: ${faces}`);
+      });
+    }
+    
+    return res.json({
+      ok: true,
+      persons: persons,
+      count: count,
+      message: `Found ${count} person(s) in Luxand database`
+    });
+  } catch (error) {
+    console.error('❌ Error listing persons:', error);
+    return res.status(500).json({
+      ok: false,
+      error: error.message || 'Failed to list persons from Luxand',
+      persons: [],
+      count: 0
     });
   }
 });

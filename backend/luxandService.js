@@ -516,3 +516,47 @@ export async function deletePerson(personUuid) {
   return responseData;
 }
 
+/**
+ * List all persons in the Luxand database
+ * @returns {Promise<Object>} - { persons: [...] } with person details
+ */
+export async function listPersons() {
+  console.log(`📤 Calling Luxand: GET ${LUXAND_BASE}/person`);
+  console.log(`📤 Using 'token' header for authentication`);
+  
+  const headers = {
+    'token': API_KEY,
+  };
+  
+  const res = await fetch(`${LUXAND_BASE}/person`, {
+    method: 'GET',
+    headers: headers
+  });
+
+  console.log(`📥 Luxand list persons response status: ${res.status} ${res.statusText}`);
+
+  const responseText = await res.text();
+  console.log(`📥 Raw Luxand list persons response (first 500 chars):`, responseText.substring(0, 500));
+
+  if (!res.ok) {
+    console.error(`❌ Luxand list persons error response:`, responseText.substring(0, 500));
+    throw new Error(`Luxand list persons error (${res.status}): ${responseText.substring(0, 200)}`);
+  }
+
+  // Handle JSON parsing
+  let responseData;
+  try {
+    let cleanedResponse = responseText;
+    cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+      return `"message": "${p1}\\"${p2}\\"${p3}"`;
+    });
+    responseData = JSON.parse(cleanedResponse);
+  } catch (parseError) {
+    console.error(`❌ Failed to parse list persons response:`, parseError.message);
+    throw new Error(`Invalid JSON response from Luxand list persons: ${responseText.substring(0, 200)}`);
+  }
+  
+  console.log(`✅ Luxand list persons success: Found ${responseData.persons?.length || responseData.length || 0} person(s)`);
+  return responseData;
+}
+
