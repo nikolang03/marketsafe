@@ -147,7 +147,47 @@ app.post('/api/enroll', async (req, res) => {
       console.log('🔧 Removed data URL prefix from base64');
     }
 
-    // 1) Liveness check before enrollment (optional - skip if endpoint not available)
+    // 1) Check for existing faces for this email and delete them (prevent duplicates)
+    try {
+      console.log(`🔍 Checking for existing faces for email: ${email}`);
+      const allPersons = await listPersons();
+      const persons = allPersons.persons || allPersons.data || allPersons || [];
+      
+      const emailToFind = email.toLowerCase().trim();
+      const existingPersons = persons.filter(person => 
+        (person.name || '').toLowerCase().trim() === emailToFind
+      );
+      
+      if (existingPersons.length > 0) {
+        console.log(`⚠️ Found ${existingPersons.length} existing face(s) for ${email}. Deleting duplicates...`);
+        
+        let deletedCount = 0;
+        for (const person of existingPersons) {
+          const personUuid = person.uuid || person.id;
+          if (personUuid) {
+            try {
+              await deletePerson(personUuid);
+              deletedCount++;
+              console.log(`✅ Deleted duplicate face: ${personUuid}`);
+            } catch (deleteError) {
+              console.warn(`⚠️ Failed to delete duplicate face ${personUuid}: ${deleteError.message}`);
+              // Continue anyway - we'll still enroll the new face
+            }
+          }
+        }
+        
+        if (deletedCount > 0) {
+          console.log(`🧹 Cleaned up ${deletedCount} duplicate face(s) for ${email}`);
+        }
+      } else {
+        console.log(`✅ No existing faces found for ${email}. Proceeding with enrollment.`);
+      }
+    } catch (cleanupError) {
+      // If cleanup fails, log but continue with enrollment
+      console.warn(`⚠️ Failed to check/cleanup existing faces: ${cleanupError.message}. Continuing with enrollment...`);
+    }
+
+    // 2) Liveness check before enrollment (optional - skip if endpoint not available)
     let livenessPassed = true;
     try {
       console.log('🔍 Running liveness check...');
@@ -179,7 +219,7 @@ app.post('/api/enroll', async (req, res) => {
       livenessPassed = true; // Allow enrollment to proceed
     }
 
-    // 2) Enroll to Luxand
+    // 3) Enroll to Luxand
     console.log('🔍 Enrolling to Luxand...');
     console.log(`📤 Sending base64 (length: ${cleanBase64.length}) to Luxand...`);
     const luxandResp = await enrollPhoto(cleanBase64, email);
@@ -659,28 +699,63 @@ app.post('/api/delete-person', async (req, res) => {
 
     let personUuid = uuid;
 
-    // If email is provided, search for the person first
+    // If email is provided, find all persons with that email and delete them
     if (email && !uuid) {
-      console.log(`🔍 Searching for person with email: ${email}`);
+      console.log(`🔍 Searching for all persons with email: ${email}`);
       
-      // Search for the person by doing a face search with a dummy image
-      // Then match by name (email) in the results
-      // Note: This is a workaround - ideally Luxand would have a list persons endpoint
       try {
-        // Create a minimal base64 image (1x1 pixel) for search
-        // This won't match any face, but will return all persons if Luxand allows
-        // Actually, we can't search without a face image, so we'll need the UUID
-        // For now, return an error asking for UUID
-        return res.status(400).json({
-          ok: false,
-          error: 'UUID is required to delete a person.',
-          note: 'To find the UUID for an email, check your Firestore users collection where luxandUuid is stored, or use the Luxand dashboard.',
-          suggestion: 'You can provide the UUID directly: { "uuid": "person-uuid-here" }'
+        // Use the list persons endpoint to find all persons with this email
+        const allPersons = await listPersons();
+        const persons = allPersons.persons || allPersons.data || allPersons || [];
+        
+        // Filter persons by email (name field)
+        const emailToFind = email.toLowerCase().trim();
+        const matchingPersons = persons.filter(person => 
+          (person.name || '').toLowerCase().trim() === emailToFind
+        );
+        
+        if (matchingPersons.length === 0) {
+          return res.json({
+            ok: true,
+            message: `No persons found with email: ${email}`,
+            deletedCount: 0,
+            uuids: []
+          });
+        }
+        
+        console.log(`📋 Found ${matchingPersons.length} person(s) with email ${email}`);
+        
+        // Delete all matching persons
+        const deletedUuids = [];
+        const errors = [];
+        
+        for (const person of matchingPersons) {
+          const personUuid = person.uuid || person.id;
+          if (personUuid) {
+            try {
+              await deletePerson(personUuid);
+              deletedUuids.push(personUuid);
+              console.log(`✅ Deleted person: ${personUuid}`);
+            } catch (deleteError) {
+              errors.push({ uuid: personUuid, error: deleteError.message });
+              console.error(`❌ Failed to delete person ${personUuid}: ${deleteError.message}`);
+            }
+          }
+        }
+        
+        return res.json({
+          ok: true,
+          message: `Deleted ${deletedUuids.length} of ${matchingPersons.length} person(s) with email: ${email}`,
+          deletedCount: deletedUuids.length,
+          totalFound: matchingPersons.length,
+          uuids: deletedUuids,
+          errors: errors.length > 0 ? errors : undefined
         });
       } catch (searchError) {
-        return res.status(400).json({
+        console.error('❌ Error searching for persons by email:', searchError);
+        return res.status(500).json({
           ok: false,
-          error: 'Cannot search by email. UUID is required.',
+          error: 'Failed to search for persons by email',
           details: searchError.message
         });
       }
@@ -756,6 +831,269 @@ app.get('/api/list-persons', async (req, res) => {
       error: error.message || 'Failed to list persons from Luxand',
       persons: [],
       count: 0
+    });
+  }
+});
+
+// ==========================================
+// DELETE ALL PERSONS BY EMAIL ENDPOINT
+// ==========================================
+// POST /api/delete-persons-by-email
+// Body: { email: string }
+// Returns: { ok: bool, deletedCount: number, uuids: [...] }
+// This endpoint deletes ALL faces for a given email (useful for cleanup)
+app.post('/api/delete-persons-by-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email || typeof email !== 'string' || email.trim().length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Email is required'
+      });
+    }
+
+    const emailToFind = email.toLowerCase().trim();
+    console.log(`🔍 Searching for all persons with email: ${emailToFind}`);
+    
+    // Get all persons from Luxand
+    const allPersons = await listPersons();
+    const persons = allPersons.persons || allPersons.data || allPersons || [];
+    
+    // Filter persons by email
+    const matchingPersons = persons.filter(person => 
+      (person.name || '').toLowerCase().trim() === emailToFind
+    );
+    
+    if (matchingPersons.length === 0) {
+      return res.json({
+        ok: true,
+        message: `No persons found with email: ${emailToFind}`,
+        deletedCount: 0,
+        uuids: []
+      });
+    }
+    
+    console.log(`📋 Found ${matchingPersons.length} person(s) with email ${emailToFind}`);
+    
+    // Delete all matching persons
+    const deletedUuids = [];
+    const errors = [];
+    
+    for (const person of matchingPersons) {
+      const personUuid = person.uuid || person.id;
+      if (personUuid) {
+        try {
+          await deletePerson(personUuid);
+          deletedUuids.push(personUuid);
+          console.log(`✅ Deleted person: ${personUuid}`);
+        } catch (deleteError) {
+          errors.push({ uuid: personUuid, error: deleteError.message });
+          console.error(`❌ Failed to delete person ${personUuid}: ${deleteError.message}`);
+        }
+      }
+    }
+    
+    return res.json({
+      ok: true,
+      message: `Deleted ${deletedUuids.length} of ${matchingPersons.length} person(s) with email: ${emailToFind}`,
+      deletedCount: deletedUuids.length,
+      totalFound: matchingPersons.length,
+      uuids: deletedUuids,
+      errors: errors.length > 0 ? errors : undefined
+    });
+
+  } catch (error) {
+    console.error('❌ Error deleting persons by email:', error);
+    return res.status(500).json({
+      ok: false,
+      error: error.message || 'Failed to delete persons by email',
+      deletedCount: 0
+    });
+  }
+});
+
+// ==========================================
+// DELETE USER ENDPOINT (with automatic Luxand cleanup)
+// ==========================================
+// POST /api/delete-user
+// Body: { email: string, userId?: string }
+// Returns: { ok: bool, message: string, luxandDeleted: number }
+// This endpoint should be called when deleting a user from Firestore
+// It automatically deletes all faces for that user from Luxand
+app.post('/api/delete-user', async (req, res) => {
+  try {
+    const { email, userId } = req.body;
+
+    if (!email || typeof email !== 'string' || email.trim().length === 0) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Email is required'
+      });
+    }
+
+    const emailToFind = email.toLowerCase().trim();
+    console.log(`🗑️ Deleting user: ${emailToFind}${userId ? ` (userId: ${userId})` : ''}`);
+    console.log(`🔍 Searching for all faces in Luxand for this email...`);
+    
+    // Get all persons from Luxand
+    const allPersons = await listPersons();
+    const persons = allPersons.persons || allPersons.data || allPersons || [];
+    
+    // Filter persons by email
+    const matchingPersons = persons.filter(person => 
+      (person.name || '').toLowerCase().trim() === emailToFind
+    );
+    
+    let deletedCount = 0;
+    const deletedUuids = [];
+    const errors = [];
+    
+    if (matchingPersons.length > 0) {
+      console.log(`📋 Found ${matchingPersons.length} face(s) in Luxand for ${emailToFind}`);
+      
+      // Delete all matching persons from Luxand
+      for (const person of matchingPersons) {
+        const personUuid = person.uuid || person.id;
+        if (personUuid) {
+          try {
+            await deletePerson(personUuid);
+            deletedUuids.push(personUuid);
+            deletedCount++;
+            console.log(`✅ Deleted face from Luxand: ${personUuid}`);
+          } catch (deleteError) {
+            errors.push({ uuid: personUuid, error: deleteError.message });
+            console.error(`❌ Failed to delete face ${personUuid}: ${deleteError.message}`);
+          }
+        }
+      }
+    } else {
+      console.log(`ℹ️ No faces found in Luxand for ${emailToFind}`);
+    }
+    
+    return res.json({
+      ok: true,
+      message: `User deletion processed. ${deletedCount} face(s) deleted from Luxand.`,
+      email: emailToFind,
+      userId: userId || null,
+      luxandDeleted: deletedCount,
+      totalFound: matchingPersons.length,
+      uuids: deletedUuids,
+      errors: errors.length > 0 ? errors : undefined,
+      note: 'This endpoint only deletes from Luxand. You must still delete the user from Firestore separately.'
+    });
+
+  } catch (error) {
+    console.error('❌ Error deleting user:', error);
+    return res.status(500).json({
+      ok: false,
+      error: error.message || 'Failed to delete user from Luxand',
+      luxandDeleted: 0
+    });
+  }
+});
+
+// ==========================================
+// CLEANUP DUPLICATES ENDPOINT
+// ==========================================
+// POST /api/cleanup-duplicates
+// Body: { email?: string } (optional - if not provided, cleans all duplicates)
+// Returns: { ok: bool, cleaned: number, duplicates: [...] }
+// This endpoint finds and removes duplicate faces (multiple faces for same email)
+app.post('/api/cleanup-duplicates', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    console.log('🧹 Starting duplicate cleanup...');
+    
+    // Get all persons from Luxand
+    const allPersons = await listPersons();
+    const persons = allPersons.persons || allPersons.data || allPersons || [];
+    
+    // Group persons by email
+    const emailGroups = {};
+    for (const person of persons) {
+      const personEmail = (person.name || '').toLowerCase().trim();
+      if (personEmail) {
+        if (!emailGroups[personEmail]) {
+          emailGroups[personEmail] = [];
+        }
+        emailGroups[personEmail].push(person);
+      }
+    }
+    
+    // Find duplicates (emails with more than 1 face)
+    const duplicates = {};
+    for (const [emailKey, emailPersons] of Object.entries(emailGroups)) {
+      if (emailPersons.length > 1) {
+        // If specific email requested, only process that one
+        if (email && email.toLowerCase().trim() !== emailKey) {
+          continue;
+        }
+        duplicates[emailKey] = emailPersons;
+      }
+    }
+    
+    if (Object.keys(duplicates).length === 0) {
+      return res.json({
+        ok: true,
+        message: 'No duplicates found',
+        cleaned: 0,
+        duplicates: []
+      });
+    }
+    
+    console.log(`📋 Found ${Object.keys(duplicates).length} email(s) with duplicates`);
+    
+    // Clean up duplicates (keep the first one, delete the rest)
+    let totalCleaned = 0;
+    const cleanedDetails = [];
+    
+    for (const [emailKey, emailPersons] of Object.entries(duplicates)) {
+      // Keep the first face, delete the rest
+      const toKeep = emailPersons[0];
+      const toDelete = emailPersons.slice(1);
+      
+      console.log(`🧹 Cleaning ${emailKey}: Keeping 1, Deleting ${toDelete.length}`);
+      
+      const deletedUuids = [];
+      for (const person of toDelete) {
+        const personUuid = person.uuid || person.id;
+        if (personUuid) {
+          try {
+            await deletePerson(personUuid);
+            deletedUuids.push(personUuid);
+            totalCleaned++;
+            console.log(`✅ Deleted duplicate: ${personUuid}`);
+          } catch (deleteError) {
+            console.error(`❌ Failed to delete ${personUuid}: ${deleteError.message}`);
+          }
+        }
+      }
+      
+      cleanedDetails.push({
+        email: emailKey,
+        totalFaces: emailPersons.length,
+        kept: toKeep.uuid || toKeep.id,
+        deleted: deletedUuids.length,
+        deletedUuids: deletedUuids
+      });
+    }
+    
+    return res.json({
+      ok: true,
+      message: `Cleaned up ${totalCleaned} duplicate face(s)`,
+      cleaned: totalCleaned,
+      duplicatesFound: Object.keys(duplicates).length,
+      details: cleanedDetails
+    });
+
+  } catch (error) {
+    console.error('❌ Error cleaning up duplicates:', error);
+    return res.status(500).json({
+      ok: false,
+      error: error.message || 'Failed to cleanup duplicates',
+      cleaned: 0
     });
   }
 });
