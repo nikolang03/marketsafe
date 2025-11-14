@@ -233,8 +233,17 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     if (mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text(message),
-          backgroundColor: Colors.red,
+          content: Text(
+            message,
+            style: const TextStyle(fontSize: 13),
+          ),
+          backgroundColor: Colors.grey[900],
+          behavior: SnackBarBehavior.floating,
+          margin: const EdgeInsets.all(16),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          duration: const Duration(seconds: 2),
         ),
       );
     }
@@ -285,21 +294,6 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     }
   }
 
-  IconData _getStatusIcon(String? status) {
-    switch (status) {
-      case 'approved':
-        return Icons.check_circle;
-      case 'rejected':
-        return Icons.cancel;
-      case 'pending':
-        return Icons.hourglass_empty;
-      case 'deleted':
-        return Icons.delete;
-      default:
-        return Icons.info;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
     return AnnotatedRegion<SystemUiOverlayStyle>(
@@ -312,63 +306,63 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
         body: SafeArea(
         child: Column(
           children: [
-            // Top bar (transparent like message screen)
+            // Minimal header
             Padding(
-              padding: const EdgeInsets.only(left: 16, right: 16, top: 30, bottom: 10),
+              padding: const EdgeInsets.only(left: 16, right: 16, top: 16, bottom: 8),
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  const SizedBox(width: 24), // Spacer to balance the layout
                   const Text(
                     'Notifications',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 20,
+                      fontWeight: FontWeight.w500,
+                      letterSpacing: 0.5,
+                    ),
                   ),
-                  Row(
-                    children: [
-                      if (_notifications.any((n) => (n['isRead'] ?? false) == false))
-                        TextButton(
-                          onPressed: _markAllAsRead,
-                          child: const Text(
-                            'Mark All Read',
-                            style: TextStyle(color: Colors.white),
-                          ),
-                        ),
-                      if (_notifications.isNotEmpty)
-                        PopupMenuButton<String>(
-                          onSelected: (value) async {
-                            if (value == 'mark_all_read') {
-                              await _markAllAsRead();
-                            } else if (value == 'delete_all') {
-                              await _deleteAllNotifications();
-                            }
-                          },
-                          itemBuilder: (context) => [
-                            if (_notifications.any((n) => (n['isRead'] ?? false) == false))
-                              const PopupMenuItem(
-                                value: 'mark_all_read',
-                                child: Row(
-                                  children: [
-                                    Icon(Icons.mark_email_read, color: Colors.white),
-                                    SizedBox(width: 8),
-                                    Text('Mark All as Read'),
-                                  ],
-                                ),
-                              ),
-                            const PopupMenuItem(
-                              value: 'delete_all',
-                              child: Row(
-                                children: [
-                                  Icon(Icons.delete_forever, color: Colors.red),
-                                  SizedBox(width: 8),
-                                  Text('Delete All Notifications', style: TextStyle(color: Colors.red)),
-                                ],
+                  if (_notifications.isNotEmpty)
+                    PopupMenuButton<String>(
+                      onSelected: (value) async {
+                        if (value == 'mark_all_read') {
+                          await _markAllAsRead();
+                        } else if (value == 'delete_all') {
+                          await _deleteAllNotifications();
+                        }
+                      },
+                      icon: Icon(
+                        Icons.more_vert,
+                        color: Colors.grey[400],
+                        size: 20,
+                      ),
+                      color: Colors.grey[900],
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      itemBuilder: (context) => [
+                        if (_notifications.any((n) => (n['isRead'] ?? false) == false))
+                          PopupMenuItem(
+                            value: 'mark_all_read',
+                            child: Text(
+                              'Mark All Read',
+                              style: TextStyle(
+                                color: Colors.grey[300],
+                                fontSize: 14,
                               ),
                             ),
-                          ],
-                          icon: const Icon(Icons.more_vert, color: Colors.white),
+                          ),
+                        PopupMenuItem(
+                          value: 'delete_all',
+                          child: Text(
+                            'Delete All',
+                            style: TextStyle(
+                              color: Colors.red.withOpacity(0.8),
+                              fontSize: 14,
+                            ),
+                          ),
                         ),
-                    ],
-                  ),
+                      ],
+                    ),
                 ],
               ),
             ),
@@ -421,7 +415,7 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                         onRefresh: _loadNotifications,
                         color: Colors.red,
                         child: ListView.builder(
-                          padding: const EdgeInsets.all(8),
+                          padding: EdgeInsets.zero,
                           itemCount: _notifications.length,
                           itemBuilder: (context, index) {
                             final notification = _notifications[index];
@@ -433,128 +427,85 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
                             final productId = notification['productId']?.toString() ?? '';
                             final isProductDeleted = _deletedProductIds.contains(productId);
 
-                            return Card(
-                              margin: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              color: isRead 
-                                  ? Colors.grey[900] 
-                                  : Colors.grey[850]?.withOpacity(0.9),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(12),
-                              ),
-                              child: InkWell(
-                                onTap: () {
-                                  if (!isRead) {
-                                    _markAsRead(notification['id'] ?? '');
-                                  }
-                                  // Show product preview
-                                  _showProductPreview(notification);
-                                },
-                                borderRadius: BorderRadius.circular(12),
-                                child: Padding(
-                                  padding: const EdgeInsets.all(16),
-                                  child: Row(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      // Status icon
-                                      Container(
-                                        padding: const EdgeInsets.all(8),
-                                        decoration: BoxDecoration(
-                                          color: _getStatusColor(status)
-                                              .withOpacity(0.2),
-                                          shape: BoxShape.circle,
-                                        ),
-                                        child: Icon(
-                                          _getStatusIcon(status),
-                                          color: _getStatusColor(status),
-                                          size: 24,
-                                        ),
+                            return InkWell(
+                              onTap: () {
+                                if (!isRead) {
+                                  _markAsRead(notification['id'] ?? '');
+                                }
+                                // Show relevant message based on notification type
+                                _handleNotificationTap(notification);
+                              },
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 16,
+                                  vertical: 12,
+                                ),
+                                decoration: BoxDecoration(
+                                  border: Border(
+                                    bottom: BorderSide(
+                                      color: Colors.grey[800]!,
+                                      width: 0.5,
+                                    ),
+                                  ),
+                                ),
+                                child: Row(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    // Minimal status indicator
+                                    Container(
+                                      width: 4,
+                                      height: 4,
+                                      margin: const EdgeInsets.only(top: 8, right: 12),
+                                      decoration: BoxDecoration(
+                                        color: isProductDeleted 
+                                            ? Colors.orange
+                                            : (isRead ? Colors.transparent : _getStatusColor(status)),
+                                        shape: BoxShape.circle,
                                       ),
-                                      const SizedBox(width: 12),
-                                      // Notification content
-                                      Expanded(
-                                        child: Column(
-                                          crossAxisAlignment:
-                                              CrossAxisAlignment.start,
-                                          children: [
-                                            Row(
-                                              children: [
-                                                // Status indicator dot
-                                                Container(
-                                                  width: 8,
-                                                  height: 8,
-                                                  decoration: BoxDecoration(
-                                                    color: isProductDeleted 
-                                                        ? Colors.orange
-                                                        : _getStatusColor(status),
-                                                    shape: BoxShape.circle,
-                                                  ),
-                                                ),
-                                                const SizedBox(width: 12),
-                                                Expanded(
-                                                  child: Text(
-                                                    isProductDeleted 
-                                                        ? '$title (Deleted)'
-                                                        : title,
-                                                    style: TextStyle(
-                                                      color: isProductDeleted ? Colors.orange : Colors.white,
-                                                      fontSize: 16,
-                                                      fontWeight: isRead
-                                                          ? FontWeight.normal
-                                                          : FontWeight.bold,
-                                                    ),
-                                                  ),
-                                                ),
-                                                if (!isRead)
-                                                  Container(
-                                                    width: 8,
-                                                    height: 8,
-                                                    decoration: const BoxDecoration(
-                                                      color: Colors.red,
-                                                      shape: BoxShape.circle,
-                                                    ),
-                                                  ),
-                                              ],
+                                    ),
+                                    // Notification content
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          Text(
+                                            isProductDeleted 
+                                                ? '$title (Deleted)'
+                                                : title,
+                                            style: TextStyle(
+                                              color: isProductDeleted 
+                                                  ? Colors.orange.withOpacity(0.8)
+                                                  : Colors.white.withOpacity(isRead ? 0.7 : 1.0),
+                                              fontSize: 14,
+                                              fontWeight: isRead ? FontWeight.normal : FontWeight.w500,
                                             ),
+                                          ),
+                                          if (message.isNotEmpty) ...[
                                             const SizedBox(height: 4),
                                             Text(
                                               isProductDeleted 
                                                   ? 'Product no longer available'
                                                   : message,
                                               style: TextStyle(
-                                                color: isProductDeleted ? Colors.orange : Colors.grey[300],
-                                                fontSize: 14,
-                                              ),
-                                              maxLines: 3,
-                                              overflow: TextOverflow.ellipsis,
-                                            ),
-                                            const SizedBox(height: 8),
-                                            Text(
-                                              _formatTimestamp(timestamp),
-                                              style: TextStyle(
                                                 color: Colors.grey[500],
                                                 fontSize: 12,
                                               ),
-                                            ),
-                                            const SizedBox(height: 4),
-                                            // Arrow indicator
-                                            Row(
-                                              mainAxisAlignment: MainAxisAlignment.end,
-                                              children: [
-                                                Icon(
-                                                  Icons.arrow_forward_ios,
-                                                  color: Colors.grey[400],
-                                                  size: 14,
-                                                ),
-                                              ],
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
                                             ),
                                           ],
-                                        ),
+                                          const SizedBox(height: 6),
+                                          Text(
+                                            _formatTimestamp(timestamp),
+                                            style: TextStyle(
+                                              color: Colors.grey[600],
+                                              fontSize: 11,
+                                            ),
+                                          ),
+                                        ],
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             );
@@ -601,6 +552,209 @@ class _NotificationsScreenState extends State<NotificationsScreen> {
     } catch (e) {
       print('❌ Error checking product existence: $e');
     }
+  }
+
+  void _handleNotificationTap(Map<String, dynamic> notification) {
+    final notificationType = notification['type'] ?? 'product_status';
+    
+    if (notificationType == 'follow') {
+      // Show follow notification message
+      _showFollowNotificationMessage(notification);
+    } else if (notificationType == 'admin_message') {
+      // Show admin message dialog
+      _showAdminMessageDialog(notification);
+    } else {
+      // Show product preview for product_status notifications
+      _showProductPreview(notification);
+    }
+  }
+  
+  void _showFollowNotificationMessage(Map<String, dynamic> notification) {
+    final followerUsername = notification['followerUsername'] ?? 'Someone';
+    final timestamp = notification['createdAt'];
+    
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.grey[900],
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.blue.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  Icons.person_add,
+                  color: Colors.blue,
+                  size: 32,
+                ),
+              ),
+              const SizedBox(height: 16),
+              // Title
+              const Text(
+                'New Follower',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const SizedBox(height: 12),
+              // Message
+              Text(
+                '$followerUsername started following you',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.grey[300],
+                  fontSize: 14,
+                ),
+              ),
+              const SizedBox(height: 8),
+              // Timestamp
+              Text(
+                _formatTimestamp(timestamp),
+                style: TextStyle(
+                  color: Colors.grey[500],
+                  fontSize: 12,
+                ),
+              ),
+              const SizedBox(height: 20),
+              // Close button
+              SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    'Close',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  void _showAdminMessageDialog(Map<String, dynamic> notification) {
+    final title = notification['title'] ?? 'Admin Message';
+    final message = notification['message'] ?? 'No message content';
+    final messageType = notification['messageType'] ?? 'info';
+    final adminName = notification['adminName'] ?? 'Admin';
+    final timestamp = notification['createdAt'];
+    
+    showDialog(
+      context: context,
+      builder: (context) => Dialog(
+        backgroundColor: Colors.transparent,
+        child: Container(
+          padding: const EdgeInsets.all(20),
+          decoration: BoxDecoration(
+            color: Colors.grey[900],
+            borderRadius: BorderRadius.circular(16),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Icon based on message type
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: messageType == 'warning' 
+                      ? Colors.orange.withOpacity(0.2)
+                      : messageType == 'announcement'
+                          ? Colors.blue.withOpacity(0.2)
+                          : Colors.grey.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  messageType == 'warning'
+                      ? Icons.warning_rounded
+                      : messageType == 'announcement'
+                          ? Icons.campaign_rounded
+                          : Icons.info_rounded,
+                  color: messageType == 'warning'
+                      ? Colors.orange
+                      : messageType == 'announcement'
+                          ? Colors.blue
+                          : Colors.grey,
+                  size: 40,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 12),
+              Text(
+                message,
+                style: const TextStyle(
+                  color: Colors.grey,
+                  fontSize: 16,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 16),
+              if (adminName.isNotEmpty)
+                Text(
+                  'From: $adminName',
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                  ),
+                ),
+              if (timestamp != null)
+                Text(
+                  _formatTimestamp(timestamp),
+                  style: TextStyle(
+                    color: Colors.grey[600],
+                    fontSize: 12,
+                  ),
+                ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () => Navigator.of(context).pop(),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.red,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                ),
+                child: const Text('Close'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Future<void> _showProductPreview(Map<String, dynamic> notification) async {
@@ -899,67 +1053,69 @@ class _ProductPreviewDialog extends StatelessWidget {
     final price = productData['price']?.toString() ?? '0';
     final status = notification['status'] ?? 'unknown';
     final rejectionReason = notification['rejectionReason'] ?? '';
+    final notificationTitle = notification['title'] ?? '';
+    final notificationMessage = notification['message'] ?? '';
 
     return Dialog(
-      backgroundColor: const Color(0xFF1A1A1A),
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(16),
-      ),
+      backgroundColor: Colors.transparent,
       child: Container(
         constraints: BoxConstraints(
           maxHeight: MediaQuery.of(context).size.height * 0.8,
           maxWidth: MediaQuery.of(context).size.width * 0.9,
         ),
+        decoration: BoxDecoration(
+          color: Colors.grey[900],
+          borderRadius: BorderRadius.circular(16),
+        ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Header
-            Container(
+            // Minimal header with notification info
+            Padding(
               padding: const EdgeInsets.all(20),
-              decoration: const BoxDecoration(
-                color: Color(0xFF2E0000),
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(16),
-                  topRight: Radius.circular(16),
-                ),
-              ),
               child: Row(
                 children: [
-                  Icon(
-                    _getStatusIcon(status),
-                    color: _getStatusColor(status),
-                    size: 24,
-                  ),
-                  const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Product Preview',
+                          notificationTitle.isNotEmpty ? notificationTitle : 'Product Status',
                           style: const TextStyle(
                             color: Colors.white,
                             fontSize: 18,
-                            fontWeight: FontWeight.bold,
+                            fontWeight: FontWeight.w600,
                           ),
                         ),
-                        Text(
-                          _getStatusText(status),
-                          style: TextStyle(
-                            color: _getStatusColor(status),
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
+                        if (notificationMessage.isNotEmpty) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            notificationMessage,
+                            style: TextStyle(
+                              color: Colors.grey[400],
+                              fontSize: 13,
+                            ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close, color: Colors.white),
+                    icon: Icon(
+                      Icons.close,
+                      color: Colors.grey[400],
+                      size: 20,
+                    ),
                   ),
                 ],
               ),
+            ),
+            
+            // Divider
+            Divider(
+              color: Colors.grey[800],
+              height: 1,
             ),
             
             // Content
@@ -974,105 +1130,108 @@ class _ProductPreviewDialog extends StatelessWidget {
                       title,
                       style: const TextStyle(
                         color: Colors.white,
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                     const SizedBox(height: 8),
                     
                     // Price
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.red.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.red),
-                      ),
-                      child: Text(
-                        '₱$price',
-                        style: const TextStyle(
-                          color: Colors.red,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    
-                    // Description
-                    const Text(
-                      'Description:',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
                     Text(
-                      description,
-                      style: const TextStyle(
-                        color: Colors.grey,
+                      '₱$price',
+                      style: TextStyle(
+                        color: Colors.grey[300],
                         fontSize: 14,
                       ),
                     ),
                     const SizedBox(height: 16),
                     
-                    // Status Information
-                    Container(
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: _getStatusColor(status).withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(
-                          color: _getStatusColor(status),
-                          width: 1,
+                    // Description
+                    if (description.isNotEmpty && description != 'No description') ...[
+                      Text(
+                        description,
+                        style: TextStyle(
+                          color: Colors.grey[400],
+                          fontSize: 13,
                         ),
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Icon(
-                                _getStatusIcon(status),
-                                color: _getStatusColor(status),
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Text(
-                                _getStatusText(status),
-                                style: TextStyle(
-                                  color: _getStatusColor(status),
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
+                      const SizedBox(height: 16),
+                    ],
+                    
+                    // Status Information
+                    if (status != 'unknown') ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: _getStatusColor(status).withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            color: _getStatusColor(status).withOpacity(0.3),
+                            width: 1,
                           ),
-                          if (status == 'rejected' && rejectionReason.isNotEmpty) ...[
-                            const SizedBox(height: 8),
-                            const Text(
-                              'Rejection Reason:',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
+                        ),
+                        child: Row(
+                          children: [
+                            Icon(
+                              _getStatusIcon(status),
+                              color: _getStatusColor(status),
+                              size: 18,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              rejectionReason,
-                              style: const TextStyle(
-                                color: Colors.grey,
-                                fontSize: 14,
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    _getStatusText(status),
+                                    style: TextStyle(
+                                      color: _getStatusColor(status),
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                  if (status == 'rejected' && rejectionReason.isNotEmpty) ...[
+                                    const SizedBox(height: 6),
+                                    Text(
+                                      rejectionReason,
+                                      style: TextStyle(
+                                        color: Colors.grey[400],
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               ),
                             ),
                           ],
-                        ],
+                        ),
                       ),
-                    ),
+                    ],
                   ],
+                ),
+              ),
+            ),
+            
+            // Close button
+            Padding(
+              padding: const EdgeInsets.all(20),
+              child: SizedBox(
+                width: double.infinity,
+                child: TextButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                  child: const Text(
+                    'Close',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 14,
+                    ),
+                  ),
                 ),
               ),
             ),

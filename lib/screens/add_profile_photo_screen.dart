@@ -125,45 +125,21 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
           return;
         }
         
-        // CRITICAL: Check if user has luxandUuid (enrolled to Luxand)
-        // If not, enroll at least one face from the 3 captured images first
+        // CRITICAL: User must have completed 3 facial verification steps first
+        // The face should already be enrolled from those steps
+        // We only verify the profile photo matches the enrolled face, we do NOT enroll a new face
         String? luxandUuid = userData['luxandUuid']?.toString();
-        if (luxandUuid == null || luxandUuid.isEmpty) {
-          print('⚠️ User has no luxandUuid. Enrolling faces from signup verification...');
-          
-          // Try to enroll all 3 faces (or at least one)
-          final enrollResult = await ProductionFaceRecognitionService.enrollAllThreeFaces(
-            email: email,
-          );
-          
-          if (enrollResult['success'] == true) {
-            luxandUuid = enrollResult['luxandUuid']?.toString();
-            final enrolledCount = enrollResult['enrolledCount'] as int? ?? 0;
-            print('✅ Enrolled $enrolledCount face(s) to Luxand. UUID: $luxandUuid');
-            
-            // Refresh user data to get the updated luxandUuid
-            final updatedUserDoc = await firestore.collection('users').doc(userId).get();
-            if (updatedUserDoc.exists) {
-              final updatedData = updatedUserDoc.data()!;
-              luxandUuid = updatedData['luxandUuid']?.toString();
-            }
-          } else {
-            print('❌ Failed to enroll faces: ${enrollResult['error']}');
-            _showErrorDialog(
-              'Enrollment Error',
-              'Failed to enroll your face. Please try again or restart signup.',
-            );
-            return;
-          }
-        }
         
         if (luxandUuid == null || luxandUuid.isEmpty) {
+          print('❌ User has no luxandUuid. Face verification steps must be completed first.');
           _showErrorDialog(
-            'Enrollment Required',
-            'Your face has not been enrolled yet. Please complete the face verification steps first.',
+            'Face Verification Required',
+            'Please complete the 3 facial verification steps (blink, move closer, head movement) before uploading your profile photo. Your face must be enrolled first.',
           );
           return;
         }
+        
+        print('✅ Face enrollment verified from 3 verification steps. luxandUuid: $luxandUuid');
         
         // Use PERFECT RECOGNITION to verify face matches user's registered face
         // NOTE: isProfilePhotoVerification=true for more lenient consistency checks

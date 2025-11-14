@@ -1,14 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_core/firebase_core.dart';
 import '../models/product_model.dart';
 import '../screens/edit_product_screen.dart';
 import '../screens/product_preview_screen.dart';
-import '../screens/user_profile_view_screen.dart';
+import '../screens/user_profile_view_screen.dart' as profile_screen;
 import '../screens/comments_screen.dart';
 import '../services/product_service.dart';
+import '../services/comment_service.dart';
 import '../services/follow_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'image_swiper.dart';
+import '../services/media_download_service.dart';
 
 class ProductCard extends StatefulWidget {
   final Product product;
@@ -28,7 +33,7 @@ class ProductCard extends StatefulWidget {
   State<ProductCard> createState() => _ProductCardState();
 }
 
-class _ProductCardState extends State<ProductCard> {
+class _ProductCardState extends State<ProductCard> with WidgetsBindingObserver {
   late Product _currentProduct;
   String? _currentUserId;
   bool _isLiking = false;
@@ -38,10 +43,44 @@ class _ProductCardState extends State<ProductCard> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _currentProduct = widget.product;
-    _getCurrentUserId();
     _debugSharedPreferences();
     _debugProductInfo();
+    _initializeUserAndFollowStatus();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // Refresh follow status when app comes back to foreground
+    if (state == AppLifecycleState.resumed) {
+      _checkFollowStatus();
+    }
+  }
+
+  @override
+  void didUpdateWidget(ProductCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // If product changed, update and refresh follow status
+    if (oldWidget.product.id != widget.product.id) {
+      _currentProduct = widget.product;
+      _initializeUserAndFollowStatus();
+    } else {
+      // Even if product is the same, refresh follow status to ensure accuracy
+      _checkFollowStatus();
+    }
+  }
+
+  Future<void> _initializeUserAndFollowStatus() async {
+    await _getCurrentUserId();
+    // Check follow status after user ID is retrieved
     _checkFollowStatus();
   }
 
@@ -201,7 +240,7 @@ class _ProductCardState extends State<ProductCard> {
     Navigator.push(
       context,
       MaterialPageRoute(
-        builder: (context) => UserProfileViewScreen(
+        builder: (context) => profile_screen.UserProfileViewScreen(
           targetUserId: _currentProduct.sellerId,
           targetUsername: _currentProduct.sellerName,
         ),
@@ -219,6 +258,57 @@ class _ProductCardState extends State<ProductCard> {
         ),
       ),
     );
+  }
+
+  void _handleDownload() {
+    // Check if product has video
+    if (_currentProduct.mediaType == 'video' && 
+        _currentProduct.videoUrl != null && 
+        _currentProduct.videoUrl!.isNotEmpty) {
+      // Download video
+      MediaDownloadService.showDownloadDialog(
+        context: context,
+        mediaUrl: _currentProduct.videoUrl!,
+        productTitle: _currentProduct.title,
+        isVideo: true,
+        productId: _currentProduct.id,
+      );
+    } 
+    // Check if product has images
+    else if (_currentProduct.imageUrls.isNotEmpty) {
+      // Download first image
+      MediaDownloadService.showDownloadDialog(
+        context: context,
+        mediaUrl: _currentProduct.imageUrls[0],
+        productTitle: _currentProduct.title,
+        isVideo: false,
+        productId: _currentProduct.id,
+      );
+    } 
+    // No media available
+    else {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No media available to download'),
+          backgroundColor: Colors.red,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Future<int> _getTotalCommentCount() async {
+    try {
+      // Get count from CommentService (includes replies)
+      final newCommentCount = await CommentService.getCommentCount(_currentProduct.id);
+      // Get count from old comments
+      final oldCommentCount = _currentProduct.comments.length;
+      // Total = new comments (which includes replies) + old comments
+      return newCommentCount + oldCommentCount;
+    } catch (e) {
+      print('❌ Error getting comment count: $e');
+      return _currentProduct.comments.length;
+    }
   }
 
   void _showSuccessSnackBar(String message) {
@@ -744,11 +834,36 @@ class _ProductCardState extends State<ProductCard> {
                             : Text(_isFollowing ? 'Following' : 'Follow'),
                       ),
                       const SizedBox(width: 8),
-                      // Comments Button
-                      IconButton(
-                        icon: const Icon(Icons.comment_outlined, color: Colors.white),
-                        onPressed: _navigateToComments,
-                        tooltip: 'View Comments',
+                      // Three-dot menu for buyers
+                      PopupMenuButton<String>(
+                        icon: const Icon(Icons.more_vert, color: Colors.white),
+                        color: Colors.grey[900],
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        onSelected: (value) {
+                          if (value == 'download') {
+                            _handleDownload();
+                          }
+                        },
+                        itemBuilder: (BuildContext context) => [
+                          PopupMenuItem<String>(
+                            value: 'download',
+                            child: Row(
+                              children: [
+                                const Icon(Icons.download, color: Colors.white, size: 20),
+                                const SizedBox(width: 12),
+                                Text(
+                                  'Download photo',
+                                  style: TextStyle(
+                                    color: Colors.grey[300],
+                                    fontSize: 14,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ],
@@ -802,20 +917,28 @@ class _ProductCardState extends State<ProductCard> {
                       icon: const Icon(Icons.mode_comment_outlined, color: Colors.white),
                       onPressed: _showCommentsDialog,
                     ),
-                    Text(
-                      "${_currentProduct.comments.length}",
-                      style: const TextStyle(color: Colors.white),
+                    FutureBuilder<int>(
+                      future: _getTotalCommentCount(),
+                      builder: (context, snapshot) {
+                        final count = snapshot.data ?? _currentProduct.comments.length;
+                        return Text(
+                          "$count",
+                          style: const TextStyle(color: Colors.white),
+                        );
+                      },
                     ),
                     const Spacer(),
-                    OutlinedButton(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Colors.white54),
+                    // Only show Make Offer button for buyers (not sellers)
+                    if (!isOwner)
+                      OutlinedButton(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Colors.white54),
+                        ),
+                        onPressed: () => _navigateToProductPreview(),
+                        child: const Text("MAKE OFFER"),
                       ),
-                      onPressed: () => _navigateToProductPreview(),
-                      child: const Text("MAKE OFFER"),
-                    ),
-                    const SizedBox(width: 10),
+                    if (!isOwner) const SizedBox(width: 10),
                     IconButton(
                       icon: const Icon(Icons.bookmark_border, color: Colors.white),
                       onPressed: () {},
@@ -905,17 +1028,192 @@ class _CommentsDialogState extends State<_CommentsDialog> {
   final TextEditingController _commentController = TextEditingController();
   late Product _currentProduct;
   bool _isAddingComment = false;
+  List<Map<String, dynamic>> _comments = [];
+  bool _isLoadingComments = true;
+  Map<String, TextEditingController> _replyControllers = {};
+  Map<String, bool> _showReplyInput = {};
+  Map<String, bool> _showReplies = {};
+  Map<String, bool> _isReplying = {};
+  String? _currentUserId;
 
   @override
   void initState() {
     super.initState();
     _currentProduct = widget.product;
+    _loadCurrentUserId();
+    _loadComments();
+  }
+  
+  Future<void> _loadCurrentUserId() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _currentUserId = prefs.getString('current_user_id') ?? 
+                      prefs.getString('signup_user_id');
+    });
   }
 
   @override
   void dispose() {
     _commentController.dispose();
+    for (var controller in _replyControllers.values) {
+      controller.dispose();
+    }
     super.dispose();
+  }
+
+  Future<void> _loadComments() async {
+    try {
+      setState(() {
+        _isLoadingComments = true;
+      });
+
+      // Load ALL comments from database (including those that should be replies)
+      List<Map<String, dynamic>> allCommentsFromDB = [];
+      try {
+        final allCommentsSnapshot = await FirebaseFirestore.instanceFor(
+          app: Firebase.app(),
+          databaseId: 'marketsafe',
+        )
+            .collection('comments')
+            .where('productId', isEqualTo: widget.product.id)
+            .where('isDeleted', isEqualTo: false)
+            .get();
+        
+        print('🔍 Total comments in database for this product: ${allCommentsSnapshot.docs.length}');
+        
+        // Separate top-level comments and replies
+        List<Map<String, dynamic>> topLevelComments = [];
+        List<Map<String, dynamic>> orphanReplies = []; // Replies that couldn't be linked to parent
+        
+        for (var doc in allCommentsSnapshot.docs) {
+          final data = doc.data();
+          final commentData = Map<String, dynamic>.from(data);
+          commentData['commentId'] = doc.id;
+          final parentId = data['parentCommentId'];
+          
+          print('  - Comment ${doc.id}: parentCommentId=$parentId, username=${data['username']}, content=${data['content']}');
+          
+          if (parentId == null) {
+            // Check if this is actually a reply to an old comment (starts with "Replying to")
+            final content = data['content'] ?? '';
+            if (content.toString().startsWith('Replying to ')) {
+              orphanReplies.add(commentData);
+            } else {
+              topLevelComments.add(commentData);
+            }
+          } else {
+            // This is a reply - we'll attach it to its parent
+            orphanReplies.add(commentData);
+          }
+        }
+        
+        // Get replies for each top-level comment
+        for (var comment in topLevelComments) {
+          final replies = await CommentService.getReplies(comment['commentId']);
+          comment['replies'] = replies;
+          print('🔍 Comment ${comment['commentId']} (${comment['username']}) has ${replies.length} replies from getReplies');
+        }
+        
+        // Try to match orphan replies to old comments more precisely
+        // We need to track which replies have been matched to avoid duplicates
+        final matchedReplyIds = <String>{};
+        
+        // Sort old comments by creation time (oldest first) to match replies in order
+        final sortedOldComments = List<Map<String, dynamic>>.from(_currentProduct.comments);
+        sortedOldComments.sort((a, b) {
+          final aTime = a['createdAt'] ?? '';
+          final bTime = b['createdAt'] ?? '';
+          return aTime.toString().compareTo(bTime.toString());
+        });
+        
+        final oldComments = sortedOldComments.map((oldComment) {
+          final oldCommentId = oldComment['id'] ?? '';
+          final oldUsername = oldComment['userName'] ?? 'Anonymous';
+          final oldContent = oldComment['text'] ?? '';
+          
+          // Find replies that mention this old comment's username
+          // Match to the FIRST comment from this user that matches
+          // This ensures replies go to the correct comment when there are multiple from same user
+          final matchingReplies = orphanReplies.where((reply) {
+            if (matchedReplyIds.contains(reply['commentId'])) {
+              return false; // Already matched to another comment
+            }
+            final content = reply['content'] ?? '';
+            final contentStr = content.toString();
+            // Check if reply is specifically for this comment
+            // It should start with "Replying to [oldUsername]:"
+            if (contentStr.startsWith('Replying to $oldUsername:')) {
+              matchedReplyIds.add(reply['commentId']);
+              return true;
+            }
+            return false;
+          }).toList();
+          
+          return {
+            'commentId': oldCommentId,
+            'userId': oldComment['userId'] ?? '',
+            'username': oldUsername,
+            'profilePictureUrl': oldComment['userProfilePicture'] ?? '',
+            'content': oldContent,
+            'createdAt': oldComment['createdAt'] ?? DateTime.now().toIso8601String(),
+            'replies': matchingReplies, // Attach matching replies
+            'isOldComment': true,
+          };
+        }).toList();
+        
+        // Any remaining orphan replies that weren't matched should be shown as top-level comments
+        final unmatchedReplies = orphanReplies.where((reply) => !matchedReplyIds.contains(reply['commentId'])).toList();
+        if (unmatchedReplies.isNotEmpty) {
+          print('⚠️ ${unmatchedReplies.length} replies could not be matched to any comment');
+          // Add them as top-level comments
+          topLevelComments.addAll(unmatchedReplies);
+        }
+        
+        // Merge: new top-level comments first, then old comments with their replies
+        allCommentsFromDB = [...topLevelComments, ...oldComments];
+        
+        print('🔍 Final comment count: ${allCommentsFromDB.length} (${topLevelComments.length} new + ${oldComments.length} old)');
+        for (var comment in allCommentsFromDB) {
+          final replies = comment['replies'] as List? ?? [];
+          if (replies.isNotEmpty) {
+            print('  - Comment ${comment['commentId']} has ${replies.length} replies');
+          }
+        }
+      } catch (e) {
+        print('❌ Error loading comments: $e');
+        // Fallback to CommentService
+        final newComments = await CommentService.getComments(widget.product.id);
+        final oldComments = _currentProduct.comments.map((oldComment) {
+          return {
+            'commentId': oldComment['id'] ?? '',
+            'userId': oldComment['userId'] ?? '',
+            'username': oldComment['userName'] ?? 'Anonymous',
+            'profilePictureUrl': oldComment['userProfilePicture'] ?? '',
+            'content': oldComment['text'] ?? '',
+            'createdAt': oldComment['createdAt'] ?? DateTime.now().toIso8601String(),
+            'replies': <Map<String, dynamic>>[],
+            'isOldComment': true,
+          };
+        }).toList();
+        allCommentsFromDB = [...newComments, ...oldComments];
+      }
+      
+      final allComments = allCommentsFromDB;
+      
+      if (mounted) {
+        setState(() {
+          _comments = allComments;
+          _isLoadingComments = false;
+        });
+      }
+    } catch (e) {
+      print('❌ Error loading comments: $e');
+      if (mounted) {
+        setState(() {
+          _isLoadingComments = false;
+        });
+      }
+    }
   }
 
   Future<void> _addComment() async {
@@ -926,21 +1224,16 @@ class _CommentsDialogState extends State<_CommentsDialog> {
     });
 
     try {
-      final userName = await widget.getCurrentUserName();
-      final userProfilePicture = await widget.getCurrentUserProfilePicture();
-      
-      
-      final success = await ProductService.addComment(
-        _currentProduct.id,
-        widget.currentUserId!,
-        userName,
-        userProfilePicture,
-        _commentController.text.trim(),
+      // Use CommentService for full reply support
+      final success = await CommentService.addComment(
+        productId: widget.product.id,
+        content: _commentController.text.trim(),
       );
 
       if (success) {
         _commentController.clear();
-        // Refresh the product data
+        await _loadComments(); // Reload comments with replies
+        // Refresh product to get updated comment count
         final updatedProduct = await ProductService.getProductById(_currentProduct.id);
         if (updatedProduct != null) {
           setState(() {
@@ -950,22 +1243,314 @@ class _CommentsDialogState extends State<_CommentsDialog> {
         }
       }
     } catch (e) {
-      print('Error adding comment: $e');
+      print('❌ Error adding comment: $e');
     } finally {
-      setState(() {
-        _isAddingComment = false;
-      });
+      if (mounted) {
+        setState(() {
+          _isAddingComment = false;
+        });
+      }
     }
   }
 
-  Future<void> _editComment(String commentId, String currentText) async {
+  Future<void> _addReply(String commentId, String parentUsername) async {
+    final replyController = _replyControllers[commentId];
+    if (replyController == null || replyController.text.trim().isEmpty || _isReplying[commentId] == true) return;
+
+    setState(() {
+      _isReplying[commentId] = true;
+    });
+
+    try {
+      // Check if this is an old comment
+      final comment = _comments.firstWhere(
+        (c) => c['commentId'] == commentId,
+        orElse: () => {},
+      );
+      
+      final isOldComment = comment['isOldComment'] == true;
+      
+      // For old comments, we can't use their ID as parentCommentId (it doesn't exist in new system)
+      // So we create a new top-level comment with a mention
+      // For new comments, we can properly create a reply
+      final replyContent = isOldComment 
+          ? 'Replying to ${comment['username'] ?? 'user'}: ${replyController.text.trim()}'
+          : replyController.text.trim();
+      
+      print('🔍 Adding reply - isOldComment: $isOldComment, commentId: $commentId');
+      print('🔍 Reply content: $replyContent');
+      
+      final success = await CommentService.addComment(
+        productId: widget.product.id,
+        content: replyContent,
+        parentCommentId: isOldComment ? null : commentId, // Don't use old comment ID as parent
+      );
+      
+      print('🔍 Reply added successfully: $success');
+
+      if (success) {
+        replyController.clear();
+        setState(() {
+          _showReplyInput[commentId] = false;
+          _showReplies[commentId] = true; // Ensure replies section is visible after adding reply
+        });
+        await _loadComments(); // Reload comments with new reply
+        // Refresh product to get updated comment count
+        final updatedProduct = await ProductService.getProductById(_currentProduct.id);
+        if (updatedProduct != null) {
+          setState(() {
+            _currentProduct = updatedProduct;
+          });
+        }
+        // Show success message
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Reply added successfully'),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to add reply'),
+              backgroundColor: Colors.red,
+              duration: Duration(seconds: 2),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ Error adding reply: $e');
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isReplying[commentId] = false;
+        });
+      }
+    }
+  }
+
+  void _showDeleteConfirmation(BuildContext context, String commentId, {bool isOldComment = false}) {
+    bool isDeleting = false;
+    
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return AlertDialog(
+              backgroundColor: const Color(0xFF1A0000),
+              title: const Text('Delete Comment', style: TextStyle(color: Colors.white)),
+              content: const Text('Are you sure you want to delete this comment?', style: TextStyle(color: Colors.white70)),
+              actions: [
+                TextButton(
+                  onPressed: isDeleting ? null : () => Navigator.pop(dialogContext),
+                  child: Text(
+                    'Cancel',
+                    style: TextStyle(
+                      color: isDeleting ? Colors.white30 : Colors.white70,
+                    ),
+                  ),
+                ),
+                TextButton(
+                  onPressed: isDeleting ? null : () async {
+                    setDialogState(() {
+                      isDeleting = true;
+                    });
+                    Navigator.pop(dialogContext);
+                    await _deleteComment(commentId, isOldComment: isOldComment);
+                  },
+                  child: isDeleting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            color: Colors.red,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text('Delete', style: TextStyle(color: Colors.red)),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showCommentOptions(BuildContext context, String commentId, String currentText, {bool isOldComment = false, bool isProductOwner = false}) {
+    print('🔍 _showCommentOptions called');
+    print('  - commentId: $commentId');
+    print('  - currentText: $currentText');
+    print('  - isOldComment: $isOldComment');
+    print('  - context: $context');
+    
+    try {
+      // Try using a dialog instead of bottom sheet since we're already in a modal
+      showDialog(
+        context: context,
+        barrierDismissible: true,
+        builder: (BuildContext dialogContext) {
+          print('🔍 Dialog builder called');
+          return AlertDialog(
+            backgroundColor: const Color(0xFF1A0000),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: const Text(
+              'Comment Options',
+              style: TextStyle(color: Colors.white, fontSize: 18),
+            ),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.edit, color: Colors.blue, size: 24),
+                  title: const Text('Edit', style: TextStyle(color: Colors.white, fontSize: 16)),
+                  onTap: () {
+                    print('🔍 Edit tapped');
+                    Navigator.pop(dialogContext);
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      _editComment(commentId, currentText, isOldComment: isOldComment);
+                    });
+                  },
+                ),
+                const Divider(color: Colors.white24, height: 1),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.delete, color: Colors.red, size: 24),
+                  title: const Text('Delete', style: TextStyle(color: Colors.red, fontSize: 16)),
+                  onTap: () {
+                    print('🔍 Delete tapped');
+                    Navigator.pop(dialogContext);
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      _deleteComment(commentId, isOldComment: isOldComment);
+                    });
+                  },
+                ),
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext),
+                child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+              ),
+            ],
+          );
+        },
+      ).then((_) {
+        print('🔍 Dialog closed');
+      }).catchError((error) {
+        print('❌ Error showing dialog: $error');
+        // Fallback to bottom sheet if dialog fails
+        _showBottomSheetFallback(context, commentId, currentText, isOldComment: isOldComment);
+      });
+    } catch (e, stackTrace) {
+      print('❌ Exception in _showCommentOptions: $e');
+      print('❌ Stack trace: $stackTrace');
+      // Fallback to bottom sheet
+      _showBottomSheetFallback(context, commentId, currentText, isOldComment: isOldComment);
+    }
+  }
+  
+  void _showBottomSheetFallback(BuildContext context, String commentId, String currentText, {bool isOldComment = false}) {
+    try {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF1A0000),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        isScrollControlled: false,
+        enableDrag: true,
+        isDismissible: true,
+        useRootNavigator: false,
+        builder: (BuildContext sheetContext) {
+          print('🔍 Bottom sheet builder called');
+          return Container(
+            padding: const EdgeInsets.symmetric(vertical: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.white24,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+                ListTile(
+                  leading: const Icon(Icons.edit, color: Colors.blue, size: 24),
+                  title: const Text('Edit', style: TextStyle(color: Colors.white, fontSize: 16)),
+                  onTap: () {
+                    print('🔍 Edit tapped');
+                    Navigator.pop(sheetContext);
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      _editComment(commentId, currentText, isOldComment: isOldComment);
+                    });
+                  },
+                ),
+                const Divider(color: Colors.white24, height: 1),
+                ListTile(
+                  leading: const Icon(Icons.delete, color: Colors.red, size: 24),
+                  title: const Text('Delete', style: TextStyle(color: Colors.red, fontSize: 16)),
+                  onTap: () {
+                    print('🔍 Delete tapped');
+                    Navigator.pop(sheetContext);
+                    Future.delayed(const Duration(milliseconds: 100), () {
+                      _deleteComment(commentId, isOldComment: isOldComment);
+                    });
+                  },
+                ),
+                const SizedBox(height: 10),
+              ],
+            ),
+          );
+        },
+      ).then((_) {
+        print('🔍 Bottom sheet closed');
+      }).catchError((error) {
+        print('❌ Error showing bottom sheet: $error');
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error showing menu: $error'),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 3),
+          ),
+        );
+      });
+    } catch (e, stackTrace) {
+      print('❌ Exception in _showCommentOptions: $e');
+      print('❌ Stack trace: $stackTrace');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Error: $e'),
+          backgroundColor: Colors.red,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
+  Future<void> _editComment(String commentId, String currentText, {bool isOldComment = false}) async {
+    final textController = TextEditingController(text: currentText);
+    
     final newText = await showDialog<String>(
       context: context,
       builder: (context) => AlertDialog(
         backgroundColor: const Color(0xFF1A0000),
         title: const Text('Edit Comment', style: TextStyle(color: Colors.white)),
         content: TextField(
-          controller: TextEditingController(text: currentText),
+          controller: textController,
           style: const TextStyle(color: Colors.white),
           decoration: const InputDecoration(
             hintText: 'Enter your comment',
@@ -974,6 +1559,8 @@ class _CommentsDialogState extends State<_CommentsDialog> {
             fillColor: Colors.white12,
             border: OutlineInputBorder(),
           ),
+          autofocus: true,
+          maxLines: 3,
         ),
         actions: [
           TextButton(
@@ -981,55 +1568,80 @@ class _CommentsDialogState extends State<_CommentsDialog> {
             child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
           ),
           TextButton(
-            onPressed: () => Navigator.pop(context, currentText),
+            onPressed: () => Navigator.pop(context, textController.text),
             child: const Text('Save', style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
 
-    if (newText != null && newText != currentText) {
-      await ProductService.editComment(_currentProduct.id, commentId, newText);
-      // Refresh the product data
-      final updatedProduct = await ProductService.getProductById(_currentProduct.id);
-      if (updatedProduct != null) {
-        setState(() {
-          _currentProduct = updatedProduct;
-        });
-        widget.onCommentAdded(updatedProduct);
+    if (newText != null && newText.trim().isNotEmpty && newText != currentText) {
+      if (isOldComment) {
+        // For old comments, use ProductService
+        await ProductService.editComment(_currentProduct.id, commentId, newText);
+        // Refresh the product data
+        final updatedProduct = await ProductService.getProductById(_currentProduct.id);
+        if (updatedProduct != null) {
+          setState(() {
+            _currentProduct = updatedProduct;
+          });
+          widget.onCommentAdded(updatedProduct);
+        }
+      } else {
+        // For new comments, use CommentService
+        final success = await CommentService.editComment(commentId, newText);
+        if (success) {
+          _loadComments();
+        } else {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Failed to edit comment'),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
       }
     }
   }
 
-  Future<void> _deleteComment(String commentId) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: const Color(0xFF1A0000),
-        title: const Text('Delete Comment', style: TextStyle(color: Colors.white)),
-        content: const Text('Are you sure you want to delete this comment?', style: TextStyle(color: Colors.white70)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
+  Future<void> _deleteComment(String commentId, {bool isOldComment = false}) async {
+    try {
+      if (isOldComment) {
+        // For old comments, use ProductService
+        await ProductService.deleteComment(_currentProduct.id, commentId);
+        // Refresh the product data
+        final updatedProduct = await ProductService.getProductById(_currentProduct.id);
+        if (updatedProduct != null && mounted) {
+          setState(() {
+            _currentProduct = updatedProduct;
+          });
+          widget.onCommentAdded(updatedProduct);
+        }
+      } else {
+        // For new comments, use CommentService
+        final success = await CommentService.deleteComment(commentId);
+        if (success && mounted) {
+          _loadComments();
+        } else if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Failed to delete comment'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      print('❌ Error deleting comment: $e');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
           ),
-          TextButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirmed == true) {
-      await ProductService.deleteComment(_currentProduct.id, commentId);
-      // Refresh the product data
-      final updatedProduct = await ProductService.getProductById(_currentProduct.id);
-      if (updatedProduct != null) {
-        setState(() {
-          _currentProduct = updatedProduct;
-        });
-        widget.onCommentAdded(updatedProduct);
+        );
       }
     }
   }
@@ -1039,8 +1651,9 @@ class _CommentsDialogState extends State<_CommentsDialog> {
     return DraggableScrollableSheet(
       initialChildSize: 0.7,
       minChildSize: 0.5,
-      maxChildSize: 0.9,
+      maxChildSize: 0.95,
       builder: (context, scrollController) {
+        final keyboardHeight = MediaQuery.of(context).viewInsets.bottom;
         return Container(
           decoration: const BoxDecoration(
             color: Color(0xFF1A0000),
@@ -1081,145 +1694,463 @@ class _CommentsDialogState extends State<_CommentsDialog> {
               ),
               // Comments list
               Expanded(
-                child: _currentProduct.comments.isEmpty
+                child: _isLoadingComments
                     ? const Center(
-                        child: Text(
-                          'No comments yet',
-                          style: TextStyle(color: Colors.white54),
-                        ),
+                        child: CircularProgressIndicator(color: Colors.white),
                       )
-                    : ListView.builder(
-                        controller: scrollController,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: _currentProduct.comments.length,
-                        itemBuilder: (context, index) {
-                          final comment = _currentProduct.comments[index];
-                          final isOwner = comment['userId'] == widget.currentUserId;
-                          
-                          
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 12),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: Colors.white10,
-                              borderRadius: BorderRadius.circular(8),
+                    : _comments.isEmpty
+                        ? const Center(
+                            child: Text(
+                              'No comments yet',
+                              style: TextStyle(color: Colors.white54),
                             ),
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    // Profile picture
-                                    CircleAvatar(
-                                      radius: 16,
-                                      backgroundColor: Colors.white24,
-                                      backgroundImage: (comment['userProfilePicture'] != null && 
-                                                      comment['userProfilePicture'].toString().isNotEmpty)
-                                          ? NetworkImage(comment['userProfilePicture'])
-                                          : null,
-                                      child: (comment['userProfilePicture'] == null || 
-                                             comment['userProfilePicture'].toString().isEmpty)
-                                          ? Text(
-                                              (comment['userName'] ?? 'A')[0].toUpperCase(),
-                                              style: const TextStyle(
-                                                color: Colors.white,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.bold,
-                                              ),
-                                            )
-                                          : null,
-                                    ),
-                                    const SizedBox(width: 8),
-                                    // Username
-                                    Text(
-                                      comment['userName'] ?? 'Anonymous',
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 14,
-                                      ),
-                                    ),
-                                    const Spacer(),
-                                    if (isOwner)
-                                      PopupMenuButton<String>(
-                                        icon: const Icon(Icons.more_vert, color: Colors.white54, size: 16),
-                                        onSelected: (value) {
-                                          if (value == 'edit') {
-                                            _editComment(comment['id'], comment['text']);
-                                          } else if (value == 'delete') {
-                                            _deleteComment(comment['id']);
-                                          }
-                                        },
-                                        itemBuilder: (context) => [
-                                          const PopupMenuItem(
-                                            value: 'edit',
-                                            child: Text('Edit', style: TextStyle(color: Colors.white)),
+                          )
+                        : ListView.builder(
+                            controller: scrollController,
+                            padding: EdgeInsets.only(
+                              left: 16,
+                              right: 16,
+                              bottom: MediaQuery.of(context).viewInsets.bottom > 0 ? 100 : 16,
+                            ),
+                            itemCount: _comments.length,
+                            itemBuilder: (context, index) {
+                              final comment = _comments[index];
+                              final commentId = comment['commentId'] ?? '';
+                              // Ensure replies is a proper list
+                              final repliesRaw = comment['replies'];
+                              final replies = repliesRaw is List 
+                                  ? List<Map<String, dynamic>>.from(repliesRaw.map((r) => r is Map ? Map<String, dynamic>.from(r) : {}))
+                                  : <Map<String, dynamic>>[];
+                              // Compare user IDs (handle both string and null cases)
+                              final commentUserId = comment['userId']?.toString() ?? '';
+                              final currentUserIdStr = _currentUserId?.toString() ?? '';
+                              final isCommentOwner = commentUserId.isNotEmpty && 
+                                                    currentUserIdStr.isNotEmpty && 
+                                                    commentUserId == currentUserIdStr;
+                              final isProductOwner = _currentProduct.sellerId == currentUserIdStr;
+                              
+                              print('🔍 Comment owner check:');
+                              print('  - commentUserId: "$commentUserId"');
+                              print('  - currentUserId: "$currentUserIdStr"');
+                              print('  - productSellerId: "${_currentProduct.sellerId}"');
+                              print('  - isCommentOwner: $isCommentOwner');
+                              print('  - isProductOwner: $isProductOwner');
+                              
+                              // Auto-show replies if they exist
+                              if (replies.isNotEmpty) {
+                                print('🔍 Comment $commentId (${comment['username']}): ${replies.length} replies');
+                              }
+                              
+                              // Initialize reply controller if not exists
+                              if (!_replyControllers.containsKey(commentId)) {
+                                _replyControllers[commentId] = TextEditingController();
+                                _showReplyInput[commentId] = false;
+                                // Auto-show replies if they exist (only on first load)
+                                _showReplies[commentId] = replies.isNotEmpty;
+                                _isReplying[commentId] = false;
+                              }
+                              
+                              return Dismissible(
+                                key: Key('comment_$commentId'),
+                                direction: isCommentOwner ? DismissDirection.endToStart : DismissDirection.none,
+                                background: Container(
+                                  alignment: Alignment.centerRight,
+                                  padding: const EdgeInsets.only(right: 20),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withOpacity(0.3),
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                  child: const Icon(Icons.delete, color: Colors.white, size: 30),
+                                ),
+                                onDismissed: isCommentOwner ? (direction) {
+                                  _deleteComment(commentId, isOldComment: comment['isOldComment'] == true);
+                                } : null,
+                                child: GestureDetector(
+                                  onLongPress: isCommentOwner ? () {
+                                    HapticFeedback.mediumImpact();
+                                    _showDeleteConfirmation(context, commentId, isOldComment: comment['isOldComment'] == true);
+                                  } : null,
+                                  behavior: HitTestBehavior.opaque,
+                                  child: Container(
+                                  margin: const EdgeInsets.only(bottom: 20),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        children: [
+                                          // Minimal profile picture - Tappable
+                                          GestureDetector(
+                                            onTap: () {
+                                              final userId = comment['userId']?.toString();
+                                              if (userId != null && userId.isNotEmpty) {
+                                                Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (context) => profile_screen.UserProfileViewScreen(
+                                                      targetUserId: userId,
+                                                      targetUsername: comment['username']?.toString(),
+                                                    ),
+                                                  ),
+                                                );
+                                              }
+                                            },
+                                            child: CircleAvatar(
+                                              radius: 18,
+                                              backgroundColor: Colors.transparent,
+                                              backgroundImage: (comment['profilePictureUrl'] != null && 
+                                                              comment['profilePictureUrl'].toString().isNotEmpty)
+                                                  ? NetworkImage(comment['profilePictureUrl'])
+                                                  : null,
+                                              child: (comment['profilePictureUrl'] == null || 
+                                                     comment['profilePictureUrl'].toString().isEmpty)
+                                                  ? Text(
+                                                      (comment['username'] ?? 'A')[0].toUpperCase(),
+                                                      style: TextStyle(
+                                                        color: Colors.white.withOpacity(0.6),
+                                                        fontSize: 16,
+                                                        fontWeight: FontWeight.w400,
+                                                      ),
+                                                    )
+                                                  : null,
+                                            ),
                                           ),
-                                          const PopupMenuItem(
-                                            value: 'delete',
-                                            child: Text('Delete', style: TextStyle(color: Colors.red)),
+                                          const SizedBox(width: 12),
+                                          // Content section
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Row(
+                                                  children: [
+                                                    // Username - Tappable
+                                                    GestureDetector(
+                                                      onTap: () {
+                                                        final userId = comment['userId']?.toString();
+                                                        if (userId != null && userId.isNotEmpty) {
+                                                          Navigator.push(
+                                                            context,
+                                                            MaterialPageRoute(
+                                                              builder: (context) => profile_screen.UserProfileViewScreen(
+                                                                targetUserId: userId,
+                                                                targetUsername: comment['username']?.toString(),
+                                                              ),
+                                                            ),
+                                                          );
+                                                        }
+                                                      },
+                                                      child: Text(
+                                                        comment['username'] ?? 'Anonymous',
+                                                        style: TextStyle(
+                                                          color: Colors.white.withOpacity(0.9),
+                                                          fontWeight: FontWeight.w500,
+                                                          fontSize: 14,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Text(
+                                                      _formatCommentTime(comment['createdAt']),
+                                                      style: TextStyle(
+                                                        color: Colors.white.withOpacity(0.4),
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.w400,
+                                                      ),
+                                                    ),
+                                                    const Spacer(),
+                                                    // Three-dot menu only for product owner
+                                                    if (isProductOwner)
+                                                      IconButton(
+                                                        icon: Icon(Icons.more_vert, color: Colors.white.withOpacity(0.5), size: 18),
+                                                        padding: EdgeInsets.zero,
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () {
+                                                          _showCommentOptions(context, commentId, comment['content'] ?? '', isOldComment: comment['isOldComment'] == true, isProductOwner: true);
+                                                        },
+                                                      ),
+                                                  ],
+                                                ),
+                                                const SizedBox(height: 4),
+                                                Text(
+                                                  comment['content'] ?? '',
+                                                  style: TextStyle(
+                                                    color: Colors.white.withOpacity(0.8),
+                                                    fontSize: 14,
+                                                    height: 1.5,
+                                                  ),
+                                                ),
+                                                const SizedBox(height: 8),
+                                                // Minimal action buttons
+                                                Row(
+                                                  children: [
+                                                    TextButton(
+                                                      onPressed: () {
+                                                        if (!_replyControllers.containsKey(commentId)) {
+                                                          _replyControllers[commentId] = TextEditingController();
+                                                        }
+                                                        final currentState = _showReplyInput[commentId] ?? false;
+                                                        setState(() {
+                                                          _showReplyInput[commentId] = !currentState;
+                                                          _showReplies[commentId] = true;
+                                                        });
+                                                      },
+                                                      style: TextButton.styleFrom(
+                                                        padding: EdgeInsets.zero,
+                                                        minimumSize: const Size(0, 0),
+                                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                      ),
+                                                      child: Text(
+                                                        'Reply${replies.isNotEmpty ? ' (${replies.length})' : ''}',
+                                                        style: TextStyle(
+                                                          color: Colors.white.withOpacity(0.6),
+                                                          fontSize: 12,
+                                                          fontWeight: FontWeight.w400,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                    // Show/Hide Replies toggle
+                                                    if (replies.isNotEmpty) ...[
+                                                      Text(
+                                                        ' • ',
+                                                        style: TextStyle(
+                                                          color: Colors.white.withOpacity(0.3),
+                                                          fontSize: 12,
+                                                        ),
+                                                      ),
+                                                      TextButton(
+                                                        onPressed: () {
+                                                          setState(() {
+                                                            _showReplies[commentId] = !(_showReplies[commentId] ?? true);
+                                                          });
+                                                        },
+                                                        style: TextButton.styleFrom(
+                                                          padding: EdgeInsets.zero,
+                                                          minimumSize: const Size(0, 0),
+                                                          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                        ),
+                                                        child: Text(
+                                                          _showReplies[commentId] == true ? 'Hide' : 'Show ${replies.length}',
+                                                          style: TextStyle(
+                                                            color: Colors.white.withOpacity(0.6),
+                                                            fontSize: 12,
+                                                            fontWeight: FontWeight.w400,
+                                                          ),
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ],
+                                                ),
+                                              ],
+                                            ),
                                           ),
                                         ],
                                       ),
+                                    
+                                    // Minimal Reply Input
+                                    if ((_showReplyInput[commentId] ?? false) && _replyControllers.containsKey(commentId)) ...[
+                                      const SizedBox(height: 12),
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 30),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              'Replying to ${comment['username'] ?? 'user'}',
+                                              style: TextStyle(
+                                                color: Colors.white.withOpacity(0.5),
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w400,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 8),
+                                            TextField(
+                                              controller: _replyControllers[commentId],
+                                              style: TextStyle(
+                                                color: Colors.white.withOpacity(0.9),
+                                                fontSize: 13,
+                                              ),
+                                              decoration: InputDecoration(
+                                                hintText: 'Write a reply...',
+                                                hintStyle: TextStyle(
+                                                  color: Colors.white.withOpacity(0.3),
+                                                ),
+                                                border: UnderlineInputBorder(
+                                                  borderSide: BorderSide(
+                                                    color: Colors.white.withOpacity(0.2),
+                                                  ),
+                                                ),
+                                                enabledBorder: UnderlineInputBorder(
+                                                  borderSide: BorderSide(
+                                                    color: Colors.white.withOpacity(0.2),
+                                                  ),
+                                                ),
+                                                focusedBorder: UnderlineInputBorder(
+                                                  borderSide: BorderSide(
+                                                    color: Colors.white.withOpacity(0.4),
+                                                  ),
+                                                ),
+                                                contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                                                isDense: true,
+                                              ),
+                                              maxLines: 3,
+                                              minLines: 1,
+                                            ),
+                                            const SizedBox(height: 8),
+                                            Row(
+                                              mainAxisAlignment: MainAxisAlignment.end,
+                                              children: [
+                                                TextButton(
+                                                  onPressed: () {
+                                                    setState(() {
+                                                      _showReplyInput[commentId] = false;
+                                                      _replyControllers[commentId]?.clear();
+                                                    });
+                                                  },
+                                                  style: TextButton.styleFrom(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                                    minimumSize: const Size(0, 0),
+                                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                  ),
+                                                  child: Text(
+                                                    'Cancel',
+                                                    style: TextStyle(
+                                                      color: Colors.white.withOpacity(0.5),
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w400,
+                                                    ),
+                                                  ),
+                                                ),
+                                                const SizedBox(width: 8),
+                                                TextButton(
+                                                  onPressed: _isReplying[commentId] == true 
+                                                      ? null 
+                                                      : () => _addReply(commentId, comment['username'] ?? 'user'),
+                                                  style: TextButton.styleFrom(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+                                                    minimumSize: const Size(0, 0),
+                                                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                  ),
+                                                  child: _isReplying[commentId] == true
+                                                      ? SizedBox(
+                                                          width: 14,
+                                                          height: 14,
+                                                          child: CircularProgressIndicator(
+                                                            color: Colors.white.withOpacity(0.6),
+                                                            strokeWidth: 2,
+                                                          ),
+                                                        )
+                                                      : Text(
+                                                          'Reply',
+                                                          style: TextStyle(
+                                                            color: Colors.white.withOpacity(0.8),
+                                                            fontSize: 12,
+                                                            fontWeight: FontWeight.w500,
+                                                          ),
+                                                        ),
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                    
+                                    // Minimal Replies List
+                                    if (replies.isNotEmpty && (_showReplies[commentId] ?? true)) ...[
+                                      const SizedBox(height: 12),
+                                      Padding(
+                                        padding: const EdgeInsets.only(left: 30),
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: replies.map((reply) {
+                                            if (reply.isEmpty || reply['username'] == null) {
+                                              return const SizedBox.shrink();
+                                            }
+                                            return _buildReplyWidget(reply, commentId);
+                                          }).toList(),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  comment['text'],
-                                  style: const TextStyle(color: Colors.white70),
-                                ),
-                                const SizedBox(height: 4),
-                                Text(
-                                  _formatDate(comment['createdAt']),
-                                  style: const TextStyle(
-                                    color: Colors.white54,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ],
+                              ),
                             ),
                           );
-                        },
-                      ),
+                            },
+                          ),
               ),
-              // Add comment section
+              // Minimal Add comment section with keyboard padding
               Container(
-                padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  color: Colors.white12,
-                  borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  top: 12,
+                  bottom: 12 + keyboardHeight,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white.withOpacity(0.02),
+                  border: Border(
+                    top: BorderSide(
+                      color: Colors.white.withOpacity(0.1),
+                      width: 0.5,
+                    ),
+                  ),
                 ),
                 child: Row(
                   children: [
                     Expanded(
                       child: TextField(
                         controller: _commentController,
-                        style: const TextStyle(color: Colors.white),
-                        decoration: const InputDecoration(
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.9),
+                          fontSize: 14,
+                        ),
+                        decoration: InputDecoration(
                           hintText: 'Add a comment...',
-                          hintStyle: TextStyle(color: Colors.white54),
-                          filled: true,
-                          fillColor: Colors.white10,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.all(Radius.circular(20)),
-                            borderSide: BorderSide.none,
+                          hintStyle: TextStyle(
+                            color: Colors.white.withOpacity(0.3),
                           ),
-                          contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                          border: InputBorder.none,
+                          enabledBorder: InputBorder.none,
+                          focusedBorder: InputBorder.none,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 0, vertical: 8),
+                          isDense: true,
                         ),
                         maxLines: null,
                         onSubmitted: (_) => _addComment(),
+                        onTap: () {
+                          // Scroll to bottom when text field is tapped
+                          Future.delayed(const Duration(milliseconds: 300), () {
+                            if (scrollController.hasClients) {
+                              scrollController.animateTo(
+                                scrollController.position.maxScrollExtent,
+                                duration: const Duration(milliseconds: 200),
+                                curve: Curves.easeOut,
+                              );
+                            }
+                          });
+                        },
                       ),
                     ),
                     const SizedBox(width: 8),
                     IconButton(
                       onPressed: _isAddingComment ? null : _addComment,
                       icon: _isAddingComment
-                          ? const SizedBox(
-                              width: 20,
-                              height: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
+                          ? SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white.withOpacity(0.6),
+                                strokeWidth: 2,
+                              ),
                             )
-                          : const Icon(Icons.send, color: Colors.red),
+                          : Icon(
+                              Icons.send_rounded,
+                              color: Colors.white.withOpacity(0.7),
+                              size: 20,
+                            ),
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
                     ),
                   ],
                 ),
@@ -1228,6 +2159,162 @@ class _CommentsDialogState extends State<_CommentsDialog> {
           ),
         );
       },
+    );
+  }
+
+  String _formatCommentTime(dynamic timestamp) {
+    if (timestamp == null) return 'Unknown';
+    
+    try {
+      DateTime date;
+      if (timestamp is Timestamp) {
+        date = timestamp.toDate();
+      } else if (timestamp is String) {
+        date = DateTime.parse(timestamp);
+      } else {
+        return 'Unknown';
+      }
+      
+      final now = DateTime.now();
+      final difference = now.difference(date);
+      
+      if (difference.inDays > 0) {
+        return '${difference.inDays}d ago';
+      } else if (difference.inHours > 0) {
+        return '${difference.inHours}h ago';
+      } else if (difference.inMinutes > 0) {
+        return '${difference.inMinutes}m ago';
+      } else {
+        return 'Just now';
+      }
+    } catch (e) {
+      return 'Unknown';
+    }
+  }
+
+  Widget _buildReplyWidget(Map<String, dynamic> reply, String parentCommentId) {
+    // Check if current user owns this reply
+    final replyUserId = reply['userId']?.toString() ?? '';
+    final currentUserIdStr = _currentUserId?.toString() ?? '';
+    final isReplyOwner = replyUserId.isNotEmpty && 
+                        currentUserIdStr.isNotEmpty && 
+                        replyUserId == currentUserIdStr;
+    
+    // Clean up reply content - remove "Replying to [username]: " prefix if present
+    String replyContent = reply['content'] ?? '';
+    if (replyContent.toString().startsWith('Replying to ')) {
+      final colonIndex = replyContent.indexOf(': ');
+      if (colonIndex > 0) {
+        replyContent = replyContent.substring(colonIndex + 2);
+      }
+    }
+    
+    return GestureDetector(
+      onLongPress: isReplyOwner ? () {
+        HapticFeedback.mediumImpact();
+        _showDeleteConfirmation(context, reply['commentId'] ?? '', isOldComment: false);
+      } : null,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Minimal profile picture - Tappable
+            GestureDetector(
+              onTap: () {
+                final userId = reply['userId']?.toString();
+                if (userId != null && userId.isNotEmpty) {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) => profile_screen.UserProfileViewScreen(
+                        targetUserId: userId,
+                        targetUsername: reply['username']?.toString(),
+                      ),
+                    ),
+                  );
+                }
+              },
+              child: CircleAvatar(
+                radius: 14,
+                backgroundColor: Colors.transparent,
+                backgroundImage: (reply['profilePictureUrl'] != null && 
+                                reply['profilePictureUrl'].toString().isNotEmpty)
+                    ? NetworkImage(reply['profilePictureUrl'])
+                    : null,
+                child: (reply['profilePictureUrl'] == null || 
+                       reply['profilePictureUrl'].toString().isEmpty)
+                    ? Text(
+                        (reply['username'] ?? 'A')[0].toUpperCase(),
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.5),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      )
+                    : null,
+              ),
+            ),
+            const SizedBox(width: 10),
+            // Reply content
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      // Username - Tappable
+                      GestureDetector(
+                        onTap: () {
+                          final userId = reply['userId']?.toString();
+                          if (userId != null && userId.isNotEmpty) {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) => profile_screen.UserProfileViewScreen(
+                                  targetUserId: userId,
+                                  targetUsername: reply['username']?.toString(),
+                                ),
+                              ),
+                            );
+                          }
+                        },
+                        child: Text(
+                          reply['username'] ?? 'Anonymous',
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.9),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _formatCommentTime(reply['createdAt']),
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.4),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w400,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    replyContent,
+                    style: TextStyle(
+                      color: Colors.white.withOpacity(0.8),
+                      fontSize: 13,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 

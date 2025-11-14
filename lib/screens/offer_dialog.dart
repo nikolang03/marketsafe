@@ -47,13 +47,19 @@ class _OfferDialogState extends State<OfferDialog> {
       return;
     }
 
+    // Prevent sellers from making offers on their own products
+    final sellerId = widget.product['userId'];
+    if (widget.currentUserId == sellerId) {
+      _showErrorSnackBar('You cannot make an offer on your own product');
+      return;
+    }
+
     setState(() {
       _isSubmitting = true;
     });
 
     try {
       // Get seller information
-      final sellerId = widget.product['userId'];
       final productTitle = widget.product['title'] ?? 'Unknown Product';
       
       print('🔍 Offer Debug Info:');

@@ -744,17 +744,15 @@
                                 </p>
                                 <small class="text-muted">
                                     <i class="fas fa-info-circle me-1"></i>
-                                    Version: 1.0.3 | Build: 4 | Size: ~450 MB
+                                    Version: 1.0.4 | Build: Latest | Size: ~450 MB
                                 </small>
                             </div>
                             <div class="col-md-4 text-end">
-                                <a href="https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fmarketsafe.apk?alt=media" 
-                                   download="MarketSafe-v1.0.3.apk" 
-                                   class="btn btn-primary btn-lg"
-                                   id="apkDownloadLink"
-                                   target="_blank">
+                                <button onclick="downloadAPK(event)" 
+                                        class="btn btn-primary btn-lg"
+                                        id="apkDownloadLink">
                                     <i class="fas fa-download me-2"></i>Download APK
-                                </a>
+                                </button>
                             </div>
                         </div>
                         <hr>
@@ -1150,6 +1148,9 @@
                     <button type="button" class="btn btn-danger" id="rejectBtn" onclick="updateUserStatus('rejected')" style="display: none;">
                         <i class="fas fa-times me-1"></i>Reject
                     </button>
+                    <button type="button" class="btn btn-danger" id="deleteUserBtn" onclick="deleteUser()" style="display: none;">
+                        <i class="fas fa-trash me-1"></i>Delete User
+                    </button>
                 </div>
             </div>
         </div>
@@ -1392,6 +1393,9 @@
 
     // Firebase REST API endpoints
     const FIREBASE_REST_BASE = `https://firestore.googleapis.com/v1/projects/${FIREBASE_CONFIG.projectId}/databases/${FIREBASE_CONFIG.databaseId}/documents`;
+    
+    // Backend API URL for Luxand operations
+    const BACKEND_API_URL = 'https://marketsafe-production.up.railway.app';
 
     // Global variables
     let usersData = {};
@@ -2588,6 +2592,7 @@
         const status = user.verificationStatus || 'pending';
         const approveBtn = document.getElementById('approveBtn');
         const rejectBtn = document.getElementById('rejectBtn');
+        const deleteUserBtn = document.getElementById('deleteUserBtn');
         
         if (status === 'pending') {
             approveBtn.style.display = 'inline-block';
@@ -2595,6 +2600,13 @@
         } else {
             approveBtn.style.display = 'none';
             rejectBtn.style.display = 'none';
+        }
+        
+        // Show delete button if admin has permission
+        if (currentUserPermissions && currentUserPermissions.canDeleteUsers) {
+            deleteUserBtn.style.display = 'inline-block';
+        } else {
+            deleteUserBtn.style.display = 'none';
         }
         
         new bootstrap.Modal(document.getElementById('userModal')).show();
@@ -2689,6 +2701,396 @@
                 showRealTimeNotification(`Error updating user status: ${error.message}`, 'danger');
             } else {
                 showError('Error updating user status: ' + error.message);
+            }
+        }
+    }
+
+    // Delete user function - deletes from both Firestore and Luxand, plus all related data
+    async function deleteUser() {
+        if (!selectedUserId) {
+            showError('No user selected');
+            return;
+        }
+
+        const user = usersData[selectedUserId];
+        if (!user) {
+            showError('User data not found');
+            return;
+        }
+
+        const userEmail = user.email || '';
+        const userName = user.firstName || user.username || 'User';
+        
+        // Confirmation dialog
+        const confirmMessage = `Are you sure you want to delete "${userName}" (${userEmail})?\n\n` +
+            'This will permanently delete:\n' +
+            '• User account from Firestore\n' +
+            '• Face data from Luxand\n' +
+            '• All posted products\n' +
+            '• All comments\n' +
+            '• All messages and conversations\n' +
+            '• All notifications\n' +
+            '• All reports\n' +
+            '• All offers\n' +
+            '• Follow relationships\n\n' +
+            'This action CANNOT be undone!';
+        
+        if (!confirm(confirmMessage)) {
+            return;
+        }
+
+        try {
+            console.log('🗑️ Starting user deletion process...');
+            console.log('User ID:', selectedUserId);
+            console.log('User Email:', userEmail);
+            
+            // Show loading state
+            const deleteBtn = document.getElementById('deleteUserBtn');
+            const originalText = deleteBtn.innerHTML;
+            deleteBtn.disabled = true;
+            deleteBtn.innerHTML = '<i class="fas fa-spinner fa-spin me-1"></i>Deleting...';
+            
+            let deletedCount = {
+                luxand: 0,
+                products: 0,
+                comments: 0,
+                conversations: 0,
+                messages: 0,
+                notifications: 0,
+                reports: 0,
+                offers: 0,
+                followRelations: 0
+            };
+
+            // Step 1: Delete from Luxand
+            if (userEmail) {
+                try {
+                    console.log('🔍 Step 1: Deleting from Luxand...');
+                    const luxandResponse = await fetch(`${BACKEND_API_URL}/api/delete-user`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ email: userEmail, userId: selectedUserId })
+                    });
+                    
+                    if (luxandResponse.ok) {
+                        const luxandResult = await luxandResponse.json();
+                        deletedCount.luxand = luxandResult.luxandDeleted || 0;
+                        console.log(`✅ Deleted ${deletedCount.luxand} face(s) from Luxand`);
+                    } else {
+                        console.warn('⚠️ Failed to delete from Luxand, continuing with Firestore deletion...');
+                    }
+                } catch (luxandError) {
+                    console.warn('⚠️ Error deleting from Luxand:', luxandError);
+                }
+            }
+
+            // Step 2: Delete all products by this user
+            try {
+                console.log('🔍 Step 2: Deleting products...');
+                const productsResponse = await fetch(`${FIREBASE_REST_BASE}/products?key=${FIREBASE_CONFIG.apiKey}`);
+                if (productsResponse.ok) {
+                    const productsData = await productsResponse.json();
+                    if (productsData.documents) {
+                        for (const doc of productsData.documents) {
+                            const productId = doc.name.split('/').pop();
+                            const productFields = doc.fields;
+                            const sellerId = productFields.sellerId?.stringValue || productFields.userId?.stringValue;
+                            
+                            if (sellerId === selectedUserId) {
+                                await fetch(`${FIREBASE_REST_BASE}/products/${productId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'DELETE'
+                                });
+                                deletedCount.products++;
+                                console.log(`✅ Deleted product: ${productId}`);
+                            }
+                        }
+                    }
+                }
+            } catch (productsError) {
+                console.warn('⚠️ Error deleting products:', productsError);
+            }
+
+            // Step 3: Delete all conversations and messages
+            try {
+                console.log('🔍 Step 3: Deleting conversations and messages...');
+                const conversationsResponse = await fetch(`${FIREBASE_REST_BASE}/conversations?key=${FIREBASE_CONFIG.apiKey}`);
+                if (conversationsResponse.ok) {
+                    const conversationsData = await conversationsResponse.json();
+                    if (conversationsData.documents) {
+                        for (const doc of conversationsData.documents) {
+                            const conversationId = doc.name.split('/').pop();
+                            const conversationFields = doc.fields;
+                            const participants = conversationFields.participants?.arrayValue?.values || [];
+                            const participantIds = participants.map(p => p.stringValue || '').filter(id => id);
+                            
+                            if (participantIds.includes(selectedUserId)) {
+                                // Delete all messages in this conversation first
+                                try {
+                                    const messagesResponse = await fetch(`${FIREBASE_REST_BASE}/conversations/${conversationId}/messages?key=${FIREBASE_CONFIG.apiKey}`);
+                                    if (messagesResponse.ok) {
+                                        const messagesData = await messagesResponse.json();
+                                        if (messagesData.documents) {
+                                            for (const msgDoc of messagesData.documents) {
+                                                const messageId = msgDoc.name.split('/').pop();
+                                                await fetch(`${FIREBASE_REST_BASE}/conversations/${conversationId}/messages/${messageId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                                    method: 'DELETE'
+                                                });
+                                                deletedCount.messages++;
+                                            }
+                                        }
+                                    }
+                                } catch (msgError) {
+                                    console.warn('⚠️ Error deleting messages:', msgError);
+                                }
+                                
+                                // Delete the conversation
+                                await fetch(`${FIREBASE_REST_BASE}/conversations/${conversationId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'DELETE'
+                                });
+                                deletedCount.conversations++;
+                                console.log(`✅ Deleted conversation: ${conversationId}`);
+                            }
+                        }
+                    }
+                }
+            } catch (conversationsError) {
+                console.warn('⚠️ Error deleting conversations:', conversationsError);
+            }
+
+            // Step 4: Delete all notifications
+            try {
+                console.log('🔍 Step 4: Deleting notifications...');
+                const notificationsResponse = await fetch(`${FIREBASE_REST_BASE}/notifications?key=${FIREBASE_CONFIG.apiKey}`);
+                if (notificationsResponse.ok) {
+                    const notificationsData = await notificationsResponse.json();
+                    if (notificationsData.documents) {
+                        for (const doc of notificationsData.documents) {
+                            const notificationId = doc.name.split('/').pop();
+                            const notificationFields = doc.fields;
+                            const userId = notificationFields.userId?.stringValue;
+                            
+                            if (userId === selectedUserId) {
+                                await fetch(`${FIREBASE_REST_BASE}/notifications/${notificationId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'DELETE'
+                                });
+                                deletedCount.notifications++;
+                            }
+                        }
+                    }
+                }
+            } catch (notificationsError) {
+                console.warn('⚠️ Error deleting notifications:', notificationsError);
+            }
+
+            // Step 5: Delete all reports (where user is reporter or reported)
+            try {
+                console.log('🔍 Step 5: Deleting reports...');
+                const reportsResponse = await fetch(`${FIREBASE_REST_BASE}/reports?key=${FIREBASE_CONFIG.apiKey}`);
+                if (reportsResponse.ok) {
+                    const reportsData = await reportsResponse.json();
+                    if (reportsData.documents) {
+                        for (const doc of reportsData.documents) {
+                            const reportId = doc.name.split('/').pop();
+                            const reportFields = doc.fields;
+                            const reporterId = reportFields.reporterId?.stringValue;
+                            const reportedUserId = reportFields.reportedUserId?.stringValue;
+                            
+                            if (reporterId === selectedUserId || reportedUserId === selectedUserId) {
+                                await fetch(`${FIREBASE_REST_BASE}/reports/${reportId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'DELETE'
+                                });
+                                deletedCount.reports++;
+                            }
+                        }
+                    }
+                }
+            } catch (reportsError) {
+                console.warn('⚠️ Error deleting reports:', reportsError);
+            }
+
+            // Step 6: Delete all offers (where user is buyer or seller)
+            try {
+                console.log('🔍 Step 6: Deleting offers...');
+                const offersResponse = await fetch(`${FIREBASE_REST_BASE}/offers?key=${FIREBASE_CONFIG.apiKey}`);
+                if (offersResponse.ok) {
+                    const offersData = await offersResponse.json();
+                    if (offersData.documents) {
+                        for (const doc of offersData.documents) {
+                            const offerId = doc.name.split('/').pop();
+                            const offerFields = doc.fields;
+                            const buyerId = offerFields.buyerId?.stringValue;
+                            const sellerId = offerFields.sellerId?.stringValue;
+                            
+                            if (buyerId === selectedUserId || sellerId === selectedUserId) {
+                                await fetch(`${FIREBASE_REST_BASE}/offers/${offerId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'DELETE'
+                                });
+                                deletedCount.offers++;
+                            }
+                        }
+                    }
+                }
+            } catch (offersError) {
+                console.warn('⚠️ Error deleting offers:', offersError);
+            }
+
+            // Step 7: Update follow relationships (remove user from followers/following arrays)
+            try {
+                console.log('🔍 Step 7: Cleaning up follow relationships...');
+                const allUsersResponse = await fetch(`${FIREBASE_REST_BASE}/users?key=${FIREBASE_CONFIG.apiKey}`);
+                if (allUsersResponse.ok) {
+                    const allUsersData = await allUsersResponse.json();
+                    if (allUsersData.documents) {
+                        for (const doc of allUsersData.documents) {
+                            const otherUserId = doc.name.split('/').pop();
+                            if (otherUserId === selectedUserId) continue;
+                            
+                            const userFields = doc.fields;
+                            const followers = userFields.followers?.arrayValue?.values || [];
+                            const following = userFields.following?.arrayValue?.values || [];
+                            
+                            let needsUpdate = false;
+                            const updatedFields = { ...userFields };
+                            
+                            if (followers.some(f => (f.stringValue || '') === selectedUserId)) {
+                                updatedFields.followers = {
+                                    arrayValue: {
+                                        values: followers.filter(f => (f.stringValue || '') !== selectedUserId)
+                                    }
+                                };
+                                needsUpdate = true;
+                                deletedCount.followRelations++;
+                            }
+                            
+                            if (following.some(f => (f.stringValue || '') === selectedUserId)) {
+                                updatedFields.following = {
+                                    arrayValue: {
+                                        values: following.filter(f => (f.stringValue || '') !== selectedUserId)
+                                    }
+                                };
+                                needsUpdate = true;
+                                deletedCount.followRelations++;
+                            }
+                            
+                            if (needsUpdate) {
+                                await fetch(`${FIREBASE_REST_BASE}/users/${otherUserId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ fields: updatedFields })
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (followError) {
+                console.warn('⚠️ Error cleaning up follow relationships:', followError);
+            }
+
+            // Step 8: Remove user from product comments and likedBy arrays
+            try {
+                console.log('🔍 Step 8: Cleaning up product interactions...');
+                const productsResponse = await fetch(`${FIREBASE_REST_BASE}/products?key=${FIREBASE_CONFIG.apiKey}`);
+                if (productsResponse.ok) {
+                    const productsData = await productsResponse.json();
+                    if (productsData.documents) {
+                        for (const doc of productsData.documents) {
+                            const productId = doc.name.split('/').pop();
+                            const productFields = doc.fields;
+                            let needsUpdate = false;
+                            const updatedFields = { ...productFields };
+                            
+                            const likedBy = productFields.likedBy?.arrayValue?.values || [];
+                            if (likedBy.some(l => (l.stringValue || '') === selectedUserId)) {
+                                updatedFields.likedBy = {
+                                    arrayValue: {
+                                        values: likedBy.filter(l => (l.stringValue || '') !== selectedUserId)
+                                    }
+                                };
+                                needsUpdate = true;
+                                deletedCount.comments++;
+                            }
+                            
+                            const comments = productFields.comments?.arrayValue?.values || [];
+                            if (comments.some(c => {
+                                const commentData = c.mapValue?.fields || {};
+                                const commentUserId = commentData.userId?.stringValue;
+                                return commentUserId === selectedUserId;
+                            })) {
+                                updatedFields.comments = {
+                                    arrayValue: {
+                                        values: comments.filter(c => {
+                                            const commentData = c.mapValue?.fields || {};
+                                            const commentUserId = commentData.userId?.stringValue;
+                                            return commentUserId !== selectedUserId;
+                                        })
+                                    }
+                                };
+                                needsUpdate = true;
+                                deletedCount.comments++;
+                            }
+                            
+                            if (needsUpdate) {
+                                await fetch(`${FIREBASE_REST_BASE}/products/${productId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                                    method: 'PATCH',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ fields: updatedFields })
+                                });
+                            }
+                        }
+                    }
+                }
+            } catch (productInteractionsError) {
+                console.warn('⚠️ Error cleaning up product interactions:', productInteractionsError);
+            }
+
+            // Step 9: Finally, delete the user document itself
+            try {
+                console.log('🔍 Step 9: Deleting user document...');
+                const deleteResponse = await fetch(`${FIREBASE_REST_BASE}/users/${selectedUserId}?key=${FIREBASE_CONFIG.apiKey}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!deleteResponse.ok && deleteResponse.status !== 404) {
+                    throw new Error(`Failed to delete user: ${deleteResponse.status}`);
+                }
+                console.log('✅ User document deleted');
+            } catch (deleteUserError) {
+                console.error('❌ Error deleting user document:', deleteUserError);
+                throw deleteUserError;
+            }
+
+            // Close modal
+            bootstrap.Modal.getInstance(document.getElementById('userModal')).hide();
+            
+            // Show success message with details
+            const summary = [
+                `✅ User deleted successfully!`,
+                `\nDeleted:`,
+                `• ${deletedCount.luxand} face(s) from Luxand`,
+                `• ${deletedCount.products} product(s)`,
+                `• ${deletedCount.comments} comment(s)/like(s)`,
+                `• ${deletedCount.conversations} conversation(s)`,
+                `• ${deletedCount.messages} message(s)`,
+                `• ${deletedCount.notifications} notification(s)`,
+                `• ${deletedCount.reports} report(s)`,
+                `• ${deletedCount.offers} offer(s)`,
+                `• ${deletedCount.followRelations} follow relationship(s)`
+            ].join('\n');
+            
+            alert(summary);
+            
+            // Refresh users list
+            loadUsers();
+            
+        } catch (error) {
+            console.error('❌ Error deleting user:', error);
+            showError('Failed to delete user: ' + (error.message || 'Unknown error'));
+            
+            // Re-enable button
+            const deleteBtn = document.getElementById('deleteUserBtn');
+            if (deleteBtn) {
+                deleteBtn.disabled = false;
+                deleteBtn.innerHTML = '<i class="fas fa-trash me-1"></i>Delete User';
             }
         }
     }
@@ -4591,19 +4993,39 @@
         event.preventDefault();
         
         // Direct download URL from Firebase Storage
-        // Format: https://firebasestorage.googleapis.com/v0/b/{bucket}/o/{path}?alt=media
-        const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fmarketsafe.apk?alt=media';
+        const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fapp-release.apk?alt=media&token=17f4944e-9df9-4503-aa27-41bf5b028980';
         
-        // Create temporary link and trigger download
-        const link = document.createElement('a');
-        link.href = downloadUrl;
-        link.download = 'MarketSafe-v1.0.3.apk';
-        link.target = '_blank';
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        
-        console.log('✅ APK download started');
+        // Use fetch to download the file
+        fetch(downloadUrl)
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.blob();
+            })
+            .then(blob => {
+                // Create a blob URL and trigger download
+                const url = window.URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = 'MarketSafe-v1.0.4.apk';
+                link.style.display = 'none';
+                document.body.appendChild(link);
+                link.click();
+                
+                // Clean up
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(url);
+                }, 100);
+                
+                console.log('✅ APK download started');
+            })
+            .catch(error => {
+                console.error('❌ Error downloading APK:', error);
+                // Fallback to direct link
+                window.open(downloadUrl, '_blank');
+            });
     }
 
     // Reports Functions

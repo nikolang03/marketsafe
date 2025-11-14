@@ -10,7 +10,21 @@ import 'notification_service.dart';
 import 'network_service.dart';
 import 'watermarking_service.dart';
 import 'image_exif_metadata_service.dart';
+import 'duplicate_detection_service.dart';
+import 'media_download_service.dart';
 import 'package:device_info_plus/device_info_plus.dart';
+
+/// Custom exception for downloaded products
+/// This exception is thrown when a user tries to upload a product that was downloaded from another user
+class DownloadedProductException implements Exception {
+  final String message;
+  final bool isVideo;
+  
+  DownloadedProductException(this.message, {this.isVideo = false});
+  
+  @override
+  String toString() => message;
+}
 
 class ProductService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instanceFor(
@@ -84,6 +98,8 @@ class ProductService {
       // Upload multiple images to Firebase Storage with watermarking
       print('📤 Uploading ${imageFiles.length} product images with watermarking...');
       final List<String> imageUrls = [];
+      final List<String> imageHashes = [];
+      
       for (int i = 0; i < imageFiles.length; i++) {
         try {
           print('📤 Starting upload for image ${i + 1}/${imageFiles.length}');
@@ -91,17 +107,64 @@ class ProductService {
           print('📁 Image file exists: ${imageFiles[i].existsSync()}');
           print('📁 Image file size: ${await imageFiles[i].length()} bytes');
           
+          // Check for duplicate before uploading
+          // Calculate hash from original image (before watermarking)
+          print('🔍 Checking for duplicate image...');
+          final imageHash = await DuplicateDetectionService.calculateImageHash(imageFiles[i]);
+          
+          // Check if this is a downloaded file
+          print('🔍 Checking if image is downloaded file...');
+          print('🔍 Image hash: ${imageHash.substring(0, 16)}...');
+          final isDownloaded = await MediaDownloadService.isDownloadedFile(imageHash, 'image');
+          print('🔍 Is downloaded: $isDownloaded');
+          if (isDownloaded) {
+            print('❌ Downloaded image detected! Rejecting upload.');
+            print('❌ Throwing DownloadedProductException...');
+            throw DownloadedProductException(
+              'This product belongs to another user and cannot be reposted.',
+              isVideo: false,
+            );
+          }
+          print('✅ Image is not a downloaded file, proceeding...');
+          
+          // Check against existing products in database
+          final isDuplicate = await DuplicateDetectionService.isDuplicateImage(imageHash);
+          final isSimilar = await DuplicateDetectionService.isSimilarImage(imageHash, threshold: 10);
+          
+          if (isDuplicate || isSimilar) {
+            print('❌ Duplicate or similar image detected! Rejecting upload.');
+            throw Exception('This image has already been posted. Please use a different image.');
+          }
+          
+          print('✅ Image is unique, proceeding with upload...');
+          
           final imageUrl = await uploadProductImage(
             imageFiles[i], 
             '${productId}_$i',
             username: sellerUsername,
+            imageHash: imageHash,
           );
           imageUrls.add(imageUrl);
+          imageHashes.add(imageHash);
           print('✅ Image ${i + 1} uploaded successfully: $imageUrl');
         } catch (e) {
           print('❌ Image ${i + 1} upload failed: $e');
           print('❌ Error type: ${e.runtimeType}');
           print('❌ Error details: ${e.toString()}');
+          
+          // If it's a downloaded product exception, rethrow it immediately
+          if (e is DownloadedProductException) {
+            print('❌ DownloadedProductException detected, rethrowing...');
+            rethrow;
+          }
+          
+          // If it's a duplicate error, throw it to stop the entire upload
+          if (e.toString().contains('already been posted') || 
+              e.toString().contains('Downloaded images') ||
+              e.toString().contains('belongs to another user')) {
+            rethrow;
+          }
+          
           print('⚠️ Skipping failed image upload');
           // Don't add random placeholder - skip this image
           continue;
@@ -146,6 +209,7 @@ class ProductService {
         sellerProfilePictureUrl: sellerProfilePictureUrl,
         imageUrl: imageUrls.isNotEmpty ? imageUrls.first : '', // First image as primary
         imageUrls: imageUrls,
+        imageHashes: imageHashes, // Store hashes for duplicate detection
         imageMetadata: imageMetadataMap,
         createdAt: DateTime.now(),
         status: 'active',
@@ -203,7 +267,7 @@ class ProductService {
   }
 
   // Upload product image to Firebase Storage with watermarking
-  static Future<String> uploadProductImage(File imageFile, String productId, {String? username}) async {
+  static Future<String> uploadProductImage(File imageFile, String productId, {String? username, String? imageHash}) async {
     try {
       print('📤 Uploading image to Firebase Storage...');
       print('📁 Image file: ${imageFile.path}');
@@ -364,6 +428,36 @@ class ProductService {
       print('🆔 Generated product ID: $productId');
       print('👤 Seller name: $sellerName');
 
+      // Check for duplicate video before uploading
+      print('🔍 Checking for duplicate video...');
+      final videoFile = File(videoPath);
+      final videoHash = await DuplicateDetectionService.calculateVideoHash(videoFile);
+      
+      // Check if this is a downloaded file
+      print('🔍 Checking if video is downloaded file...');
+      print('🔍 Video hash: ${videoHash.substring(0, 16)}...');
+      final isDownloaded = await MediaDownloadService.isDownloadedFile(videoHash, 'video');
+      print('🔍 Is downloaded: $isDownloaded');
+      if (isDownloaded) {
+        print('❌ Downloaded video detected! Rejecting upload.');
+        print('❌ Throwing DownloadedProductException...');
+        throw DownloadedProductException(
+          'This product belongs to another user and cannot be reposted.',
+          isVideo: true,
+        );
+      }
+      print('✅ Video is not a downloaded file, proceeding...');
+      
+      // Check against existing products in database
+      final isDuplicateVideo = await DuplicateDetectionService.isDuplicateVideo(videoHash);
+      
+      if (isDuplicateVideo) {
+        print('❌ Duplicate video detected! Rejecting upload.');
+        throw Exception('This video has already been posted. Please use a different video.');
+      }
+      
+      print('✅ Video is unique, proceeding with upload...');
+
       // Upload video and generate thumbnail with watermarking
       print('📤 Uploading video and generating watermarked thumbnail...');
       final videoData = await VideoUploadService.uploadVideoWithThumbnail(
@@ -389,6 +483,7 @@ class ProductService {
         imageUrls: [videoData['thumbnailUrl'] ?? ''], // Use thumbnail in imageUrls
         videoUrl: videoData['videoUrl'],
         videoThumbnailUrl: videoData['thumbnailUrl'],
+        videoHash: videoHash, // Store video hash for duplicate detection
         mediaType: 'video',
         createdAt: DateTime.now(),
         status: 'active',
@@ -469,9 +564,9 @@ class ProductService {
         print('🔄 Trying fallback method...');
         final allProducts = await getAllProducts();
         final filteredProducts = allProducts
-            .where((product) => product.category == category)
+            .where((product) => product.category == category && product.status == 'active')
             .toList();
-        print('✅ Fallback found ${filteredProducts.length} products in $category');
+        print('✅ Fallback found ${filteredProducts.length} active products in $category');
         return filteredProducts;
       } catch (fallbackError) {
         print('❌ Fallback also failed: $fallbackError');
@@ -709,6 +804,7 @@ class ProductService {
       final querySnapshot = await _firestore
           .collection('products')
           .where('sellerId', isEqualTo: userId)
+          .where('status', isEqualTo: 'active')
           .get();
 
       // Sort in memory instead of using orderBy
@@ -717,7 +813,7 @@ class ProductService {
           .toList()
         ..sort((a, b) => b.createdAt.compareTo(a.createdAt));
 
-      print('✅ Found ${products.length} products for user $userId');
+      print('✅ Found ${products.length} active products for user $userId');
       return products;
     } catch (e) {
       print('❌ Error fetching user products: $e');
@@ -727,9 +823,9 @@ class ProductService {
         print('🔄 Trying fallback method for user products...');
         final allProducts = await getAllProducts();
         final userProducts = allProducts
-            .where((product) => product.sellerId == userId)
+            .where((product) => product.sellerId == userId && product.status == 'active')
             .toList();
-        print('✅ Fallback found ${userProducts.length} products for user $userId');
+        print('✅ Fallback found ${userProducts.length} active products for user $userId');
         return userProducts;
       } catch (fallbackError) {
         print('❌ Fallback also failed: $fallbackError');
@@ -758,13 +854,31 @@ class ProductService {
     try {
       print('🔄 ProductService: Deleting product: $productId');
       
-      // Update status to inactive instead of deleting
-      await _firestore.collection('products').doc(productId).update({
-        'status': 'inactive',
-        'deletedAt': FieldValue.serverTimestamp(),
-      });
+      // Delete all comments associated with this product
+      try {
+        final commentsSnapshot = await _firestore
+            .collection('comments')
+            .where('productId', isEqualTo: productId)
+            .get();
+        
+        if (commentsSnapshot.docs.isNotEmpty) {
+          print('🗑️ Deleting ${commentsSnapshot.docs.length} comments for product $productId');
+          final batch = _firestore.batch();
+          for (var doc in commentsSnapshot.docs) {
+            batch.delete(doc.reference);
+          }
+          await batch.commit();
+          print('✅ All comments deleted for product $productId');
+        }
+      } catch (commentError) {
+        print('⚠️ Error deleting comments: $commentError');
+        // Continue with product deletion even if comment deletion fails
+      }
       
-      print('✅ Product deleted successfully');
+      // Actually delete the product from the database
+      await _firestore.collection('products').doc(productId).delete();
+      
+      print('✅ Product deleted successfully from database');
       return true;
     } catch (e) {
       print('❌ Error deleting product: $e');

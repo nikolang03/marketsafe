@@ -393,6 +393,56 @@ class NotificationService {
     }
   }
 
+  /// Create a notification for when a user follows another user
+  static Future<void> createFollowNotification({
+    required String targetUserId,
+    required String followerId,
+    String? followerUsername,
+  }) async {
+    try {
+      print('🔔 Creating follow notification');
+      print('🔔 Target User ID: $targetUserId');
+      print('🔔 Follower ID: $followerId');
+      
+      // Get follower's username if not provided
+      String username = followerUsername ?? 'Someone';
+      if (followerUsername == null) {
+        try {
+          final followerDoc = await _firestore.collection('users').doc(followerId).get();
+          if (followerDoc.exists) {
+            final followerData = followerDoc.data()!;
+            username = followerData['username'] ?? 'Someone';
+          }
+        } catch (e) {
+          print('⚠️ Could not fetch follower username: $e');
+        }
+      }
+      
+      final notificationId = 'notification_${DateTime.now().millisecondsSinceEpoch}_follow_$followerId';
+      
+      final notification = {
+        'id': notificationId,
+        'userId': targetUserId,
+        'type': 'follow',
+        'followerId': followerId,
+        'followerUsername': username,
+        'isRead': false,
+        'createdAt': Timestamp.fromDate(DateTime.now()),
+        'title': 'New Follower 👤',
+        'message': '$username started following you',
+      };
+
+      await _firestore
+          .collection('notifications')
+          .doc(notificationId)
+          .set(notification);
+      
+      print('✅ Follow notification created successfully: $notificationId');
+    } catch (e) {
+      print('❌ Error creating follow notification: $e');
+    }
+  }
+
   /// Get notification title based on status
   static String _getNotificationTitle(String status) {
     switch (status) {

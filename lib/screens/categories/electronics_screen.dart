@@ -50,8 +50,8 @@ class _ElectronicsScreenState extends State<ElectronicsScreen> {
 
 
   void _showFilterDialog() {
-    final TextEditingController minController = TextEditingController(text: selectedMin.toInt().toString());
-    final TextEditingController maxController = TextEditingController(text: selectedMax.toInt().toString());
+    final TextEditingController minController = TextEditingController(text: selectedMin == minPrice ? '' : selectedMin.toInt().toString());
+    final TextEditingController maxController = TextEditingController(text: selectedMax == maxPrice ? '' : selectedMax.toInt().toString());
     
     showDialog(
       context: context,
@@ -82,7 +82,7 @@ class _ElectronicsScreenState extends State<ElectronicsScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: minController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
                           hintText: "0",
@@ -118,7 +118,7 @@ class _ElectronicsScreenState extends State<ElectronicsScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: maxController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
                           hintText: "100000",
@@ -149,21 +149,45 @@ class _ElectronicsScreenState extends State<ElectronicsScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              minController.text = minPrice.toInt().toString();
-              maxController.text = maxPrice.toInt().toString();
+              setState(() {
+                selectedMin = minPrice;
+                selectedMax = maxPrice;
+              });
+              Navigator.pop(context);
             },
             child: const Text("Reset", style: TextStyle(color: Colors.white70)),
           ),
           TextButton(
             onPressed: () {
-              final minValue = double.tryParse(minController.text) ?? minPrice;
-              final maxValue = double.tryParse(maxController.text) ?? maxPrice;
+              // Parse values, defaulting to min/max if empty or invalid
+              double? minValue = minController.text.trim().isEmpty 
+                  ? null 
+                  : double.tryParse(minController.text.trim());
+              double? maxValue = maxController.text.trim().isEmpty 
+                  ? null 
+                  : double.tryParse(maxController.text.trim());
+              
+              // Validate and set values
+              final newMin = minValue ?? minPrice;
+              final newMax = maxValue ?? maxPrice;
+              
+              // Ensure min <= max
+              if (newMin > newMax) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Minimum price must be less than or equal to maximum price"),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
               
               setState(() {
-                selectedMin = minValue.clamp(minPrice, maxPrice);
-                selectedMax = maxValue.clamp(minPrice, maxPrice);
+                selectedMin = newMin.clamp(minPrice, maxPrice);
+                selectedMax = newMax.clamp(minPrice, maxPrice);
               });
               
+              print('✅ Filter applied: ₱${selectedMin.toInt()} - ₱${selectedMax.toInt()}');
               Navigator.pop(context);
             },
             child: const Text("Apply", style: TextStyle(color: Colors.red)),

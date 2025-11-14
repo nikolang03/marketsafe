@@ -9,7 +9,7 @@ import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'fill_information_screen.dart';
-import '../services/face_net_service.dart';
+// import '../services/face_net_service.dart';  // Removed - TensorFlow Lite no longer used
 import '../services/production_face_recognition_service.dart';
 
 class FaceHeadMovementScreen extends StatefulWidget {
@@ -378,19 +378,9 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> {
                 print('✅ Head movement embedding registered successfully');
                 
                 // Also save to SharedPreferences for backward compatibility
-                if (_lastCameraImage != null) {
-                  final faceFeatures = await FaceNetService().predict(_lastCameraImage!, _lastDetectedFace!);
-                  if (faceFeatures.isNotEmpty) {
-                    final featuresString = faceFeatures.map((f) => f.toString()).join(',');
-                    await prefs.setString('face_verification_headMovementFeatures', featuresString);
-                  }
-                } else if (_lastImageBytes != null) {
-                  final faceFeatures = await FaceNetService().predictFromBytes(_lastImageBytes!, _lastDetectedFace!);
-                  if (faceFeatures.isNotEmpty) {
-                    final featuresString = faceFeatures.map((f) => f.toString()).join(',');
-                    await prefs.setString('face_verification_headMovementFeatures', featuresString);
-                  }
-                }
+                // NOTE: TensorFlow Lite removed - features no longer saved locally (backend handles it)
+                // Features are now handled by backend/Luxand during enrollment
+                print('ℹ️ Face features now handled by backend/Luxand');
               } else {
                 print('⚠️ Failed to register head movement embedding: ${result['error']}');
               }

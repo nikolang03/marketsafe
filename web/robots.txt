@@ -1,0 +1,10 @@
+# robots.txt for MarketSafe Admin Website
+User-agent: *
+Allow: /
+Allow: /admin.html
+Allow: /index.html
+Allow: /login.html
+
+# Sitemap location
+Sitemap: https://marketsafe-e57cf.web.app/sitemap.xml
+

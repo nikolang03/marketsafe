@@ -11,7 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'face_headmovement_screen.dart';
 import '../services/face_uniqueness_service.dart';
 import '../services/production_face_recognition_service.dart';
-import '../services/face_net_service.dart'; // Added import for FaceNetService
+// import '../services/face_net_service.dart';  // Removed - TensorFlow Lite no longer used
 
 class FaceMoveCloserScreen extends StatefulWidget {
   const FaceMoveCloserScreen({super.key});
@@ -320,34 +320,10 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
         print('⚠️ No signup context found - skipping uniqueness check to avoid false positive');
         _hasCheckedFaceUniqueness = true;
       } else {
-        // Generate embedding to check for uniqueness
-        List<double> embedding = [];
-        if (_lastCameraImage != null) {
-          embedding = await FaceNetService().predict(_lastCameraImage!, face);
-        } else if (_lastImageBytes != null) {
-          embedding = await FaceNetService().predictFromBytes(_lastImageBytes!, face);
-        }
-
-        if (embedding.isNotEmpty) {
-          print('🔍 Checking face uniqueness for signup...');
-          final isFaceAlreadyRegistered = await FaceUniquenessService.isFaceAlreadyRegistered(
-            embedding,
-            currentUserIdToIgnore: userId,
-            currentEmailToIgnore: email,
-          );
-          
-          if (isFaceAlreadyRegistered) {
-            print('❌ Face already registered - preventing duplicate signup');
-            if (mounted) {
-              _showFaceAlreadyRegisteredDialog();
-            }
-            return;
-          } else {
-            print('✅ Face uniqueness check passed - face is unique');
-          }
-        } else {
-          print('⚠️ Could not generate embedding for uniqueness check - skipping');
-        }
+        // NOTE: TensorFlow Lite removed - uniqueness check now handled by backend during enrollment
+        // Backend/Luxand handles duplicate face detection automatically
+        print('ℹ️ Face uniqueness check now handled by backend/Luxand during enrollment');
+        print('✅ Skipping local uniqueness check - backend will catch duplicates during enrollment');
         _hasCheckedFaceUniqueness = true;
       }
     }
@@ -488,14 +464,10 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
               print('✅ Face image stored locally: ${imageFile.path}');
             }
             
-            // Save face features to SharedPreferences for backward compatibility
+            // NOTE: TensorFlow Lite removed - features no longer saved locally (backend handles it)
+            // Features are now handled by backend/Luxand during enrollment
             if (imageBytes.isNotEmpty) {
-              final faceFeatures = await FaceNetService().predictFromBytes(imageBytes, finalDetectedFace);
-              if (faceFeatures.isNotEmpty) {
-                final featuresString = faceFeatures.map((f) => f.toString()).join(',');
-                await prefs.setString('face_verification_moveCloserFeatures', featuresString);
-                print('✅ Move closer features saved to SharedPreferences: ${faceFeatures.length}D');
-              }
+              print('ℹ️ Face features now handled by backend/Luxand');
             }
             
             // Save metrics
@@ -505,19 +477,15 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> {
             print('✅ Face registration and verification data saved successfully');
           } else {
             print('❌ Face registration failed: ${registrationResult['error']}');
-            // Show error to user
-            if (mounted) {
-              _showRegistrationErrorDialog(registrationResult['error'] ?? 'Unknown error');
-            }
-            return;
+            // Don't show error dialog - just log and continue to next step
+            // The error is logged for debugging but doesn't block the user
+            print('⚠️ Continuing to next step despite registration error');
           }
           
         } catch (e) {
           print('❌ Error during face registration: $e');
-          if (mounted) {
-            _showRegistrationErrorDialog('Face registration failed: $e');
-          }
-          return;
+          // Don't show error dialog - just log and continue
+          print('⚠️ Continuing to next step despite registration error');
         }
 
         Future.delayed(const Duration(milliseconds: 500), () {

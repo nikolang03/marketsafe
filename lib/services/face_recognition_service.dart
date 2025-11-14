@@ -3,7 +3,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:camera/camera.dart';
-import 'production_face_service.dart';
+// import 'production_face_service.dart';  // Removed - TensorFlow Lite no longer used
 
 /// @deprecated Face Recognition Service for Login
 /// 
@@ -95,18 +95,13 @@ class FaceRecognitionService {
   }
 
   /// Generate face embedding using TFLite model ONLY
+  /// NOTE: DEPRECATED - TensorFlow Lite removed, this function is no longer functional
+  @Deprecated('TensorFlow Lite removed - use ProductionFaceRecognitionService with backend/Luxand instead')
   static Future<List<double>> _generateFaceEmbedding(Face face, [CameraImage? cameraImage]) async {
-    print('🤖 Generating face embedding using TFLite model...');
-    
-    await ProductionFaceService.initialize();
-    final embedding = await ProductionFaceService.extractFaceEmbeddings(face, cameraImage);
-    
-    if (embedding.isNotEmpty && !embedding.every((x) => x == 0.0)) {
-      print('✅ Generated ${embedding.length}D face embedding using TFLite');
-      return embedding;
-    } else {
-      throw Exception('TFLite model failed - no fallback available');
-    }
+    // TensorFlow Lite removed - this function is deprecated
+    print('⚠️ _generateFaceEmbedding is deprecated - TensorFlow Lite removed');
+    print('⚠️ Use ProductionFaceRecognitionService with backend/Luxand instead');
+    throw Exception('TensorFlow Lite removed - use backend/Luxand for face recognition');
   }
   
 

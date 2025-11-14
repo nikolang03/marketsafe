@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../services/user_check_service.dart';
 import '../services/production_face_recognition_service.dart';
@@ -250,6 +251,7 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
                       errorMessage.isNotEmpty 
                         ? errorMessage
                         : 'This face is already registered with a different account. You cannot create multiple accounts with the same face. Please use your existing account or contact support if you believe this is an error.',
+                      navigateToWelcome: true, // Navigate to welcome screen on OK
                     );
                     setState(() {
                       _isLoading = false;
@@ -285,8 +287,22 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         
         print('✅ [PRE-CHECK] Duplicate check passed. Proceeding with account creation...');
 
-        // Generate a unique user ID for signup
-        final userId = 'user_${DateTime.now().millisecondsSinceEpoch}_${userEmail.isNotEmpty ? userEmail.split('@')[0] : userPhone.replaceAll('+', '').replaceAll(' ', '')}';
+        // Use Firebase Auth UID if available (from email signup), otherwise generate new ID
+        // This prevents creating duplicate users when AdminSyncService.initializeUser was called
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        final userId = firebaseUser?.uid ?? 'user_${DateTime.now().millisecondsSinceEpoch}_${userEmail.isNotEmpty ? userEmail.split('@')[0] : userPhone.replaceAll('+', '').replaceAll(' ', '')}';
+        
+        print('🆔 Using user ID: $userId ${firebaseUser != null ? '(from Firebase Auth)' : '(generated new)'}');
+        
+        // Check if user document already exists (from AdminSyncService.initializeUser)
+        final existingDoc = await FirebaseFirestore.instanceFor(
+          app: Firebase.app(),
+          databaseId: 'marketsafe',
+        ).collection('users').doc(userId).get();
+        
+        if (existingDoc.exists) {
+          print('⚠️ User document already exists - will update instead of creating new');
+        }
         
         // Store the user ID and username in SharedPreferences for later verification checks
         await prefs.setString('signup_user_id', userId);
@@ -343,13 +359,14 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         print('  - NOTE: biometricFeatures removed (deprecated - old 64D format)');
         
         // Save the complete user data (this will overwrite the document and remove isTemporaryUser)
+        // Use set() with merge: true to update existing document if it exists (from AdminSyncService)
         await FirebaseFirestore.instanceFor(
           app: Firebase.app(),
           databaseId: 'marketsafe',
         )
             .collection('users')
             .doc(userId)
-            .set(userData);
+            .set(userData, SetOptions(merge: true));
 
         print('✅ User data saved successfully to Firestore with signup ID: $userId');
 
@@ -404,6 +421,7 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
                   errorMessage.isNotEmpty 
                     ? errorMessage
                     : 'This face is already registered with a different account. You cannot create multiple accounts with the same face. Please use your existing account or contact support if you believe this is an error.',
+                  navigateToWelcome: true, // Navigate to welcome screen on OK
                 );
               } else {
                 // For other errors, just log (don't block - enrollment can be retried later)
@@ -689,9 +707,10 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
     );
   }
 
-  void _showErrorDialog(String title, String message) {
+  void _showErrorDialog(String title, String message, {bool navigateToWelcome = false}) {
     showDialog(
       context: context,
+      barrierDismissible: false,
       builder: (BuildContext context) {
         return AlertDialog(
           backgroundColor: Colors.grey[900],
@@ -705,7 +724,13 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.of(context).pop(),
+              onPressed: () {
+                Navigator.of(context).pop();
+                if (navigateToWelcome) {
+                  // Navigate to welcome screen after closing dialog
+                  Navigator.of(context).pushReplacementNamed('/welcome');
+                }
+              },
               child: const Text(
                 'OK',
                 style: TextStyle(color: Colors.white),

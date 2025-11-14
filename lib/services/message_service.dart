@@ -250,6 +250,162 @@ class MessageService {
     }
   }
 
+  /// Search users by name or username
+  static Future<List<Map<String, dynamic>>> searchUsers(String query, String currentUserId) async {
+    try {
+      if (query.trim().isEmpty) {
+        return [];
+      }
+
+      final searchQuery = query.trim().toLowerCase();
+      print('🔍 Searching users with query: "$searchQuery"');
+      
+      // Try indexed queries first, but fall back to fetching all and filtering if indexes are missing
+      try {
+        // Search by username (starts with) - single field query, no index needed
+        final usernameQuery = await _firestore
+            .collection('users')
+            .where('signupCompleted', isEqualTo: true)
+            .get();
+
+        print('🔍 Fetched ${usernameQuery.docs.length} users with signupCompleted=true');
+        
+        // Filter in memory for better flexibility
+        final Map<String, Map<String, dynamic>> uniqueUsers = {};
+        
+        for (var doc in usernameQuery.docs) {
+          final userId = doc.id;
+          
+          // Skip current user
+          if (userId == currentUserId) continue;
+          
+          final data = doc.data();
+          final username = (data['username'] ?? '').toString().trim();
+          final fullName = (data['fullName'] ?? '').toString().trim();
+          final firstName = (data['firstName'] ?? '').toString().trim();
+          final lastName = (data['lastName'] ?? '').toString().trim();
+          
+          // Build fullName if not exists
+          final computedFullName = fullName.isNotEmpty 
+              ? fullName 
+              : '$firstName $lastName'.trim();
+          
+          // Check if any field starts with the search query (case-insensitive)
+          final usernameLower = username.toLowerCase();
+          final fullNameLower = computedFullName.toLowerCase();
+          final firstNameLower = firstName.toLowerCase();
+          final lastNameLower = lastName.toLowerCase();
+          
+          final matches = usernameLower.startsWith(searchQuery) ||
+              fullNameLower.startsWith(searchQuery) ||
+              firstNameLower.startsWith(searchQuery) ||
+              lastNameLower.startsWith(searchQuery) ||
+              usernameLower.contains(searchQuery) ||
+              fullNameLower.contains(searchQuery) ||
+              firstNameLower.contains(searchQuery) ||
+              lastNameLower.contains(searchQuery);
+          
+          if (matches) {
+            // Get display name
+            String displayName = username.isNotEmpty 
+                ? username 
+                : computedFullName.isNotEmpty 
+                    ? computedFullName 
+                    : 'Unknown User';
+            
+            if (displayName.isEmpty) {
+              displayName = 'Unknown User';
+            }
+            
+            uniqueUsers[userId] = {
+              'id': userId,
+              'name': displayName,
+              'username': username,
+              'email': (data['email'] ?? '').toString(),
+              'profilePictureUrl': (data['profilePictureUrl'] ?? '').toString(),
+            };
+          }
+        }
+        
+        // Convert to list and sort by name
+        final usersList = uniqueUsers.values.toList();
+        usersList.sort((a, b) => (a['name'] as String).toLowerCase().compareTo((b['name'] as String).toLowerCase()));
+        
+        print('✅ Found ${usersList.length} matching users');
+        return usersList;
+      } catch (e) {
+        print('❌ Error in indexed search, trying fallback: $e');
+        // Fallback: fetch all users and filter
+        return await _searchUsersFallback(searchQuery, currentUserId);
+      }
+    } catch (e) {
+      print('❌ Error searching users: $e');
+      return [];
+    }
+  }
+
+  /// Fallback search method - fetches all users and filters in memory
+  static Future<List<Map<String, dynamic>>> _searchUsersFallback(String searchQuery, String currentUserId) async {
+    try {
+      print('🔍 Using fallback search method');
+      final allUsersSnapshot = await _firestore
+          .collection('users')
+          .where('signupCompleted', isEqualTo: true)
+          .limit(100) // Limit to prevent too much data
+          .get();
+
+      final Map<String, Map<String, dynamic>> uniqueUsers = {};
+      
+      for (var doc in allUsersSnapshot.docs) {
+        final userId = doc.id;
+        if (userId == currentUserId) continue;
+        
+        final data = doc.data();
+        final username = (data['username'] ?? '').toString().trim();
+        final fullName = (data['fullName'] ?? '').toString().trim();
+        final firstName = (data['firstName'] ?? '').toString().trim();
+        final lastName = (data['lastName'] ?? '').toString().trim();
+        
+        final computedFullName = fullName.isNotEmpty 
+            ? fullName 
+            : '$firstName $lastName'.trim();
+        
+        final usernameLower = username.toLowerCase();
+        final fullNameLower = computedFullName.toLowerCase();
+        final firstNameLower = firstName.toLowerCase();
+        final lastNameLower = lastName.toLowerCase();
+        
+        if (usernameLower.startsWith(searchQuery) ||
+            fullNameLower.startsWith(searchQuery) ||
+            firstNameLower.startsWith(searchQuery) ||
+            lastNameLower.startsWith(searchQuery)) {
+          
+          String displayName = username.isNotEmpty 
+              ? username 
+              : computedFullName.isNotEmpty 
+                  ? computedFullName 
+                  : 'Unknown User';
+          
+          uniqueUsers[userId] = {
+            'id': userId,
+            'name': displayName,
+            'username': username,
+            'email': (data['email'] ?? '').toString(),
+            'profilePictureUrl': (data['profilePictureUrl'] ?? '').toString(),
+          };
+        }
+      }
+      
+      final usersList = uniqueUsers.values.toList();
+      usersList.sort((a, b) => (a['name'] as String).toLowerCase().compareTo((b['name'] as String).toLowerCase()));
+      
+      return usersList;
+    } catch (e) {
+      print('❌ Error in fallback search: $e');
+      return [];
+    }
+  }
+
   /// Get user data by ID
   static Future<Map<String, dynamic>> getUserData(String userId) async {
     try {

@@ -13,8 +13,10 @@ class Product {
   final String? sellerProfilePictureUrl; // Seller's profile picture URL
   final String imageUrl; // Keep for backward compatibility
   final List<String> imageUrls; // New field for multiple images
+  final List<String>? imageHashes; // Hash values for duplicate detection
   final String? videoUrl; // Video URL for video products
   final String? videoThumbnailUrl; // Thumbnail for video products
+  final String? videoHash; // Hash value for video duplicate detection
   final String mediaType; // 'image' or 'video'
   final DateTime createdAt;
   final String status; // active, sold, inactive
@@ -44,8 +46,10 @@ class Product {
     this.sellerProfilePictureUrl,
     required this.imageUrl,
     this.imageUrls = const [],
+    this.imageHashes,
     this.videoUrl,
     this.videoThumbnailUrl,
+    this.videoHash,
     this.mediaType = 'image',
     required this.createdAt,
     this.status = 'active',
@@ -76,8 +80,10 @@ class Product {
       'sellerProfilePictureUrl': sellerProfilePictureUrl,
       'imageUrl': imageUrl,
       'imageUrls': imageUrls,
+      'imageHashes': imageHashes,
       'videoUrl': videoUrl,
       'videoThumbnailUrl': videoThumbnailUrl,
+      'videoHash': videoHash,
       'mediaType': mediaType,
       'createdAt': Timestamp.fromDate(createdAt),
       'status': status,
@@ -109,8 +115,10 @@ class Product {
       sellerProfilePictureUrl: map['sellerProfilePictureUrl'],
       imageUrl: map['imageUrl'] ?? '',
       imageUrls: List<String>.from(map['imageUrls'] ?? []),
+      imageHashes: map['imageHashes'] != null ? List<String>.from(map['imageHashes']) : null,
       videoUrl: map['videoUrl'],
       videoThumbnailUrl: map['videoThumbnailUrl'],
+      videoHash: map['videoHash'],
       mediaType: map['mediaType'] ?? 'image',
       createdAt: (map['createdAt'] as Timestamp?)?.toDate() ?? DateTime.now(),
       status: map['status'] ?? 'active',
@@ -147,8 +155,10 @@ class Product {
     String? sellerProfilePictureUrl,
     String? imageUrl,
     List<String>? imageUrls,
+    List<String>? imageHashes,
     String? videoUrl,
     String? videoThumbnailUrl,
+    String? videoHash,
     String? mediaType,
     DateTime? createdAt,
     String? status,
@@ -176,8 +186,10 @@ class Product {
       sellerProfilePictureUrl: sellerProfilePictureUrl ?? this.sellerProfilePictureUrl,
       imageUrl: imageUrl ?? this.imageUrl,
       imageUrls: imageUrls ?? this.imageUrls,
+      imageHashes: imageHashes ?? this.imageHashes,
       videoUrl: videoUrl ?? this.videoUrl,
       videoThumbnailUrl: videoThumbnailUrl ?? this.videoThumbnailUrl,
+      videoHash: videoHash ?? this.videoHash,
       mediaType: mediaType ?? this.mediaType,
       createdAt: createdAt ?? this.createdAt,
       status: status ?? this.status,

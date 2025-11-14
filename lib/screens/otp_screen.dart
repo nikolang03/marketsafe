@@ -145,16 +145,10 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
 
         await FirebaseAuth.instance.signInWithCredential(credential);
         
-        // Initialize user in admin system for phone verification (non-blocking)
-        final user = FirebaseAuth.instance.currentUser;
-        if (user != null) {
-          AdminSyncService.initializeUser(
-            email: '',
-            phoneNumber: widget.phoneNumber,
-          ).catchError((error) {
-            print('⚠️ Admin sync failed (non-blocking): $error');
-          });
-        }
+        // NOTE: Don't initialize user here for phone signup - it creates an "unknown user"
+        // The user will be properly created in fill_information_screen.dart with all data
+        // Only initialize for email signups where we have the email immediately
+        print('✅ Phone verification successful - user will be created in fill information screen');
       } else {
         // Email verification
         print('🔍 Starting email verification process...');

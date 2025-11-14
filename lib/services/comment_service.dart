@@ -76,28 +76,66 @@ class CommentService {
   /// Get comments for a product
   static Future<List<Map<String, dynamic>>> getComments(String productId) async {
     try {
-      final commentsSnapshot = await _firestore
-          .collection('comments')
-          .where('productId', isEqualTo: productId)
-          .where('parentCommentId', isNull: true) // Only top-level comments
-          .where('isDeleted', isEqualTo: false)
-          .orderBy('createdAt', descending: true)
-          .get();
+      // Try with orderBy first
+      try {
+        final commentsSnapshot = await _firestore
+            .collection('comments')
+            .where('productId', isEqualTo: productId)
+            .where('parentCommentId', isNull: true) // Only top-level comments
+            .where('isDeleted', isEqualTo: false)
+            .orderBy('createdAt', descending: true)
+            .get();
 
-      List<Map<String, dynamic>> comments = [];
-      
-      for (var doc in commentsSnapshot.docs) {
-        final commentData = doc.data();
-        commentData['commentId'] = doc.id;
+        List<Map<String, dynamic>> comments = [];
         
-        // Get replies for this comment
-        final replies = await getReplies(doc.id);
-        commentData['replies'] = replies;
+        for (var doc in commentsSnapshot.docs) {
+          final commentData = doc.data();
+          commentData['commentId'] = doc.id;
+          
+          // Get replies for this comment
+          final replies = await getReplies(doc.id);
+          commentData['replies'] = replies;
+          
+          comments.add(commentData);
+        }
         
-        comments.add(commentData);
+        return comments;
+      } catch (orderByError) {
+        // If orderBy fails (missing index), try without it
+        print('⚠️ OrderBy failed, trying without orderBy: $orderByError');
+        final commentsSnapshot = await _firestore
+            .collection('comments')
+            .where('productId', isEqualTo: productId)
+            .where('parentCommentId', isNull: true)
+            .where('isDeleted', isEqualTo: false)
+            .get();
+
+        List<Map<String, dynamic>> comments = [];
+        
+        for (var doc in commentsSnapshot.docs) {
+          final commentData = doc.data();
+          commentData['commentId'] = doc.id;
+          
+          // Get replies for this comment
+          final replies = await getReplies(doc.id);
+          commentData['replies'] = replies;
+          
+          comments.add(commentData);
+        }
+        
+        // Sort manually by createdAt
+        comments.sort((a, b) {
+          final aTime = a['createdAt'];
+          final bTime = b['createdAt'];
+          if (aTime == null || bTime == null) return 0;
+          if (aTime is Timestamp && bTime is Timestamp) {
+            return bTime.compareTo(aTime); // Descending
+          }
+          return 0;
+        });
+        
+        return comments;
       }
-      
-      return comments;
     } catch (e) {
       print('❌ Error getting comments: $e');
       return [];
@@ -107,22 +145,56 @@ class CommentService {
   /// Get replies for a comment
   static Future<List<Map<String, dynamic>>> getReplies(String parentCommentId) async {
     try {
-      final repliesSnapshot = await _firestore
-          .collection('comments')
-          .where('parentCommentId', isEqualTo: parentCommentId)
-          .where('isDeleted', isEqualTo: false)
-          .orderBy('createdAt', descending: false) // Oldest first for replies
-          .get();
+      // Try with orderBy first, if it fails (no index), try without
+      try {
+        final repliesSnapshot = await _firestore
+            .collection('comments')
+            .where('parentCommentId', isEqualTo: parentCommentId)
+            .where('isDeleted', isEqualTo: false)
+            .orderBy('createdAt', descending: false) // Oldest first for replies
+            .get();
 
-      List<Map<String, dynamic>> replies = [];
-      
-      for (var doc in repliesSnapshot.docs) {
-        final replyData = doc.data();
-        replyData['commentId'] = doc.id;
-        replies.add(replyData);
+        List<Map<String, dynamic>> replies = [];
+        
+        for (var doc in repliesSnapshot.docs) {
+          final replyData = doc.data();
+          replyData['commentId'] = doc.id;
+          replies.add(replyData);
+        }
+        
+        print('✅ Found ${replies.length} replies for comment $parentCommentId');
+        return replies;
+      } catch (orderByError) {
+        // If orderBy fails (likely missing index), try without it
+        print('⚠️ OrderBy failed for replies, trying without orderBy: $orderByError');
+        final repliesSnapshot = await _firestore
+            .collection('comments')
+            .where('parentCommentId', isEqualTo: parentCommentId)
+            .where('isDeleted', isEqualTo: false)
+            .get();
+
+        List<Map<String, dynamic>> replies = [];
+        
+        for (var doc in repliesSnapshot.docs) {
+          final replyData = doc.data();
+          replyData['commentId'] = doc.id;
+          replies.add(replyData);
+        }
+        
+        // Sort manually by createdAt
+        replies.sort((a, b) {
+          final aTime = a['createdAt'];
+          final bTime = b['createdAt'];
+          if (aTime == null || bTime == null) return 0;
+          if (aTime is Timestamp && bTime is Timestamp) {
+            return aTime.compareTo(bTime);
+          }
+          return 0;
+        });
+        
+        print('✅ Found ${replies.length} replies for comment $parentCommentId (without orderBy)');
+        return replies;
       }
-      
-      return replies;
     } catch (e) {
       print('❌ Error getting replies: $e');
       return [];
@@ -280,12 +352,13 @@ class CommentService {
     }
   }
 
-  /// Get comment count for a product
+  /// Get comment count for a product (only top-level comments, excludes replies)
   static Future<int> getCommentCount(String productId) async {
     try {
       final commentsSnapshot = await _firestore
           .collection('comments')
           .where('productId', isEqualTo: productId)
+          .where('parentCommentId', isNull: true) // Only top-level comments, not replies
           .where('isDeleted', isEqualTo: false)
           .get();
 

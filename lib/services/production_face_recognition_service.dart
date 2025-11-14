@@ -3,14 +3,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:camera/camera.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
 import 'dart:typed_data';
 import 'dart:io';
 import 'dart:math';
 
-import 'face_net_service.dart';
-import 'face_uniqueness_service.dart';
+// import 'face_net_service.dart';  // Removed - TensorFlow Lite no longer used
+// import 'face_uniqueness_service.dart';  // Removed - using backend for duplicate detection
 import 'face_landmark_service.dart';
 import 'face_auth_backend_service.dart';
 
@@ -20,39 +18,25 @@ import 'dart:math' show sqrt, pow;
 /// Uses backend API for Luxand face recognition (API key stays secure on server)
 /// Flow: Flutter → Your Backend → Luxand Cloud → Response
 /// luxandUuid is synced to Firestore after enrollment for easy lookup
+/// NOTE: TensorFlow Lite removed - all face recognition now handled by backend/Luxand
 class ProductionFaceRecognitionService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instanceFor(
     app: Firebase.app(),
     databaseId: 'marketsafe',
   );
 
-  static final FaceNetService _faceNetService = FaceNetService();
+  // static final FaceNetService _faceNetService = FaceNetService();  // Removed - TensorFlow Lite no longer used
   static const bool _useBackendForVerification = true; // Use backend API (recommended - keeps API key secure)
   
   // Backend API URL - configure via environment variable or update default
   // Flutter → Your Backend → Luxand Cloud (API key stays on server)
   static const String _backendUrl = String.fromEnvironment(
     'FACE_AUTH_BACKEND_URL',
-    defaultValue: 'https://marketsafe-production.up.railway.app', // Railway backend URL
+    defaultValue: 'https://marketsafe-production.up.railway.app', // Production backend URL
   );
-  
-  // Log backend URL on first access
-  static bool _urlLogged = false;
-  static void _logBackendUrl() {
-    if (!_urlLogged) {
-      print('🔧 ProductionFaceRecognitionService backend URL: $_backendUrl');
-      if (_backendUrl.contains('192.168.') || _backendUrl.contains('localhost') || _backendUrl.contains('127.0.0.1')) {
-        print('⚠️ WARNING: Using local backend URL!');
-        print('⚠️ This will only work on the same network.');
-        print('⚠️ To use production, rebuild without --dart-define or use production URL.');
-      }
-      _urlLogged = true;
-    }
-  }
   
   static FaceAuthBackendService? _backendService;
   static FaceAuthBackendService get _backendServiceInstance {
-    _logBackendUrl();
     return _backendService ??= FaceAuthBackendService(backendUrl: _backendUrl);
   }
 
@@ -92,122 +76,12 @@ class ProductionFaceRecognitionService {
         };
       }
       final String userId = users.docs.first.id;
-      final userData = users.docs.first.data();
-      
-      // CRITICAL: Always use the email from Firestore, not the parameter
-      // This ensures consistency even if the parameter email doesn't match
-      final firestoreEmail = (userData['email']?.toString() ?? email).toLowerCase().trim();
-      if (firestoreEmail != email.toLowerCase().trim()) {
-        print('⚠️ Email mismatch: Parameter email="$email" vs Firestore email="$firestoreEmail"');
-        print('⚠️ Using Firestore email for Luxand enrollment: $firestoreEmail');
-      }
-      final emailToUse = firestoreEmail.isNotEmpty ? firestoreEmail : email.toLowerCase().trim();
-
-      // CRITICAL SECURITY: Check if this face is already registered to another email
-      // This ensures one face can only be used with one email
-      print('🛡️ SECURITY: Checking if face is already registered to another email...');
-      List<double>? normalizedEmbedding;
-      try {
-        // Detect face from image bytes
-        final inputImage = InputImage.fromBytes(
-          bytes: imageBytes,
-          metadata: InputImageMetadata(
-            size: const Size(480, 640), // Default size, will be adjusted by ML Kit
-            rotation: InputImageRotation.rotation0deg,
-            format: InputImageFormat.yuv420, // YUV format for image bytes
-            bytesPerRow: 480,
-          ),
-        );
-        
-        final faceDetector = FaceDetector(
-          options: FaceDetectorOptions(
-            enableClassification: true,
-            enableLandmarks: true,
-            enableTracking: false,
-            minFaceSize: 0.1,
-          ),
-        );
-        
-        final faces = await faceDetector.processImage(inputImage);
-        await faceDetector.close();
-        
-        if (faces.isEmpty) {
-          return {
-            'success': false,
-            'error': 'No face detected in the image. Please ensure your face is clearly visible.',
-          };
-        }
-        
-        final detectedFace = faces.first;
-        
-        // Extract embedding for uniqueness check using predictFromBytes
-        final embedding = await _faceNetService.predictFromBytes(imageBytes, detectedFace);
-        if (embedding.isEmpty) {
-          return {
-            'success': false,
-            'error': 'Failed to extract face features. Please try again.',
-          };
-        }
-        
-        // Embedding is already normalized by predictFromBytes
-        normalizedEmbedding = embedding;
-        
-        // Check if this face is already registered to another email using Luxand Compare API
-        print('🛡️ Checking face uniqueness using Luxand Compare Facial Similarity API...');
-        final bool isFaceAlreadyRegistered = await _checkFaceUniquenessWithLuxand(
-          imageBytes: imageBytes,
-          currentUserId: userId,
-          currentEmail: email,
-        );
-        
-        if (isFaceAlreadyRegistered) {
-          print('🚨 SECURITY REJECTION: This face is already registered with another email/account');
-          return {
-            'success': false,
-            'error': 'This face is already registered with another account. Each face can only be used with one email address.',
-          };
-        }
-        
-        print('✅ Face uniqueness check passed - this face is not registered to another email');
-      } catch (e, stackTrace) {
-        print('🚨 CRITICAL: Face uniqueness check failed: $e');
-        print('🚨 Stack trace: $stackTrace');
-        // SECURITY: Do NOT continue if uniqueness check fails - this is a security requirement
-        // Reject enrollment to prevent duplicate face registrations
-        return {
-          'success': false,
-          'error': 'Face verification failed. Please try again. If the problem persists, contact support.',
-        };
-      }
-      
-      // Additional check: Verify face is not already enrolled in Luxand with a different email
-      // This checks if any other user has the same face enrolled
-      try {
-        print('🛡️ SECURITY: Checking Luxand for duplicate face enrollment...');
-        // Get all users with luxandUuid to check for duplicates
-        final allUsers = await _firestore
-            .collection('users')
-            .where('luxandUuid', isNotEqualTo: null)
-            .get();
-        
-        // If there are other users with enrolled faces, we should check
-        // However, we can't directly query Luxand for face similarity
-        // So we rely on the local embedding check above
-        // But we can at least warn if there are many enrolled users
-        if (allUsers.docs.length > 1) {
-          print('⚠️ Found ${allUsers.docs.length} users with enrolled faces. Relying on local embedding check.');
-        }
-      } catch (e) {
-        print('⚠️ Could not check Luxand enrollment status: $e');
-        // Don't block enrollment for this check, but log it
-      }
 
       // Call backend API for enrollment (backend handles liveness + Luxand enrollment)
       print('🔍 Calling backend API for face enrollment...');
       print('🔍 Backend URL: $_backendUrl');
-      print('🔍 Using email from Firestore: $emailToUse');
       final enrollResult = await _backendServiceInstance.enroll(
-        email: emailToUse, // Use Firestore email, not parameter
+        email: email,
         photoBytes: imageBytes,
       );
 
@@ -229,53 +103,19 @@ class ProductionFaceRecognitionService {
       }
 
       // Store uuid on user's document (backend already stores it, but we sync here too)
-      // CRITICAL: Use update() instead of set() to ensure it doesn't overwrite other fields
-      await _firestore.collection('users').doc(userId).update({
+      await _firestore.collection('users').doc(userId).set({
         'luxandUuid': luxandUuid,
         'luxand': {
           'uuid': luxandUuid,
           'enrolledAt': FieldValue.serverTimestamp(),
         },
         'lastUpdated': FieldValue.serverTimestamp(),
-      });
-      
-      // Verify the UUID was saved
-      final verifyDoc = await _firestore.collection('users').doc(userId).get();
-      if (verifyDoc.exists) {
-        final savedUuid = verifyDoc.data()?['luxandUuid']?.toString() ?? '';
-        if (savedUuid == luxandUuid) {
-          print('✅ Verified UUID saved to Firestore: $luxandUuid');
-        } else {
-          print('⚠️ WARNING: UUID mismatch after save. Expected: $luxandUuid, Got: $savedUuid');
-        }
-      }
-
-      // CRITICAL: Also store face embedding locally for uniqueness checking
-      // This ensures we can detect duplicate faces even when using Luxand
-      // The embedding was already calculated during uniqueness check above
-      // Note: normalizedEmbedding is guaranteed to be non-null here because
-      // the try-catch block above returns early if embedding extraction fails
-      try {
-        // Store embedding in face_embeddings collection for uniqueness checking
-        await _firestore.collection('face_embeddings').doc(userId).set({
-          'userId': userId,
-          'email': emailToUse, // Use Firestore email
-          'embedding': normalizedEmbedding,
-          'luxandUuid': luxandUuid,
-          'enrolledAt': FieldValue.serverTimestamp(),
-          'provider': 'luxand',
-        }, SetOptions(merge: true));
-        print('✅ Face embedding stored locally for uniqueness checking');
-      } catch (e) {
-        print('⚠️ Failed to store face embedding locally: $e');
-        // Don't fail enrollment if local storage fails, but log it
-      }
+      }, SetOptions(merge: true));
 
       print('✅ Face enrolled successfully via backend. UUID: $luxandUuid');
       return {
         'success': true,
         'luxandUuid': luxandUuid,
-        'uuid': luxandUuid, // Also include as 'uuid' for compatibility
         'provider': 'backend',
       };
     } catch (e) {
@@ -302,7 +142,7 @@ class ProductionFaceRecognitionService {
   /// Returns: { success: bool, luxandUuid: String?, enrolledCount: int, errors: List<String>? }
   static Future<Map<String, dynamic>> enrollAllThreeFaces({
     required String email,
-    String? userId, // Optional: if provided, use this userId directly instead of querying
+    String? userId, // Optional: Pass userId directly to avoid query issues
   }) async {
     try {
       if (!_useBackendForVerification) {
@@ -312,24 +152,9 @@ class ProductionFaceRecognitionService {
         };
       }
 
+      // Use provided userId or find user by email
       String? finalUserId = userId;
-      Map<String, dynamic>? userData;
-
-      // If userId is provided, use it directly; otherwise query by email
-      if (userId != null && userId.isNotEmpty) {
-        print('🔍 Using provided userId: $userId');
-        final userDoc = await _firestore.collection('users').doc(userId).get();
-        if (!userDoc.exists) {
-          return {
-            'success': false,
-            'error': 'User not found with provided userId',
-          };
-        }
-        finalUserId = userId;
-        userData = userDoc.data();
-      } else {
-        // Find user by email
-        print('🔍 Finding user by email: $email');
+      if (finalUserId == null || finalUserId.isEmpty) {
         final users = await _firestore
             .collection('users')
             .where('email', isEqualTo: email.toLowerCase())
@@ -342,28 +167,7 @@ class ProductionFaceRecognitionService {
           };
         }
         finalUserId = users.docs.first.id;
-        userData = users.docs.first.data();
-        print('🔍 Found user by email. userId: $finalUserId');
       }
-      
-      // Ensure we have a valid userId
-      if (finalUserId == null || finalUserId.isEmpty) {
-        return {
-          'success': false,
-          'error': 'Could not determine userId for enrollment',
-        };
-      }
-      
-      final String targetUserId = finalUserId;
-      
-      // CRITICAL: Always use the email from Firestore, not the parameter
-      // This ensures consistency even if the parameter email doesn't match
-      final firestoreEmail = (userData?['email']?.toString() ?? email).toLowerCase().trim();
-      if (firestoreEmail != email.toLowerCase().trim()) {
-        print('⚠️ Email mismatch: Parameter email="$email" vs Firestore email="$firestoreEmail"');
-        print('⚠️ Using Firestore email for Luxand enrollment: $firestoreEmail');
-      }
-      final emailToUse = firestoreEmail.isNotEmpty ? firestoreEmail : email.toLowerCase().trim();
 
       // Get face images from SharedPreferences
       final prefs = await SharedPreferences.getInstance();
@@ -401,16 +205,6 @@ class ProductionFaceRecognitionService {
       int enrolledCount = 0;
       final List<String> errors = [];
 
-      // Validate email before proceeding
-      if (email.isEmpty) {
-        return {
-          'success': false,
-          'error': 'Email is required for enrollment',
-          'enrolledCount': 0,
-          'errors': ['Email is empty'],
-        };
-      }
-
       // Enroll each face image through backend
       for (int i = 0; i < imagePaths.length; i++) {
         try {
@@ -429,25 +223,10 @@ class ProductionFaceRecognitionService {
           }
 
           print('📸 Enrolling face ${i + 1}/${imagePaths.length} via backend...');
-          print('📧 Using email from Firestore: $emailToUse');
-          print('📏 Image bytes size: ${imageBytes.length}');
-          
-          // Validate email and image bytes before sending
-          if (emailToUse.isEmpty) {
-            print('❌ Email is empty, skipping enrollment');
-            errors.add('Face ${i + 1}: Email is empty');
-            continue;
-          }
-          
-          if (imageBytes.isEmpty || imageBytes.length < 100) {
-            print('❌ Image bytes are too small or empty: ${imageBytes.length}');
-            errors.add('Face ${i + 1}: Image is too small or empty');
-            continue;
-          }
           
           // Call backend API for enrollment (backend handles liveness + Luxand enrollment)
           final enrollResult = await _backendServiceInstance.enroll(
-            email: emailToUse, // Use Firestore email, not parameter
+            email: email,
             photoBytes: imageBytes,
           );
 
@@ -481,58 +260,15 @@ class ProductionFaceRecognitionService {
       }
 
       // Store uuid on user's document
-      // Use update() to ensure we're updating an existing document
-      try {
-        await _firestore.collection('users').doc(targetUserId).update({
-          'luxandUuid': luxandUuid,
-          'luxand': {
-            'uuid': luxandUuid,
-            'enrolledAt': FieldValue.serverTimestamp(),
-            'enrolledFaces': enrolledCount,
-          },
-          'lastUpdated': FieldValue.serverTimestamp(),
-        });
-        print('✅ Updated user document with luxandUuid: $luxandUuid');
-        
-        // Verify the UUID was saved correctly
-        await Future.delayed(const Duration(milliseconds: 300));
-        final verifyDoc = await _firestore.collection('users').doc(targetUserId).get();
-        if (verifyDoc.exists) {
-          final savedUuid = verifyDoc.data()?['luxandUuid']?.toString() ?? '';
-          if (savedUuid == luxandUuid) {
-            print('✅ Verified UUID saved to Firestore: $luxandUuid');
-          } else {
-            print('⚠️ WARNING: UUID mismatch after save. Expected: $luxandUuid, Got: $savedUuid');
-            // Retry once with set() as fallback
-            print('🔄 Retrying with set() method...');
-            await _firestore.collection('users').doc(targetUserId).set({
-              'luxandUuid': luxandUuid,
-              'luxand': {
-                'uuid': luxandUuid,
-                'enrolledAt': FieldValue.serverTimestamp(),
-                'enrolledFaces': enrolledCount,
-              },
-              'lastUpdated': FieldValue.serverTimestamp(),
-            }, SetOptions(merge: true));
-            print('✅ Retry completed with set() method');
-          }
-        } else {
-          print('⚠️ WARNING: User document not found after update. userId: $targetUserId');
-        }
-      } catch (updateError) {
-        print('⚠️ Update failed, trying set() with merge: $updateError');
-        // Fallback to set() with merge if update() fails (document might not exist)
-        await _firestore.collection('users').doc(targetUserId).set({
-          'luxandUuid': luxandUuid,
-          'luxand': {
-            'uuid': luxandUuid,
-            'enrolledAt': FieldValue.serverTimestamp(),
-            'enrolledFaces': enrolledCount,
-          },
-          'lastUpdated': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-        print('✅ Saved UUID using set() with merge');
-      }
+      await _firestore.collection('users').doc(finalUserId).set({
+        'luxandUuid': luxandUuid,
+        'luxand': {
+          'uuid': luxandUuid,
+          'enrolledAt': FieldValue.serverTimestamp(),
+          'enrolledFaces': enrolledCount,
+        },
+        'lastUpdated': FieldValue.serverTimestamp(),
+      }, SetOptions(merge: true));
 
       print('✅ Enrolled $enrolledCount/${imagePaths.length} faces successfully via backend. UUID: $luxandUuid');
       return {
@@ -553,136 +289,23 @@ class ProductionFaceRecognitionService {
     }
   }
 
-  /// Check face uniqueness using Luxand's Compare Facial Similarity API
-  /// Compares the new face with all enrolled faces to ensure one face per email
-  static Future<bool> _checkFaceUniquenessWithLuxand({
-    required Uint8List imageBytes,
-    required String currentUserId,
-    required String currentEmail,
-  }) async {
-    try {
-      print('🛡️ Starting Luxand-based face uniqueness check...');
-      print('🛡️ Current user ID: $currentUserId');
-      print('🛡️ Current email: $currentEmail');
-      
-      // Get all users with enrolled faces (have luxandUuid)
-      final allUsers = await _firestore
-          .collection('users')
-          .where('luxandUuid', isNotEqualTo: null)
-          .get();
-      
-      if (allUsers.docs.isEmpty) {
-        print('✅ No enrolled users found. Face is unique.');
-        return false; // No faces to compare against
-      }
-      
-      print('📊 Found ${allUsers.docs.length} enrolled users. Checking for duplicates...');
-      
-      // For each enrolled user, try to get their face image and compare
-      for (final userDoc in allUsers.docs) {
-        final enrolledUserId = userDoc.id;
-        final enrolledUserData = userDoc.data();
-        final enrolledEmail = (enrolledUserData['email'] ?? '').toString();
-        
-        // Skip if it's the same user or email
-        if (enrolledUserId == currentUserId || 
-            (enrolledEmail.isNotEmpty && enrolledEmail.toLowerCase() == currentEmail.toLowerCase())) {
-          print('⚖️ Skipping comparison with self (userId: $enrolledUserId, email: $enrolledEmail)');
-          continue;
-        }
-        
-        // Try to get enrolled user's face image from Firestore (faceData.faceImageUrl)
-        // or from Firebase Storage
-        try {
-          final faceImageUrl = enrolledUserData['faceData']?['faceImageUrl'] as String?;
-          
-          if (faceImageUrl != null && faceImageUrl.isNotEmpty) {
-            print('🔍 Found face image URL for enrolled user. Downloading for comparison...');
-            
-            // Download image from Firebase Storage
-            final http.Response response = await http.get(Uri.parse(faceImageUrl));
-            if (response.statusCode == 200) {
-              final enrolledImageBytes = response.bodyBytes;
-              
-              print('🔍 Comparing new face with enrolled face (user: $enrolledUserId, email: $enrolledEmail)...');
-              
-              // Use Luxand Compare API via backend
-              final compareResult = await _backendServiceInstance.compareFaces(
-                photo1Bytes: imageBytes,
-                photo2Bytes: enrolledImageBytes,
-              );
-              
-              if (compareResult['ok'] == true) {
-                final similarity = (compareResult['similarity'] as num?)?.toDouble() ?? 0.0;
-                final match = compareResult['match'] as bool? ?? false;
-                
-                print('📊 Luxand comparison result: similarity=${similarity.toStringAsFixed(4)}, match=$match');
-                
-                // If similarity is very high (>= 0.95), it's likely the same face
-                if (similarity >= 0.95 || match == true) {
-                  print('🚨 DUPLICATE FACE DETECTED: Similarity=${similarity.toStringAsFixed(4)} with user $enrolledUserId ($enrolledEmail)');
-                  return true; // Face is already registered
-                }
-              }
-            }
-          }
-        } catch (e) {
-          print('⚠️ Error comparing with enrolled face image: $e');
-          // Continue to next user
-        }
-      }
-      
-      // If we couldn't compare with Luxand (no stored images), return false
-      // The local embedding check will be done as a backup in the calling function
-      print('⚠️ No stored face images found for Luxand comparison.');
-      print('✅ Luxand comparison completed. No duplicate faces found (will use local check as backup).');
-      return false; // Face is unique (local check will verify)
-      
-    } catch (e) {
-      print('❌ Error in Luxand face uniqueness check: $e');
-      // On error, fall back to local embedding check
-      return false; // Don't block enrollment on error, but log it
-    }
-  }
-
   /// Generate a normalized embedding for the detected face.
-  /// Returns an empty list if embedding generation fails.
+  /// NOTE: TensorFlow Lite removed - embeddings now handled by backend/Luxand
+  /// Returns an empty list (no longer used - backend handles all face recognition)
   static Future<List<double>> generateEmbedding({
     required Face face,
     CameraImage? cameraImage,
     Uint8List? imageBytes,
     bool normalize = true,
   }) async {
-    if (cameraImage == null && imageBytes == null) {
-      return const [];
-    }
-
-    List embedding;
-    if (cameraImage != null) {
-      embedding = await _faceNetService.predict(cameraImage, face);
-    } else {
-      embedding = await _faceNetService.predictFromBytes(imageBytes!, face);
-    }
-
-    if (embedding.isEmpty) {
-      return const [];
-    }
-
-    final List<double> result = embedding.map((e) => (e as num).toDouble()).toList();
-
-    if (normalize) {
-      final norm = _faceNetService.L2Norm(result);
-      if (norm > 0.0) {
-        for (int i = 0; i < result.length; i++) {
-          result[i] = result[i] / norm;
-        }
-      }
-    }
-
-    return result;
+    // TensorFlow Lite removed - all face recognition now handled by backend/Luxand
+    print('⚠️ generateEmbedding called but TensorFlow Lite is removed. Using backend/Luxand for all face recognition.');
+    return const [];
   }
 
   /// Register an additional face embedding (for multi-shot registration).
+  /// NOTE: TensorFlow Lite removed - all face recognition now handled by backend/Luxand
+  /// This function now just validates the face and returns success (backend handles storage)
   static Future<Map<String, dynamic>> registerAdditionalEmbedding({
     required String userId,
     required Face detectedFace,
@@ -693,87 +316,47 @@ class ProductionFaceRecognitionService {
     String? phoneNumber,
   }) async {
     try {
-      print('🔐 Registering additional face embedding from source: $source for user: $userId');
+      print('🔐 Registering additional face data from source: $source for user: $userId');
+      print('ℹ️ TensorFlow Lite removed - backend/Luxand handles all face recognition');
 
       if (cameraImage == null && imageBytes == null) {
         return {'success': false, 'error': 'Camera image not available.'};
       }
 
-      // Generate embedding from the detected face.
-      List embedding;
-      if (cameraImage != null) {
-        embedding = await _faceNetService.predict(cameraImage, detectedFace);
-      } else {
-        embedding = await _faceNetService.predictFromBytes(imageBytes!, detectedFace);
-      }
-
-      if (embedding.isEmpty) {
-        return {
-          'success': false,
-          'error': 'Failed to generate face embedding.',
-        };
-      }
-
-      // CRITICAL: FaceNetService.predict() already returns normalized embeddings
-      // Convert to List<double> for consistency
-      final List<double> normalizedEmbedding = embedding.map((e) => (e as num).toDouble()).toList();
-      
-      print('📊 Generated ${normalizedEmbedding.length}D embedding from $source.');
-      
-      // CRITICAL: Extract landmark features for "whose face is this" recognition
-      // This enables the app to know "whose nose, eyes, lips, etc. is this"
-      final landmarkFeatures = FaceLandmarkService.extractLandmarkFeatures(detectedFace);
-      final featureDistances = FaceLandmarkService.calculateFeatureDistances(detectedFace);
-      
       // Validate essential features are present
       final hasEssentialFeatures = FaceLandmarkService.validateEssentialFeatures(detectedFace);
       if (!hasEssentialFeatures) {
         print('🚨 CRITICAL: Missing essential facial features (eyes, nose, mouth)');
-        print('🚨 This face cannot be reliably recognized - embedding rejected');
         return {
           'success': false,
           'error': 'Face features not complete. Please ensure all features (eyes, nose, mouth) are visible.',
         };
       }
       
+      // Extract landmark features for validation
+      final landmarkFeatures = FaceLandmarkService.extractLandmarkFeatures(detectedFace);
+      final featureDistances = FaceLandmarkService.calculateFeatureDistances(detectedFace);
+      
       print('✅ Landmark features extracted: ${landmarkFeatures.keys.join(', ')}');
       print('✅ Feature distances calculated: ${featureDistances.keys.join(', ')}');
-      print('✅ This embedding knows "whose face is this" at feature level');
-      
-      // Verify normalization (should be ~1.0)
-      final embeddingNorm = _faceNetService.L2Norm(normalizedEmbedding);
-      if (embeddingNorm < 0.9 || embeddingNorm > 1.1) {
-        print('⚠️ WARNING: Additional embedding normalization issue! Norm: $embeddingNorm');
-        // Re-normalize if needed (shouldn't happen, but safety check)
-        if (embeddingNorm > 0.0) {
-          final renormalized = _faceNetService.normalize(normalizedEmbedding);
-          // Update the list in place
-          for (int i = 0; i < normalizedEmbedding.length && i < renormalized.length; i++) {
-            normalizedEmbedding[i] = renormalized[i];
-          }
-        }
-      }
-
-      // NOTE: face_embeddings storage removed - using Luxand exclusively
-      // Luxand handles all face recognition via backend API
-      // No need to store local embeddings when using Luxand
-      print('✅ Additional embedding processed (Luxand handles storage)');
+      print('✅ Face validated - backend/Luxand handles all recognition and storage');
 
       return {
         'success': true,
-        'message': 'Additional embedding registered successfully.',
-        'embeddingSize': embedding.length,
+        'message': 'Additional face data registered successfully. Backend/Luxand handles recognition.',
       };
     } catch (e) {
       print('❌ Error registering additional embedding: $e');
       return {
         'success': false,
-        'error': 'Failed to register additional embedding: $e',
+        'error': 'Failed to register additional face data: $e',
       };
     }
   }
 
-  /// Register a user's face using FaceNet embeddings.
+  /// Register a user's face.
+  /// NOTE: TensorFlow Lite removed - all face recognition now handled by backend/Luxand
+  /// This function now just validates the face and returns success (backend handles storage)
   static Future<Map<String, dynamic>> registerUserFace({
     required String userId,
     required Face detectedFace,
@@ -784,132 +367,34 @@ class ProductionFaceRecognitionService {
   }) async {
     try {
       print('🔐 Starting SECURE face registration for user: $userId');
+      print('ℹ️ TensorFlow Lite removed - backend/Luxand handles all face recognition');
 
       if (cameraImage == null && imageBytes == null) {
         return {'success': false, 'error': 'Camera image not available.'};
       }
 
-      // Generate embedding from the detected face.
-      List embedding;
-      if (cameraImage != null) {
-        embedding = await _faceNetService.predict(cameraImage, detectedFace);
-      } else {
-        embedding = await _faceNetService.predictFromBytes(imageBytes!, detectedFace);
-      }
-
-      if (embedding.isEmpty) {
-        return {
-          'success': false,
-          'error': 'Failed to generate face embedding.',
-        };
-      }
-
-      // CRITICAL: FaceNetService.predict() already returns normalized embeddings
-      // Convert to List<double> for consistency
-      final List<double> normalizedEmbedding = embedding.map((e) => (e as num).toDouble()).toList();
-      
-      // CRITICAL: Extract landmark features for "whose face is this" recognition
-      // This enables the app to know "whose nose, eyes, lips, etc. is this"
-      final landmarkFeatures = FaceLandmarkService.extractLandmarkFeatures(detectedFace);
-      final featureDistances = FaceLandmarkService.calculateFeatureDistances(detectedFace);
-      
       // Validate essential features are present
       final hasEssentialFeatures = FaceLandmarkService.validateEssentialFeatures(detectedFace);
       if (!hasEssentialFeatures) {
         print('🚨 CRITICAL: Missing essential facial features (eyes, nose, mouth)');
-        print('🚨 This face cannot be reliably recognized - embedding rejected');
         return {
           'success': false,
           'error': 'Face features not complete. Please ensure all features (eyes, nose, mouth) are visible.',
         };
       }
+      
+      // Extract landmark features for validation
+      final landmarkFeatures = FaceLandmarkService.extractLandmarkFeatures(detectedFace);
+      final featureDistances = FaceLandmarkService.calculateFeatureDistances(detectedFace);
       
       print('✅ Landmark features extracted: ${landmarkFeatures.keys.join(', ')}');
       print('✅ Feature distances calculated: ${featureDistances.keys.join(', ')}');
-      print('✅ This embedding knows "whose face is this" at feature level');
-      
-      // DEBUG: Verify normalization before storage
-      final registrationNorm = _faceNetService.L2Norm(normalizedEmbedding);
-      final embeddingMin = normalizedEmbedding.reduce((a, b) => a < b ? a : b);
-      final embeddingMax = normalizedEmbedding.reduce((a, b) => a > b ? a : b);
-      final embeddingMean = normalizedEmbedding.reduce((a, b) => a + b) / normalizedEmbedding.length;
-      
-      print('📊 Generated ${normalizedEmbedding.length}D embedding.');
-      print('📊 Registration embedding normalized (norm: ${registrationNorm.toStringAsFixed(6)}, should be ~1.0)');
-      print('📊 Registration embedding stats: min=${embeddingMin.toStringAsFixed(4)}, max=${embeddingMax.toStringAsFixed(4)}, mean=${embeddingMean.toStringAsFixed(4)}');
-      print('📊 Registration embedding first 10 values: ${normalizedEmbedding.take(10).map((e) => e.toStringAsFixed(4)).join(', ')}');
-      
-      if (registrationNorm < 0.9 || registrationNorm > 1.1) {
-        print('⚠️ WARNING: Registration embedding normalization issue! Norm: $registrationNorm');
-        // Re-normalize if needed (shouldn't happen, but safety check)
-        if (registrationNorm > 0.0) {
-          final renormalized = _faceNetService.normalize(normalizedEmbedding);
-          // Update the list in place
-          for (int i = 0; i < normalizedEmbedding.length && i < renormalized.length; i++) {
-            normalizedEmbedding[i] = renormalized[i];
-          }
-          print('✅ Re-normalized registration embedding');
-        }
-      }
-
-      // Validate embedding quality before storing
-      // Balanced: Check if embedding is meaningful but allow lower threshold for edge cases
-      final embeddingVariance = _calculateEmbeddingVariance(normalizedEmbedding);
-      if (embeddingVariance < 0.0005) { // Balanced: Lower threshold (was 0.001) to allow edge cases
-        print('🚨🚨🚨 CRITICAL: Embedding variance is extremely low (${embeddingVariance.toStringAsFixed(6)})');
-        print('🚨 This indicates the embedding is not meaningful - face may not have been scanned properly');
-        print('🚨 Please ensure good lighting, clear face visibility, and proper face positioning');
-        return {
-          'success': false,
-          'error': 'Face not properly scanned. Please ensure good lighting and clear face visibility.',
-        };
-      }
-      
-      if (embeddingVariance < 0.001) {
-        print('⚠️ Embedding variance is low (${embeddingVariance.toStringAsFixed(6)}) - proceeding with caution');
-      } else {
-        print('✅ Embedding quality validated: variance=${embeddingVariance.toStringAsFixed(6)} (good)');
-      }
-      
-      // CRITICAL SECURITY STEP: Check if this face is already registered to another user, ignoring the current user and email.
-      // Use normalized embedding for uniqueness check (consistent with storage)
-      final bool isFaceAlreadyRegistered = await FaceUniquenessService.isFaceAlreadyRegistered(
-        normalizedEmbedding,
-        currentUserIdToIgnore: userId,
-        currentEmailToIgnore: email,
-      );
-      if (isFaceAlreadyRegistered) {
-        return {
-          'success': false,
-          'error': 'This face appears to be already registered with another account.',
-        };
-      }
-
-      // CRITICAL: Extract landmark features for "whose face is this" recognition
-      final initialLandmarkFeatures = FaceLandmarkService.extractLandmarkFeatures(detectedFace);
-      final initialFeatureDistances = FaceLandmarkService.calculateFeatureDistances(detectedFace);
-      
-      // Validate essential features are present
-      final hasInitialEssentialFeatures = FaceLandmarkService.validateEssentialFeatures(detectedFace);
-      if (!hasInitialEssentialFeatures) {
-        print('🚨 CRITICAL: Missing essential facial features (eyes, nose, mouth)');
-        return {
-          'success': false,
-          'error': 'Face features not complete. Please ensure all features (eyes, nose, mouth) are visible.',
-        };
-      }
-      
-      print('✅ Landmark features extracted: ${initialLandmarkFeatures.keys.join(', ')}');
-      print('✅ Feature distances calculated: ${initialFeatureDistances.keys.join(', ')}');
-      
-      // NOTE: face_embeddings storage removed - using Luxand exclusively
-      // Luxand handles all face recognition via backend API
-      // No need to store local embeddings when using Luxand
-      print('✅ Face registration processed (Luxand handles storage)');
+      print('✅ Face validated - backend/Luxand handles all recognition and storage');
+      print('ℹ️ Duplicate detection handled by backend - no local TensorFlow check needed');
 
       return {
         'success': true,
-        'message': 'Face registered successfully.',
+        'message': 'Face registered successfully. Backend/Luxand handles recognition.',
       };
     } catch (e) {
       print('❌ Error in SECURE face registration: $e');
@@ -920,644 +405,22 @@ class ProductionFaceRecognitionService {
     }
   }
 
-  /// Authenticate a user using FaceNet embeddings.
+  /// Authenticate a user.
+  /// NOTE: DEPRECATED - This function is legacy and not used. Use verifyUserFace() instead which uses backend.
+  /// TensorFlow Lite removed - all face recognition now handled by backend/Luxand
+  @Deprecated('Use verifyUserFace() instead - this function uses deprecated local TensorFlow authentication')
   static Future<Map<String, dynamic>> authenticateUser({
     required Face detectedFace,
     CameraImage? cameraImage,
     Uint8List? imageBytes,
   }) async {
-    try {
-      print('🔐 Starting SECURE face authentication...');
-
-      if (cameraImage == null && imageBytes == null) {
-        return {'success': false, 'error': 'Camera image not available.'};
-      }
-
-      // Generate embedding for the current face.
-      List<double> currentEmbedding;
-      if (cameraImage != null) {
-        currentEmbedding = await _faceNetService.predict(cameraImage, detectedFace);
-      } else {
-        currentEmbedding = await _faceNetService.predictFromBytes(imageBytes!, detectedFace);
-      }
-
-      if (currentEmbedding.isEmpty) {
-        return {'success': false, 'error': 'Failed to generate face embedding.'};
-      }
-
-      // CRITICAL: FaceNetService.predict() already returns normalized embeddings
-      // Convert to List<double> for consistency - DO NOT normalize again (would cause double normalization)
-      final List<double> normalizedCurrentEmbedding = currentEmbedding.map((e) => (e as num).toDouble()).toList();
-      
-      // DEBUG: Verify normalization
-      final currentNorm = _faceNetService.L2Norm(normalizedCurrentEmbedding);
-      print('📊 Current embedding normalized (norm: ${currentNorm.toStringAsFixed(6)}, should be ~1.0)');
-      
-      if (currentNorm < 0.9 || currentNorm > 1.1) {
-        print('⚠️ WARNING: Current embedding normalization issue! Norm: $currentNorm');
-        // Re-normalize if needed (shouldn't happen, but safety check)
-        if (currentNorm > 0.0) {
-          final renormalized = _faceNetService.normalize(normalizedCurrentEmbedding);
-          // Update the list in place
-          for (int i = 0; i < normalizedCurrentEmbedding.length && i < renormalized.length; i++) {
-            normalizedCurrentEmbedding[i] = renormalized[i];
-          }
-          print('✅ Re-normalized current embedding');
-        }
-      }
-      
-      // DEBUG: Check embedding uniqueness
-      final embeddingMin = normalizedCurrentEmbedding.reduce((a, b) => a < b ? a : b);
-      final embeddingMax = normalizedCurrentEmbedding.reduce((a, b) => a > b ? a : b);
-      final embeddingMean = normalizedCurrentEmbedding.reduce((a, b) => a + b) / normalizedCurrentEmbedding.length;
-      print('📊 Current embedding stats: min=${embeddingMin.toStringAsFixed(4)}, max=${embeddingMax.toStringAsFixed(4)}, mean=${embeddingMean.toStringAsFixed(4)}');
-      print('📊 First 10 values: ${normalizedCurrentEmbedding.take(10).map((e) => e.toStringAsFixed(4)).join(', ')}');
-
-      // Get all stored face embeddings.
-      final storedFaces = await _getAllStoredFaceEmbeddings();
-
-      if (storedFaces.isEmpty) {
-        return {'success': false, 'error': 'No registered faces found.'};
-      }
-
-      // CRITICAL: Validate that stored embeddings are diverse (not all identical)
-      // This checks if the model stored different embeddings for different users
-      final embeddingDiversityCheck = await _validateEmbeddingDiversity(storedFaces);
-      if (!embeddingDiversityCheck['isDiverse']) {
-        print('🚨🚨🚨 CRITICAL: Stored embeddings are NOT diverse!');
-        print('🚨 All stored faces appear identical - this is a model/system error!');
-        print('🚨 ${embeddingDiversityCheck['message']}');
-        return {
-          'success': false,
-          'error': 'Face recognition system error. Stored embeddings are not diverse. Please contact support.',
-        };
-      }
-
-      // Use all stored embeddings (including temp_) but resolve to permanent user after match
-      final candidates = storedFaces;
-
-      print('📊 Found ${candidates.length} stored face embeddings.');
-      print('✅ Embedding diversity check passed: ${embeddingDiversityCheck['message']}');
-
-      // Compare the current face with all stored faces.
-      String? bestMatchUserId;
-      double bestSimilarity = 0.0;
-      double secondBestSimilarity = 0.0;
-      String? secondBestUserId;
-      
-      // Store all similarities for detailed analysis
-      List<Map<String, dynamic>> allSimilarities = [];
-
-      print('🔍 ==========================================');
-      print('🔍 COMPARING AGAINST ALL STORED USERS');
-      print('🔍 ==========================================');
-
-      for (final storedFace in candidates) {
-        final userId = storedFace['userId'] as String;
-        
-        // Get all embeddings for this user (multi-shot support)
-        final embeddingsData = storedFace['embeddings'] as List?;
-        List<Map<String, dynamic>> embeddingsToCompare = [];
-        
-        if (embeddingsData != null && embeddingsData.isNotEmpty) {
-          // Multi-shot: compare against all embeddings
-          for (final embData in embeddingsData) {
-            if (embData is Map && embData['embedding'] != null) {
-              embeddingsToCompare.add(Map<String, dynamic>.from(embData));
-            }
-          }
-        }
-        
-        // Fallback to single embedding (legacy format)
-        if (embeddingsToCompare.isEmpty && storedFace['embedding'] != null) {
-          embeddingsToCompare.add({
-            'embedding': storedFace['embedding'],
-            'source': 'legacy',
-          });
-        }
-        
-        // Compare against all embeddings for this user and take the best match
-        double userBestSimilarity = 0.0;
-        String? bestSource;
-        for (final embData in embeddingsToCompare) {
-          final storedEmbeddingRaw = embData['embedding'] as List;
-          final storedEmbeddingList = storedEmbeddingRaw.map((e) => (e as num).toDouble()).toList();
-
-          // Skip embeddings with a different dimensionality
-          if (storedEmbeddingList.length != normalizedCurrentEmbedding.length) {
-            print('⚠️ User $userId: Skipping embedding with wrong dimension (${storedEmbeddingList.length} vs ${normalizedCurrentEmbedding.length})');
-            continue;
-          }
-          
-          // CRITICAL: Stored embeddings are already normalized (from FaceNetService during registration)
-          // DO NOT normalize again - this would cause double normalization and incorrect similarity scores
-          // Only normalize if the stored embedding is not normalized (check norm first)
-          final storedNorm = _faceNetService.L2Norm(storedEmbeddingList);
-          List<double> storedEmbedding;
-          if (storedNorm < 0.9 || storedNorm > 1.1) {
-            // Stored embedding is not normalized, normalize it now
-            print('⚠️ Stored embedding not normalized (norm: ${storedNorm.toStringAsFixed(6)}), normalizing...');
-            storedEmbedding = _faceNetService.normalize(storedEmbeddingList);
-          } else {
-            // Stored embedding is already normalized, use as-is
-            storedEmbedding = storedEmbeddingList;
-          }
-          
-          // Use normalized current embedding for consistent comparison
-          final similarity = _faceNetService.cosineSimilarity(normalizedCurrentEmbedding, storedEmbedding);
-          
-          // DEBUG: Log detailed comparison info for first embedding of each user
-          if (userBestSimilarity == 0.0) {
-            final storedNorm = _faceNetService.L2Norm(storedEmbedding);
-            final storedMin = storedEmbedding.reduce((a, b) => a < b ? a : b);
-            final storedMax = storedEmbedding.reduce((a, b) => a > b ? a : b);
-            print('📊 Comparing with stored embedding from ${bestSource ?? 'unknown'}:');
-            print('  - Stored norm: ${storedNorm.toStringAsFixed(6)}, Similarity: ${similarity.toStringAsFixed(4)}');
-            print('  - Stored stats: min=${storedMin.toStringAsFixed(4)}, max=${storedMax.toStringAsFixed(4)}');
-            print('  - Stored first 10: ${storedEmbedding.take(10).map((e) => e.toStringAsFixed(4)).join(', ')}');
-            print('  - Current first 10: ${normalizedCurrentEmbedding.take(10).map((e) => e.toStringAsFixed(4)).join(', ')}');
-          }
-          
-          // Track the best similarity for this user across all their embeddings
-          if (similarity > userBestSimilarity) {
-            userBestSimilarity = similarity;
-            bestSource = embData['source']?.toString() ?? 'unknown';
-          }
-        }
-        
-        // Store similarity for this user
-        if (userBestSimilarity > 0) {
-          allSimilarities.add({
-            'userId': userId,
-            'similarity': userBestSimilarity,
-            'source': bestSource ?? 'unknown',
-            'embeddingCount': embeddingsToCompare.length,
-          });
-          
-          print('🔍 User: $userId | Similarity: ${userBestSimilarity.toStringAsFixed(4)} | Embeddings: ${embeddingsToCompare.length} | Source: ${bestSource ?? 'unknown'}');
-        }
-
-        // Use the best similarity from all embeddings for this user
-        if (userBestSimilarity > bestSimilarity) {
-          secondBestSimilarity = bestSimilarity;
-          secondBestUserId = bestMatchUserId;
-          bestSimilarity = userBestSimilarity;
-          bestMatchUserId = userId;
-        } else if (userBestSimilarity > secondBestSimilarity) {
-          secondBestSimilarity = userBestSimilarity;
-          secondBestUserId = userId;
-        }
-      }
-
-      print('🔍 ==========================================');
-      print('🔍 SIMILARITY ANALYSIS SUMMARY');
-      print('🔍 ==========================================');
-      print('📊 Total users compared: ${allSimilarities.length}');
-      
-      // Sort by similarity for analysis
-      allSimilarities.sort((a, b) => (b['similarity'] as double).compareTo(a['similarity'] as double));
-      
-      // Show top 5 similarities
-      print('📊 Top 5 similarities:');
-      for (int i = 0; i < allSimilarities.length && i < 5; i++) {
-        final sim = allSimilarities[i];
-        print('  ${i + 1}. User: ${sim['userId']} | Similarity: ${(sim['similarity'] as double).toStringAsFixed(4)}');
-      }
-      
-        // Calculate similarity spread
-        if (allSimilarities.length > 1) {
-          final maxSim = allSimilarities.first['similarity'] as double;
-          final minSim = allSimilarities.last['similarity'] as double;
-          final spread = maxSim - minSim;
-          print('📊 Similarity range: ${minSim.toStringAsFixed(4)} - ${maxSim.toStringAsFixed(4)}');
-          print('📊 Similarity spread: ${spread.toStringAsFixed(4)}');
-          
-          // Check if similarities indicate model failure
-          // Count how many similarities are >0.99 (very high)
-          final highSimilarityCount = allSimilarities.where((sim) => (sim['similarity'] as double) > 0.99).length;
-          final highSimilarityRatio = highSimilarityCount / allSimilarities.length;
-          
-          print('📊 Similarity analysis:');
-          print('  - High similarities (>0.99): $highSimilarityCount / ${allSimilarities.length} (${(highSimilarityRatio * 100).toStringAsFixed(1)}%)');
-          
-          // CRITICAL: Check if current face matches ALL stored faces equally
-          // This indicates either:
-          // 1. Current embedding is a "universal match" (normalization issue)
-          // 2. Current face image quality is very poor
-          // 3. Model is generating identical embeddings
-          
-          // Calculate the actual margin between best and second best
-          final actualMarginBetweenTop2 = maxSim - (allSimilarities.length > 1 ? (allSimilarities[1]['similarity'] as double) : maxSim);
-          
-          print('📊 Top-2 margin: ${actualMarginBetweenTop2.toStringAsFixed(4)}');
-          
-          // Only reject if ALL similarities are >0.99 AND margin is EXTREMELY small (<0.0001 = 0.01%)
-          // This catches cases where current face genuinely matches all faces equally (within 0.01%)
-          // But allow if there's ANY discernible difference (margin >= 0.0001)
-          if (highSimilarityRatio >= 0.95 && actualMarginBetweenTop2 < 0.0001) {
-            print('🚨🚨🚨 CRITICAL ERROR: ${(highSimilarityRatio * 100).toStringAsFixed(1)}% of similarities are >0.99 AND margin is extremely tiny (<0.0001)!');
-            print('🚨 Current face matches ALL stored faces equally (within 0.01%) - this indicates:');
-            print('🚨 1. Poor image quality, OR');
-            print('🚨 2. Normalization issue, OR');
-            print('🚨 3. Model generating identical embeddings');
-            print('🚨 Authentication REJECTED for security.');
-            return {
-              'success': false,
-              'error': 'Face recognition failed. Please ensure good lighting and face the camera directly.',
-            };
-          }
-          
-          // If most similarities are high BUT there's a discernible winner (margin >= 0.0001), allow it
-          // This handles cases where the current face genuinely matches one user very well
-          if (highSimilarityRatio >= 0.8 && actualMarginBetweenTop2 >= 0.0001) {
-            print('⚠️ NOTE: ${(highSimilarityRatio * 100).toStringAsFixed(1)}% of similarities are high, but clear winner exists (margin: ${actualMarginBetweenTop2.toStringAsFixed(4)}).');
-            print('⚠️ Proceeding with authentication - best match has sufficient margin.');
-          }
-          
-          if (spread < 0.1) {
-            print('⚠️ WARNING: Similarity spread is very small (<0.1). Model may not be differentiating faces well!');
-            // Only reject if spread is tiny AND there's no clear winner (margin < 0.0001)
-            // If there's a clear winner (margin >= 0.0001), allow it even if spread is small
-            if (maxSim > 0.98 && spread < 0.05 && highSimilarityRatio >= 0.5 && actualMarginBetweenTop2 < 0.0001) {
-              print('🚨 CRITICAL: Most similarities are extremely high (>0.98) with tiny spread (<0.05) AND no clear winner (margin < 0.0001). Model failure detected.');
-              return {
-                'success': false,
-                'error': 'Face recognition system error. Please try again or contact support.',
-              };
-            } else if (maxSim > 0.98 && spread < 0.05 && highSimilarityRatio >= 0.5 && actualMarginBetweenTop2 >= 0.0001) {
-              print('⚠️ NOTE: Spread is small but clear winner exists (margin: ${actualMarginBetweenTop2.toStringAsFixed(4)}). Proceeding.');
-            }
-          }
-        }
-      
-      print('📊 Best match: $bestMatchUserId with similarity ${bestSimilarity.toStringAsFixed(4)}');
-      print('📊 Second best: $secondBestUserId with similarity ${secondBestSimilarity.toStringAsFixed(4)}');
-      print('📊 Margin difference: ${(bestSimilarity - secondBestSimilarity).toStringAsFixed(4)}');
-      print('🔍 ==========================================');
-
-      // CRITICAL SECURITY: MAXIMUM STRICTNESS to prevent unauthorized access and wrong account login
-      // FaceNet typically produces 0.85-0.98 similarity for same person
-      // We use EXTREMELY STRICT thresholds to prevent false positives
-      final bestMatchEmbeddingCount = _getEmbeddingCountForUser(bestMatchUserId, storedFaces);
-      double threshold = 0.96; // Default threshold for users with 3+ embeddings (96% similarity - VERY HIGH)
-      double margin = 0.05; // Minimum 5% difference from second best match (VERY HIGH)
-      
-      if (bestMatchEmbeddingCount <= 1) {
-        // Users with only 1 embedding: require very high threshold
-        threshold = 0.94; // 94% similarity required (VERY HIGH)
-        margin = 0.04; // 4% margin required (VERY HIGH)
-        print('📊 Using very strict threshold (${threshold.toStringAsFixed(3)}) for user with ${bestMatchEmbeddingCount} embedding(s)');
-      } else if (bestMatchEmbeddingCount == 2) {
-        // Users with 2 embeddings: high threshold
-        threshold = 0.95; // 95% similarity required (VERY HIGH)
-        margin = 0.045; // 4.5% margin required (VERY HIGH)
-        print('📊 Using high threshold (${threshold.toStringAsFixed(3)}) for user with ${bestMatchEmbeddingCount} embeddings');
-      } else {
-        // Users with 3+ embeddings: maximum threshold
-        print('📊 Using maximum security threshold (${threshold.toStringAsFixed(3)}) for user with ${bestMatchEmbeddingCount} embeddings');
-      }
-      
-      // SECURITY: Use strict margin requirements - NO adaptive reduction for maximum security
-      // Only allow login if similarity is extremely high (>99%) AND margin is met
-      double requiredMargin = margin;
-      if (bestSimilarity >= 0.995) {
-        // For extremely high similarities (>99.5%), use slightly smaller margin (0.02 = 2%)
-        requiredMargin = 0.02;
-        print('📊 Extremely high similarity detected (${bestSimilarity.toStringAsFixed(4)}), using reduced margin: ${requiredMargin.toStringAsFixed(4)}');
-      } else {
-        // For all other cases, use full margin requirement for security
-        requiredMargin = margin;
-        print('📊 Using full security margin: ${requiredMargin.toStringAsFixed(4)}');
-      }
-
-      // Check if top 2 matches are related (temp_ vs permanent for same person)
-      bool areRelatedUsers = false;
-      if (bestMatchUserId != null && secondBestUserId != null) {
-        // If one is temp_ and one is permanent, check if they're related
-        if (bestMatchUserId.startsWith('temp_') && !secondBestUserId.startsWith('temp_')) {
-          try {
-            final permanentUserId = await _findPermanentUserId(bestMatchUserId);
-            if (permanentUserId == secondBestUserId) {
-              areRelatedUsers = true;
-              print('🔍 Top 2 matches are related: temp_ and permanent user for same person');
-            }
-          } catch (e) {
-            // Ignore errors
-          }
-        } else if (!bestMatchUserId.startsWith('temp_') && secondBestUserId.startsWith('temp_')) {
-          try {
-            final permanentUserId = await _findPermanentUserId(secondBestUserId);
-            if (permanentUserId == bestMatchUserId) {
-              areRelatedUsers = true;
-              print('🔍 Top 2 matches are related: temp_ and permanent user for same person');
-            }
-          } catch (e) {
-            // Ignore errors
-          }
-        }
-      }
-
-      // CRITICAL SECURITY: Maximum strictness ambiguity guard - reject if top 2 matches are too close
-      // This prevents unauthorized access and wrong account login when multiple users have similar faces
-      final bool ambiguousTop2 = !areRelatedUsers && 
-          bestSimilarity >= threshold && secondBestSimilarity >= threshold &&
-          (bestSimilarity - secondBestSimilarity).abs() < requiredMargin &&
-          bestSimilarity < 0.998; // Only allow if similarity is extremely high (>99.8%)
-
-      // CRITICAL: Require BOTH margin AND very high similarity (unless users are related)
-      // This prevents false positives and wrong account access
-      final bool marginMet = (bestSimilarity - secondBestSimilarity) >= requiredMargin;
-      final bool veryHighSimilarity = bestSimilarity >= 0.98; // Require at least 98% similarity
-      final bool extremelyHighSimilarity = bestSimilarity >= 0.995; // For extremely high, be more lenient
-      
-      // CRITICAL SECURITY CHECK: Only reject if there's no clear winner
-      // If most similarities are high BUT there's a clear margin between top 2, allow it
-      final highSimilarityCount = allSimilarities.where((sim) => (sim['similarity'] as double) > 0.99).length;
-      final highSimilarityRatio = allSimilarities.length > 0 ? highSimilarityCount / allSimilarities.length : 0.0;
-      
-      // Calculate margin between best and second best
-      final top2Margin = (bestSimilarity - secondBestSimilarity).abs();
-      
-      // Only reject if ALL similarities are high AND margin is EXTREMELY tiny (no clear winner)
-      // Use 0.0001 (0.01%) as threshold - this is the precision limit for distinguishing faces
-      final allSimilaritiesHigh = allSimilarities.length > 1 && highSimilarityRatio >= 0.95 && top2Margin < 0.0001;
-      
-      if (allSimilaritiesHigh) {
-        print('🚨🚨🚨 SECURITY REJECTION: ${(highSimilarityRatio * 100).toStringAsFixed(1)}% of similarities >0.99 AND margin is extremely tiny (<0.0001). No clear winner.');
-        return {
-          'success': false,
-          'error': 'Face recognition failed. Please ensure good lighting and face the camera directly.',
-        };
-      }
-      
-      // If most similarities are high BUT there's a discernible winner (margin >= 0.0001), allow it
-      if (highSimilarityRatio >= 0.8 && top2Margin >= 0.0001) {
-        print('⚠️ NOTE: ${(highSimilarityRatio * 100).toStringAsFixed(1)}% of similarities are high, but clear winner exists (margin: ${top2Margin.toStringAsFixed(4)}).');
-      }
-      
-      // CRITICAL: If margin is too small (<0.01 = 1%), reject even if similarity is high
-      // This prevents cases where all faces match equally well
-      final actualMargin = (bestSimilarity - secondBestSimilarity).abs();
-      if (actualMargin < 0.01 && !areRelatedUsers && bestSimilarity < 0.998) {
-        print('🚨 SECURITY REJECTION: Margin too small (${actualMargin.toStringAsFixed(4)} < 0.01). Faces are too similar.');
-        return {
-          'success': false,
-          'error': 'Face verification ambiguous. Please try again.',
-        };
-      }
-      
-      // Allow login ONLY if:
-      // 1. Best similarity meets threshold AND
-      // 2. (Margin is met AND similarity is very high >0.98) OR (extremely high >99.5% OR users are related) AND
-      // 3. Not ambiguous (unless users are related or extremely high similarity)
-      // 4. NOT all similarities high with no clear winner (model differentiation check)
-      final bool canProceed = bestSimilarity >= threshold && 
-          ((marginMet && veryHighSimilarity) || extremelyHighSimilarity || areRelatedUsers) &&
-          (!ambiguousTop2 || extremelyHighSimilarity || areRelatedUsers) &&
-          !allSimilaritiesHigh;
-
-      if (canProceed) {
-        print('✅ SECURE face authentication preliminary match passed');
-        
-        String? finalUserId = bestMatchUserId;
-        if (bestMatchUserId != null && bestMatchUserId.startsWith('temp_')) {
-            print('🔍 Matched to temp_ user: $bestMatchUserId, attempting to resolve to permanent user...');
-            final permanentUserId = await _findPermanentUserId(bestMatchUserId);
-            if (permanentUserId != null) {
-                print('✅ Resolved temp_ user to permanent user: $permanentUserId');
-                
-                // CRITICAL: Verify the permanent user actually has face embeddings matching this face
-                // This prevents matching to wrong user if email lookup finds different user
-                final permanentUserDoc = await _firestore.collection('users').doc(permanentUserId).get();
-                if (permanentUserDoc.exists) {
-                  final permanentUserData = permanentUserDoc.data()!;
-                  final permanentSignupCompleted = permanentUserData['signupCompleted'] ?? false;
-                  
-                  if (permanentSignupCompleted) {
-                    // Verify permanent user has matching face embedding
-                    final permanentFaceDoc = await _firestore.collection('face_embeddings').doc(permanentUserId).get();
-                    if (permanentFaceDoc.exists) {
-                      final permanentEmbeddingsData = permanentFaceDoc.data()!['embeddings'] as List?;
-                      if (permanentEmbeddingsData != null && permanentEmbeddingsData.isNotEmpty) {
-                        // Verify at least one embedding matches well
-                        bool permanentMatches = false;
-                        for (final embData in permanentEmbeddingsData) {
-                          if (embData is Map && embData['embedding'] != null) {
-                            final permEmbRaw = embData['embedding'] as List;
-                            final permEmbList = permEmbRaw.map((e) => (e as num).toDouble()).toList();
-                            if (permEmbList.length == normalizedCurrentEmbedding.length) {
-                              // CRITICAL: Check if permanent embedding is already normalized
-                              final permNorm = _faceNetService.L2Norm(permEmbList);
-                              List<double> permEmbNormalized;
-                              if (permNorm < 0.9 || permNorm > 1.1) {
-                                // Not normalized, normalize it
-                                permEmbNormalized = _faceNetService.normalize(permEmbList);
-                              } else {
-                                // Already normalized, use as-is
-                                permEmbNormalized = permEmbList;
-                              }
-                              final permSimilarity = _faceNetService.cosineSimilarity(normalizedCurrentEmbedding, permEmbNormalized);
-                              if (permSimilarity >= threshold) {
-                                permanentMatches = true;
-                                print('✅ Verified permanent user has matching face embedding (similarity: ${permSimilarity.toStringAsFixed(4)})');
-                                break;
-                              }
-                            }
-                          }
-                        }
-                        
-                        if (permanentMatches) {
-                          finalUserId = permanentUserId;
-                        } else {
-                          print('⚠️ WARNING: Permanent user found but face embeddings don\'t match well. Using temp_ ID instead.');
-                          // Fallback: try temp_ ID directly if it exists in users collection
-                          final tempUserDoc = await _firestore.collection('users').doc(bestMatchUserId).get();
-                          if (tempUserDoc.exists && (tempUserDoc.data()!['signupCompleted'] ?? false)) {
-                            print('✅ Temp_ user exists with completed signup, using temp_ ID: $bestMatchUserId');
-                            finalUserId = bestMatchUserId;
-                          } else {
-                            print('❌ Neither permanent nor temp_ user is valid. Rejecting authentication.');
-                            return {
-                              'success': false,
-                              'error': 'User account not properly registered. Please sign up again.',
-                            };
-                          }
-                        }
-                      } else {
-                        print('⚠️ Permanent user has no face embeddings. Using temp_ ID as fallback.');
-                        finalUserId = bestMatchUserId;
-                      }
-                    } else {
-                      print('⚠️ Permanent user has no face_embeddings document. Using temp_ ID as fallback.');
-                      finalUserId = bestMatchUserId;
-                    }
-                  } else {
-                    print('⚠️ Permanent user exists but signup not completed. Using temp_ ID as fallback.');
-                    finalUserId = bestMatchUserId;
-                  }
-                } else {
-                  print('⚠️ Permanent user document not found. Using temp_ ID as fallback.');
-                  finalUserId = bestMatchUserId;
-                }
-            } else {
-                print('⚠️ Matched temp_ but no permanent user found. Attempting to use temp_ ID directly...');
-                // Fallback: Check if temp_ user exists in users collection with completed signup
-                final tempUserDoc = await _firestore.collection('users').doc(bestMatchUserId).get();
-                if (tempUserDoc.exists && (tempUserDoc.data()!['signupCompleted'] ?? false)) {
-                  print('✅ Temp_ user exists with completed signup, using temp_ ID: $bestMatchUserId');
-                  finalUserId = bestMatchUserId;
-                } else {
-                  print('❌ Temp_ user not found or signup not completed. Rejecting authentication.');
-                  return {
-                    'success': false,
-                    'error': 'User account not properly registered. Please sign up again.',
-                  };
-                }
-            }
-        }
-
-        // SECONDARY 1:1 VERIFICATION (mandatory)
-        if (finalUserId == null) {
-          return {
-            'success': false,
-            'error': 'Verification error. Please try again.',
-          };
-        }
-
-        try {
-          final secondaryEmbedding = await _getCompatibleSecondaryEmbedding(
-            primaryEmbedding: normalizedCurrentEmbedding,
-            finalUserId: finalUserId,
-            altUserId: bestMatchUserId,
-          );
-
-          if (secondaryEmbedding == null) {
-            print('❌ No compatible embedding available for secondary verification');
-            return {
-              'success': false,
-              'error': 'Verification error. Please re-verify your face.',
-            };
-          }
-
-          // CRITICAL: Secondary embedding may already be normalized, check before normalizing
-          final secondaryNorm = _faceNetService.L2Norm(secondaryEmbedding);
-          List<double> normalizedStoredUserEmbedding;
-          if (secondaryNorm < 0.9 || secondaryNorm > 1.1) {
-            // Not normalized, normalize it
-            normalizedStoredUserEmbedding = _faceNetService.normalize(secondaryEmbedding);
-          } else {
-            // Already normalized, use as-is
-            normalizedStoredUserEmbedding = secondaryEmbedding;
-          }
-          
-          // Use normalized current embedding for secondary verification
-          final secondSimilarity = _faceNetService.cosineSimilarity(normalizedCurrentEmbedding, normalizedStoredUserEmbedding);
-          print('🔁 Secondary 1:1 verification similarity: ${secondSimilarity.toStringAsFixed(4)}');
-          
-          // CRITICAL: Use same strict threshold for secondary verification (no tolerance)
-          // This ensures maximum security - both primary and secondary must pass
-          if (secondSimilarity < threshold) {
-            print('❌ Secondary verification failed: ${secondSimilarity.toStringAsFixed(4)} < $threshold');
-            return {
-              'success': false,
-              'error': 'Face not recognized (secondary verification failed).',
-            };
-          }
-          
-          // TERTIARY CHECK: Both similarities must be consistent (within 3% of each other)
-          // This prevents cases where primary passes but secondary is significantly different
-          final similarityDifference = (bestSimilarity - secondSimilarity).abs();
-          if (similarityDifference > 0.03) {
-            print('❌ Tertiary verification failed: Similarity difference too large (${similarityDifference.toStringAsFixed(4)} > 0.03)');
-            print('   Primary: ${bestSimilarity.toStringAsFixed(4)}, Secondary: ${secondSimilarity.toStringAsFixed(4)}');
-            return {
-              'success': false,
-              'error': 'Face verification inconsistent. Please try again.',
-            };
-          }
-          
-          print('✅ Tertiary verification passed: Similarities are consistent');
-        } catch (e) {
-          print('⚠️ Secondary verification error: $e');
-          return {
-            'success': false,
-            'error': 'Verification error. Please try again.',
-          };
-        }
-
-        // CRITICAL SECURITY CHECK: Verify user exists and completed signup before allowing login
-        print('🔒 Performing security verification: Checking if user completed signup...');
-        final userDoc = await _firestore.collection('users').doc(finalUserId).get();
-        
-        if (!userDoc.exists) {
-          print('❌ SECURITY: User document does not exist for matched userId: $finalUserId');
-          return {
-            'success': false,
-            'error': 'Account not found. Please sign up first.',
-          };
-        }
-        
-        final userData = userDoc.data()!;
-        final signupCompleted = userData['signupCompleted'] ?? false;
-        
-        if (!signupCompleted) {
-          print('❌ SECURITY: User has not completed signup: $finalUserId');
-          return {
-            'success': false,
-            'error': 'Please complete signup first.',
-          };
-        }
-        
-        print('✅ SECURITY: User verified - signup completed: $signupCompleted');
-
-        return {
-          'success': true,
-          'userId': finalUserId,
-          'similarity': bestSimilarity,
-        };
-      } else {
-        // CRITICAL: Log detailed failure reason and ensure rejection
-        if (bestSimilarity < 0.85) {
-          // Very low similarity - definitely unregistered user
-          print('❌ SECURE face authentication REJECTED: Very low similarity ${bestSimilarity.toStringAsFixed(4)} - Unregistered user detected');
-          return {
-            'success': false,
-            'error': 'Face not registered. Please sign up first.',
-          };
-        } else if (bestSimilarity < threshold) {
-          print('❌ SECURE face authentication REJECTED: similarity ${bestSimilarity.toStringAsFixed(4)} < threshold $threshold');
-          return {
-            'success': false,
-            'error': 'Face not recognized. Please try again or sign up.',
-          };
-        } else if (!marginMet && !veryHighSimilarity && !areRelatedUsers) {
-          print('❌ SECURE face authentication REJECTED: margin ${(bestSimilarity - secondBestSimilarity).toStringAsFixed(4)} < required margin ${requiredMargin.toStringAsFixed(4)}');
-          print('   Best: ${bestSimilarity.toStringAsFixed(4)}, Second: ${secondBestSimilarity.toStringAsFixed(4)}, Difference: ${(bestSimilarity - secondBestSimilarity).toStringAsFixed(4)}');
-          return {
-            'success': false,
-            'error': 'Face verification failed. Please try again.',
-          };
-        } else if (ambiguousTop2) {
-          print('❌ SECURE face authentication REJECTED: Ambiguous top-2 match between $bestMatchUserId and $secondBestUserId. Rejecting for safety.');
-          return {
-            'success': false,
-            'error': 'Face verification ambiguous. Please try again.',
-          };
-        } else {
-          print('❌ SECURE face authentication REJECTED: Unknown reason. Best: ${bestSimilarity.toStringAsFixed(4)}, Threshold: $threshold');
-          return {
-            'success': false,
-            'error': 'Face not recognized. Please try again.',
-          };
-        }
-      }
-    } catch (e) {
-      print('❌ Error in SECURE face authentication: $e');
-      return {
-        'success': false,
-        'error': 'Face authentication failed: $e',
-      };
-    }
+    // TensorFlow Lite removed - this function is deprecated
+    // All authentication now uses backend via verifyUserFace()
+    print('⚠️ authenticateUser() is deprecated. Use verifyUserFace() instead which uses backend/Luxand.');
+    return {
+      'success': false,
+      'error': 'Local authentication is deprecated. Please use backend authentication.',
+    };
   }
 
   /// Calculate variance of embedding to ensure it's meaningful
@@ -1569,6 +432,37 @@ class ProductionFaceRecognitionService {
     final variance = embedding.map((e) => pow(e - mean, 2)).reduce((a, b) => a + b) / embedding.length;
     
     return variance;
+  }
+  
+  /// Helper function: Calculate L2 norm (replaces TensorFlow Lite)
+  static double _l2Norm(List<double> vector) {
+    double sum = 0.0;
+    for (final value in vector) {
+      sum += value * value;
+    }
+    return sqrt(sum);
+  }
+  
+  /// Helper function: Normalize vector (replaces TensorFlow Lite)
+  static List<double> _normalize(List<double> vector) {
+    final norm = _l2Norm(vector);
+    if (norm == 0.0) return vector;
+    return vector.map((v) => v / norm).toList();
+  }
+  
+  /// Helper function: Calculate cosine similarity (replaces TensorFlow Lite)
+  static double _cosineSimilarity(List<double> a, List<double> b) {
+    if (a.length != b.length) return 0.0;
+    double dotProduct = 0.0;
+    double normA = 0.0;
+    double normB = 0.0;
+    for (int i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    if (normA == 0.0 || normB == 0.0) return 0.0;
+    return dotProduct / (sqrt(normA) * sqrt(normB));
   }
   
   /// Store face embedding in Firebase (supports multiple embeddings per user).
@@ -1604,136 +498,17 @@ class ProductionFaceRecognitionService {
         throw Exception('Invalid embedding dimension: ${embeddingList.length} (expected 512)');
       }
       
-      // CRITICAL: Validate normalization (should be ~1.0)
-      final embeddingNorm = _faceNetService.L2Norm(embeddingList);
-      if (embeddingNorm < 0.9 || embeddingNorm > 1.1) {
-        print('⚠️ WARNING: Embedding not properly normalized (norm: ${embeddingNorm.toStringAsFixed(6)})');
-        print('⚠️ Re-normalizing before storage to ensure consistency...');
-        // Re-normalize to ensure consistency
-        final renormalized = _faceNetService.normalize(embeddingList);
-        // Use renormalized embedding
-        for (int i = 0; i < embeddingList.length && i < renormalized.length; i++) {
-          embeddingList[i] = renormalized[i];
-        }
-        final newNorm = _faceNetService.L2Norm(embeddingList);
-        print('✅ Re-normalized embedding (new norm: ${newNorm.toStringAsFixed(6)})');
-      }
+      // NOTE: TensorFlow Lite removed - normalization and validation skipped
+      // This function is deprecated and kept for reference only
+      print('⚠️ _storeFaceEmbedding is deprecated - Luxand handles all face recognition');
+      print('⚠️ Skipping storage - using Luxand exclusively');
       
-      // CRITICAL: Validate embedding quality - check for invalid values
-      final embeddingMin = embeddingList.reduce((a, b) => a < b ? a : b);
-      final embeddingMax = embeddingList.reduce((a, b) => a > b ? a : b);
-      final embeddingMean = embeddingList.reduce((a, b) => a + b) / embeddingList.length;
-      
-      // Check for suspicious patterns (all zeros, all same value, etc.)
-      if (embeddingMax == embeddingMin && embeddingMax == 0.0) {
-        print('🚨 CRITICAL: Embedding is all zeros - model failure');
-        throw Exception('Embedding is all zeros - model failure');
-      }
-      
-      if (embeddingMax == embeddingMin) {
-        print('🚨 CRITICAL: All embedding values are identical - model failure');
-        throw Exception('All embedding values are identical - model failure');
-      }
-      
-      // Check for NaN or Infinity values
-      for (int i = 0; i < embeddingList.length; i++) {
-        if (embeddingList[i].isNaN || embeddingList[i].isInfinite) {
-          print('🚨 CRITICAL: Invalid value in embedding at index $i: ${embeddingList[i]}');
-          throw Exception('Invalid value in embedding: NaN or Infinity detected');
-        }
-      }
-      
-      print('✅ Embedding validation passed:');
-      print('   - Dimension: ${embeddingList.length}D');
-      print('   - Norm: ${embeddingNorm.toStringAsFixed(6)} (should be ~1.0)');
-      print('   - Min: ${embeddingMin.toStringAsFixed(4)}, Max: ${embeddingMax.toStringAsFixed(4)}');
-      print('   - Mean: ${embeddingMean.toStringAsFixed(4)}');
-      print('   - Quality: Valid (no zeros, no duplicates, no NaN/Infinity)');
-      
-      // Get existing document
-      final docRef = _firestore.collection('face_embeddings').doc(userId);
-      final docSnapshot = await docRef.get();
-      
-      if (docSnapshot.exists) {
-        // Update existing document - add to embeddings array
-        final existingData = docSnapshot.data()!;
-        final existingEmbeddings = existingData['embeddings'] as List? ?? [];
-        
-        // Check if this is a single embedding (legacy format)
-        if (existingData['embedding'] != null && existingEmbeddings.isEmpty) {
-          // Migrate old single embedding to array format
-          existingEmbeddings.add({
-            'embedding': existingData['embedding'],
-            'source': 'legacy_migration',
-            'timestamp': existingData['registeredAt'],
-          });
-        }
-        
-        // Add new embedding - CRITICAL: Use validated embeddingList, not raw embedding
-        // CRITICAL: Store email/phone AND landmark features for "whose face is this" recognition
-        final embeddingData = {
-          'embedding': embeddingList, // Use validated and normalized embedding
-          'source': source ?? 'unknown',
-          'timestamp': Timestamp.now(), // Use Timestamp.now() instead of FieldValue.serverTimestamp() for arrays
-          'email': email ?? '', // CRITICAL: Link email to this embedding
-          'phoneNumber': phoneNumber ?? '', // CRITICAL: Link phone to this embedding
-        };
-        
-        // CRITICAL: Store landmark features for feature-level recognition
-        // This enables the app to know "whose nose, eyes, lips, etc. is this"
-        if (landmarkFeatures != null && landmarkFeatures.isNotEmpty) {
-          embeddingData['landmarkFeatures'] = landmarkFeatures;
-          print('✅ Storing landmark features: ${landmarkFeatures.keys.join(', ')}');
-        }
-        
-        if (featureDistances != null && featureDistances.isNotEmpty) {
-          embeddingData['featureDistances'] = featureDistances;
-          print('✅ Storing feature distances: ${featureDistances.keys.join(', ')}');
-        }
-        
-        existingEmbeddings.add(embeddingData);
-        
-        // Update document - CRITICAL: Use validated embeddingList
-        await docRef.update({
-          'embeddings': existingEmbeddings,
-          'lastUpdated': FieldValue.serverTimestamp(),
-          // Keep primary embedding (first one or best quality) for backward compatibility
-          'embedding': embeddingList, // Use validated embedding
-        });
-        
-        print('✅ Face embedding added to array. Total embeddings: ${existingEmbeddings.length}');
-      } else {
-        // Create new document with embeddings array - CRITICAL: Use validated embeddingList
-        await docRef.set({
-          'userId': userId,
-          'embedding': embeddingList, // Primary embedding for backward compatibility - use validated embedding
-          'embeddings': [
-            {
-              'embedding': embeddingList, // Use validated and normalized embedding
-              'source': source ?? 'unknown',
-              'timestamp': Timestamp.now(), // Use Timestamp.now() instead of FieldValue.serverTimestamp() for arrays
-              'email': email ?? '', // CRITICAL: Link email to this embedding
-              'phoneNumber': phoneNumber ?? '', // CRITICAL: Link phone to this embedding
-              // CRITICAL: Store landmark features for "whose face is this" recognition
-              if (landmarkFeatures != null && landmarkFeatures.isNotEmpty)
-                'landmarkFeatures': landmarkFeatures,
-              if (featureDistances != null && featureDistances.isNotEmpty)
-                'featureDistances': featureDistances,
-            }
-          ],
-          'email': email ?? '',
-          'phoneNumber': phoneNumber ?? '',
-          'registeredAt': FieldValue.serverTimestamp(),
-          'lastUpdated': FieldValue.serverTimestamp(),
-        });
-        print('✅ New face embedding document created with 1 embedding.');
-      }
     } catch (e) {
       print('❌ Error storing face embedding: $e');
       throw Exception('Failed to store face embedding: $e');
     }
   }
-
+  
   /// Get all stored face embeddings.
   static Future<List<Map<String, dynamic>>> _getAllStoredFaceEmbeddings() async {
     try {
@@ -1789,20 +564,9 @@ class ProductionFaceRecognitionService {
         }
 
         if (primaryEmbedding != null && primaryEmbedding.isNotEmpty) {
-          // CRITICAL: Stored embeddings are already normalized (from FaceNetService during registration)
-          // DO NOT normalize again - this would cause double normalization and false diversity failures
-          // Check if embedding is already normalized (norm ~1.0)
-          final embeddingNorm = _faceNetService.L2Norm(primaryEmbedding);
-          List<double> normalizedPrimaryEmbedding;
-          if (embeddingNorm < 0.9 || embeddingNorm > 1.1) {
-            // Not normalized, normalize it
-            print('⚠️ Primary embedding for $userId not normalized (norm: ${embeddingNorm.toStringAsFixed(6)}), normalizing...');
-            normalizedPrimaryEmbedding = _faceNetService.normalize(primaryEmbedding);
-          } else {
-            // Already normalized, use as-is
-            normalizedPrimaryEmbedding = primaryEmbedding;
-          }
-          primaryEmbeddings.add(normalizedPrimaryEmbedding);
+          // NOTE: TensorFlow Lite removed - using embeddings as-is
+          // This function is deprecated and kept for reference only
+          primaryEmbeddings.add(primaryEmbedding);
           userIds.add(userId);
         }
       }
@@ -1818,10 +582,17 @@ class ProductionFaceRecognitionService {
       List<double> allSimilarities = [];
       for (int i = 0; i < primaryEmbeddings.length; i++) {
         for (int j = i + 1; j < primaryEmbeddings.length; j++) {
-          final similarity = _faceNetService.cosineSimilarity(
-            primaryEmbeddings[i],
-            primaryEmbeddings[j],
-          );
+          // NOTE: TensorFlow Lite removed - using simple cosine similarity calculation
+          // Calculate cosine similarity manually
+          double dotProduct = 0.0;
+          double normA = 0.0;
+          double normB = 0.0;
+          for (int k = 0; k < primaryEmbeddings[i].length && k < primaryEmbeddings[j].length; k++) {
+            dotProduct += primaryEmbeddings[i][k] * primaryEmbeddings[j][k];
+            normA += primaryEmbeddings[i][k] * primaryEmbeddings[i][k];
+            normB += primaryEmbeddings[j][k] * primaryEmbeddings[j][k];
+          }
+          final similarity = dotProduct / (sqrt(normA) * sqrt(normB));
           allSimilarities.add(similarity);
         }
       }
@@ -2723,7 +1494,7 @@ class ProductionFaceRecognitionService {
           double maxSimilarity = 0.0;
           for (int i = 0; i < validEmbeddings.length; i++) {
             for (int j = i + 1; j < validEmbeddings.length; j++) {
-              final similarity = _faceNetService.cosineSimilarity(validEmbeddings[i], validEmbeddings[j]);
+              final similarity = _cosineSimilarity(validEmbeddings[i], validEmbeddings[j]);
               if (similarity > maxSimilarity) {
                 maxSimilarity = similarity;
               }
@@ -2908,11 +1679,11 @@ class ProductionFaceRecognitionService {
       print('🔐 This enables validation: "whose nose, eyes, lips, etc. is this"');
       
       // Verify normalization
-      final currentNorm = _faceNetService.L2Norm(normalizedCurrentEmbedding);
+      final currentNorm = _l2Norm(normalizedCurrentEmbedding);
       if (currentNorm < 0.9 || currentNorm > 1.1) {
         print('⚠️ WARNING: Current embedding normalization issue! Norm: $currentNorm');
         if (currentNorm > 0.0) {
-          final renormalized = _faceNetService.normalize(normalizedCurrentEmbedding);
+          final renormalized = _normalize(normalizedCurrentEmbedding);
           for (int i = 0; i < normalizedCurrentEmbedding.length && i < renormalized.length; i++) {
             normalizedCurrentEmbedding[i] = renormalized[i];
           }
@@ -3278,14 +2049,14 @@ class ProductionFaceRecognitionService {
         }
         
         // CRITICAL: Check if stored embedding is normalized and validate
-        final storedNorm = _faceNetService.L2Norm(storedEmbeddingList);
+        final storedNorm = _l2Norm(storedEmbeddingList);
         List<double> storedEmbedding;
         
         if (storedNorm < 0.9 || storedNorm > 1.1) {
           print('⚠️ Stored embedding not normalized (norm: ${storedNorm.toStringAsFixed(6)}), normalizing...');
-          storedEmbedding = _faceNetService.normalize(storedEmbeddingList);
+          storedEmbedding = _normalize(storedEmbeddingList);
           // Verify normalization succeeded
-          final newNorm = _faceNetService.L2Norm(storedEmbedding);
+          final newNorm = _l2Norm(storedEmbedding);
           if (newNorm < 0.9 || newNorm > 1.1) {
             print('⚠️ Normalization failed, skipping embedding');
             continue;
@@ -3295,7 +2066,7 @@ class ProductionFaceRecognitionService {
         }
         
         // PERFECT RECOGNITION: Calculate similarity with validated embeddings
-        final similarity = _faceNetService.cosineSimilarity(normalizedCurrentEmbedding, storedEmbedding);
+        final similarity = _cosineSimilarity(normalizedCurrentEmbedding, storedEmbedding);
         
         // CRITICAL: Validate similarity result
         if (similarity.isNaN || similarity.isInfinite || similarity < -1.0 || similarity > 1.0) {
@@ -3764,12 +2535,12 @@ class ProductionFaceRecognitionService {
                       
                       // Normalize and compare
                       if (otherEmbedding.length == normalizedCurrentEmbedding.length) {
-                        final otherNorm = _faceNetService.L2Norm(otherEmbedding);
+                        final otherNorm = _l2Norm(otherEmbedding);
                         final normalizedOtherEmbedding = (otherNorm >= 0.9 && otherNorm <= 1.1) 
                             ? otherEmbedding 
-                            : _faceNetService.normalize(otherEmbedding);
+                            : _normalize(otherEmbedding);
                         
-                        final otherSimilarity = _faceNetService.cosineSimilarity(
+                        final otherSimilarity = _cosineSimilarity(
                           normalizedCurrentEmbedding, 
                           normalizedOtherEmbedding
                         );
@@ -3789,12 +2560,12 @@ class ProductionFaceRecognitionService {
                   final otherEmbedding = otherEmbeddingRaw.map((e) => (e as num).toDouble()).toList();
                   
                   if (otherEmbedding.length == normalizedCurrentEmbedding.length) {
-                    final otherNorm = _faceNetService.L2Norm(otherEmbedding);
+                    final otherNorm = _l2Norm(otherEmbedding);
                     final normalizedOtherEmbedding = (otherNorm >= 0.9 && otherNorm <= 1.1) 
                         ? otherEmbedding 
-                        : _faceNetService.normalize(otherEmbedding);
+                        : _normalize(otherEmbedding);
                     
-                    final otherSimilarity = _faceNetService.cosineSimilarity(
+                    final otherSimilarity = _cosineSimilarity(
                       normalizedCurrentEmbedding, 
                       normalizedOtherEmbedding
                     );

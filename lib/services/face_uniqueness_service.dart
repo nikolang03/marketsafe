@@ -1,15 +1,46 @@
+import 'dart:math';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'face_net_service.dart';
+// import 'face_net_service.dart';  // Removed - TensorFlow Lite no longer used
 
 /// A service to ensure that each registered face is unique within the system.
+/// NOTE: This service is deprecated - backend/Luxand handles duplicate detection automatically
 class FaceUniquenessService {
   static final FirebaseFirestore _firestore = FirebaseFirestore.instanceFor(
     app: Firebase.app(),
     databaseId: 'marketsafe',
   );
 
-  static final FaceNetService _faceNetService = FaceNetService();
+  // Helper function: Calculate L2 norm (replaces TensorFlow Lite)
+  static double _l2Norm(List<double> vector) {
+    double sum = 0.0;
+    for (final value in vector) {
+      sum += value * value;
+    }
+    return sqrt(sum);
+  }
+  
+  // Helper function: Normalize vector (replaces TensorFlow Lite)
+  static List<double> _normalize(List<double> vector) {
+    final norm = _l2Norm(vector);
+    if (norm == 0.0) return vector;
+    return vector.map((v) => v / norm).toList();
+  }
+  
+  // Helper function: Calculate cosine similarity (replaces TensorFlow Lite)
+  static double _cosineSimilarity(List<double> a, List<double> b) {
+    if (a.length != b.length) return 0.0;
+    double dotProduct = 0.0;
+    double normA = 0.0;
+    double normB = 0.0;
+    for (int i = 0; i < a.length; i++) {
+      dotProduct += a[i] * b[i];
+      normA += a[i] * a[i];
+      normB += b[i] * b[i];
+    }
+    if (normA == 0.0 || normB == 0.0) return 0.0;
+    return dotProduct / (sqrt(normA) * sqrt(normB));
+  }
 
   /// Checks if a given face embedding is already registered in the database.
   ///
@@ -109,8 +140,8 @@ class FaceUniquenessService {
           }
 
           // Normalize the stored embedding to ensure a fair comparison
-          final storedEmbedding = _faceNetService.normalize(storedEmbeddingList);
-          final similarity = _faceNetService.cosineSimilarity(newEmbedding, storedEmbedding);
+          final storedEmbedding = _normalize(storedEmbeddingList);
+          final similarity = _cosineSimilarity(newEmbedding, storedEmbedding);
           
           // Track the best similarity for this user
           if (similarity > userBestSimilarity) {

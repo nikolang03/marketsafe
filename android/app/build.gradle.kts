@@ -30,9 +30,10 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         
-        // TFLite configuration
+        // TFLite configuration - only include arm64-v8a (most modern devices) to reduce APK size
+        // Most devices today are 64-bit, so we can drop 32-bit support to save ~50% size
         ndk {
-            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
+            abiFilters += listOf("arm64-v8a") // Only 64-bit ARM (covers 95%+ of modern devices)
         }
     }
 
@@ -41,9 +42,21 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
-            isMinifyEnabled = false
-            isShrinkResources = false
-            // proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            // Enable code shrinking and obfuscation to reduce APK size
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
+    }
+    
+    // Disable split APKs - we're only building for arm64-v8a now
+    // This creates a single optimized APK
+    splits {
+        abi {
+            isEnable = false // Disabled since we only support arm64-v8a
         }
     }
 }

@@ -9,7 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'face_movecloser_screen.dart';
 import '../services/production_face_recognition_service.dart';
-import '../services/face_net_service.dart';
+// import '../services/face_net_service.dart';  // Removed - TensorFlow Lite no longer used
 
 class FaceBlinkTwiceScreen extends StatefulWidget {
   const FaceBlinkTwiceScreen({super.key});
@@ -423,15 +423,10 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> {
           if (result['success'] == true) {
             print('✅ Blink verification embedding registered successfully');
             
-            // Save face features to SharedPreferences for backward compatibility
-            final prefs = await SharedPreferences.getInstance();
+            // NOTE: TensorFlow Lite removed - features no longer saved locally (backend handles it)
+            // Features are now handled by backend/Luxand during enrollment
             if (imageBytes.isNotEmpty) {
-              final faceFeatures = await FaceNetService().predictFromBytes(imageBytes, capturedFace);
-              if (faceFeatures.isNotEmpty) {
-                final featuresString = faceFeatures.map((f) => f.toString()).join(',');
-                await prefs.setString('face_verification_blinkFeatures', featuresString);
-                print('✅ Blink features saved to SharedPreferences: ${faceFeatures.length}D');
-              }
+              print('ℹ️ Face features now handled by backend/Luxand');
             }
           } else {
             print('⚠️ Failed to register blink embedding: ${result['error']}');

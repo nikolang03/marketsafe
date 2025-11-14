@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 import 'offer_dialog.dart';
+import '../services/media_download_service.dart';
 
 class ProductPreviewScreen extends StatefulWidget {
   final Map<String, dynamic> product;
@@ -148,7 +149,7 @@ class _ProductPreviewScreenState extends State<ProductPreviewScreen> {
                   ),
                   Expanded(
                     child: Text(
-                      'Make Offer',
+                      'Collection',
                       style: TextStyle(
                         color: Colors.white,
                         fontSize: 18,
@@ -157,12 +158,8 @@ class _ProductPreviewScreenState extends State<ProductPreviewScreen> {
                       textAlign: TextAlign.center,
                     ),
                   ),
-                  IconButton(
-                    icon: Icon(Icons.notifications, color: Colors.white),
-                    onPressed: () {
-                      // Navigate to notifications
-                    },
-                  ),
+                  // Spacer to balance the layout (notification icon removed)
+                  const SizedBox(width: 48),
                 ],
               ),
             ),
@@ -207,27 +204,28 @@ class _ProductPreviewScreenState extends State<ProductPreviewScreen> {
                                   ),
                                 ),
                               ),
-                              // Make Offer button
-                              ElevatedButton(
-                                onPressed: _showOfferDialog,
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Color(0xFF8B0000), // Dark red background
-                                  side: BorderSide(color: Colors.white, width: 1),
-                                  padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(8),
+                              // Make Offer button - only show for buyers (not sellers)
+                              if (widget.product['userId'] != widget.currentUserId)
+                                ElevatedButton(
+                                  onPressed: _showOfferDialog,
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Color(0xFF8B0000), // Dark red background
+                                    side: BorderSide(color: Colors.white, width: 1),
+                                    padding: EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                    shape: RoundedRectangleBorder(
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    elevation: 4,
                                   ),
-                                  elevation: 4,
-                                ),
-                                child: Text(
-                                  'MAKE OFFER',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
+                                  child: Text(
+                                    'MAKE OFFER',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                    ),
                                   ),
                                 ),
-                              ),
                             ],
                           ),
                           SizedBox(height: 16),
@@ -290,73 +288,124 @@ class _ProductPreviewScreenState extends State<ProductPreviewScreen> {
 
     // If it's a video product, show video thumbnail
     if (mediaType == 'video' && videoThumbnailUrl != null && videoThumbnailUrl.isNotEmpty) {
-      return Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: Image.network(
-                videoThumbnailUrl,
-                fit: BoxFit.cover,
-                errorBuilder: (context, error, stackTrace) {
-                  return Container(
-                    color: Colors.black,
-                    child: const Center(
-                      child: Icon(Icons.video_library, color: Colors.white54, size: 50),
+      return GestureDetector(
+        onLongPress: () {
+          if (videoUrl != null && videoUrl.isNotEmpty) {
+            MediaDownloadService.showDownloadDialog(
+              context: context,
+              mediaUrl: videoUrl,
+              productTitle: widget.product['title'] ?? 'Product',
+              isVideo: true,
+              productId: widget.product['id'] ?? widget.product['productId'],
+            );
+          }
+        },
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Image.network(
+                  videoThumbnailUrl,
+                  fit: BoxFit.cover,
+                  errorBuilder: (context, error, stackTrace) {
+                    return Container(
+                      color: Colors.black,
+                      child: const Center(
+                        child: Icon(Icons.video_library, color: Colors.white54, size: 50),
+                      ),
+                    );
+                  },
+                  loadingBuilder: (context, child, loadingProgress) {
+                    if (loadingProgress == null) return child;
+                    return const Center(
+                      child: CircularProgressIndicator(color: Colors.white),
+                    );
+                  },
+                ),
+              ),
+              // Video play button overlay
+              Center(
+                child: GestureDetector(
+                  onTap: () => _showVideoPlayer(videoUrl!),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withOpacity(0.6),
+                      shape: BoxShape.circle,
                     ),
-                  );
-                },
-                loadingBuilder: (context, child, loadingProgress) {
-                  if (loadingProgress == null) return child;
-                  return const Center(
-                    child: CircularProgressIndicator(color: Colors.white),
-                  );
-                },
+                    child: const Icon(
+                      Icons.play_arrow,
+                      color: Colors.white,
+                      size: 48,
+                    ),
+                  ),
+                ),
               ),
-            ),
-            // Video play button overlay
-            Center(
-              child: GestureDetector(
-                onTap: () => _showVideoPlayer(videoUrl!),
+              // Video badge
+              Positioned(
+                top: 8,
+                right: 8,
                 child: Container(
-                  padding: const EdgeInsets.all(16),
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                   decoration: BoxDecoration(
-                    color: Colors.black.withOpacity(0.6),
-                    shape: BoxShape.circle,
+                    color: Colors.red,
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(
-                    Icons.play_arrow,
-                    color: Colors.white,
-                    size: 48,
-                  ),
-                ),
-              ),
-            ),
-            // Video badge
-            Positioned(
-              top: 8,
-              right: 8,
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: Colors.red,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Text(
-                  'VIDEO',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 10,
-                    fontWeight: FontWeight.bold,
+                  child: const Text(
+                    'VIDEO',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+              // Download button
+              Positioned(
+                bottom: 8,
+                right: 8,
+                child: GestureDetector(
+                  onTap: () {
+                    print('📥 Download button tapped for video: $videoUrl');
+                    if (videoUrl != null && videoUrl.isNotEmpty) {
+                      MediaDownloadService.showDownloadDialog(
+                        context: context,
+                        mediaUrl: videoUrl,
+                        productTitle: widget.product['title'] ?? 'Product',
+                        isVideo: true,
+                        productId: widget.product['id'] ?? widget.product['productId'],
+                      );
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.red.withOpacity(0.9),
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withOpacity(0.3),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: const Icon(
+                      Icons.download,
+                      color: Colors.white,
+                      size: 24,
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
         ),
       );
     }
@@ -367,25 +416,77 @@ class _ProductPreviewScreenState extends State<ProductPreviewScreen> {
         itemCount: imageUrls.length,
         itemBuilder: (context, index) {
           final imageUrl = imageUrls[index] as String;
-          return ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Image.network(
-              imageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (context, error, stackTrace) {
-                return Container(
-                  color: Colors.grey[800],
-                  child: const Center(
-                    child: Icon(Icons.image_not_supported, color: Colors.grey, size: 50),
+          return GestureDetector(
+            onLongPress: () {
+              MediaDownloadService.showDownloadDialog(
+                context: context,
+                mediaUrl: imageUrl,
+                productTitle: widget.product['title'] ?? 'Product',
+                isVideo: false,
+                productId: widget.product['id'] ?? widget.product['productId'],
+              );
+            },
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.network(
+                    imageUrl,
+                    fit: BoxFit.cover,
+                    errorBuilder: (context, error, stackTrace) {
+                      return Container(
+                        color: Colors.grey[800],
+                        child: const Center(
+                          child: Icon(Icons.image_not_supported, color: Colors.grey, size: 50),
+                        ),
+                      );
+                    },
+                    loadingBuilder: (context, child, loadingProgress) {
+                      if (loadingProgress == null) return child;
+                      return const Center(
+                        child: CircularProgressIndicator(color: Colors.white),
+                      );
+                    },
                   ),
-                );
-              },
-              loadingBuilder: (context, child, loadingProgress) {
-                if (loadingProgress == null) return child;
-                return const Center(
-                  child: CircularProgressIndicator(color: Colors.white),
-                );
-              },
+                ),
+                // Download button
+                Positioned(
+                  bottom: 8,
+                  right: 8,
+                  child: GestureDetector(
+                    onTap: () {
+                      print('📥 Download button tapped for image: $imageUrl');
+                      MediaDownloadService.showDownloadDialog(
+                        context: context,
+                        mediaUrl: imageUrl,
+                        productTitle: widget.product['title'] ?? 'Product',
+                        isVideo: false,
+                        productId: widget.product['id'] ?? widget.product['productId'],
+                      );
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.red.withOpacity(0.9),
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withOpacity(0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.download,
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           );
         },
@@ -415,6 +516,7 @@ class _ProductPreviewScreenState extends State<ProductPreviewScreen> {
       builder: (context) => _VideoPlayerDialog(
         videoUrl: videoUrl,
         productTitle: widget.product['title'] ?? 'Product Video',
+        productId: widget.product['id'] ?? widget.product['productId'],
       ),
     );
   }
@@ -423,10 +525,12 @@ class _ProductPreviewScreenState extends State<ProductPreviewScreen> {
 class _VideoPlayerDialog extends StatefulWidget {
   final String videoUrl;
   final String productTitle;
+  final String? productId;
 
   const _VideoPlayerDialog({
     required this.videoUrl,
     required this.productTitle,
+    this.productId,
   });
 
   @override
@@ -497,6 +601,19 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                     ),
                   ),
                   IconButton(
+                    onPressed: () {
+                      MediaDownloadService.showDownloadDialog(
+                        context: context,
+                        mediaUrl: widget.videoUrl,
+                        productTitle: widget.productTitle,
+                        isVideo: true,
+                        productId: widget.productId,
+                      );
+                    },
+                    icon: const Icon(Icons.download, color: Colors.white),
+                    tooltip: 'Download video',
+                  ),
+                  IconButton(
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.close, color: Colors.white),
                   ),
@@ -532,6 +649,14 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                             }
                             setState(() {});
                           },
+                          onLongPress: () {
+                            MediaDownloadService.showDownloadDialog(
+                              context: context,
+                              mediaUrl: widget.videoUrl,
+                              productTitle: widget.productTitle,
+                              isVideo: true,
+                            );
+                          },
                           child: Stack(
                             fit: StackFit.expand,
                             children: [
@@ -555,6 +680,32 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
                                     ),
                                   ),
                                 ),
+                              // Download hint
+                              Positioned(
+                                bottom: 16,
+                                left: 16,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.black.withOpacity(0.6),
+                                    borderRadius: BorderRadius.circular(12),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.download, color: Colors.white, size: 14),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'Long press to download',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ),

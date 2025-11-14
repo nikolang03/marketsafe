@@ -1027,20 +1027,81 @@ class _PostDetailsScreenState extends State<PostDetailsScreen> {
       );
     } catch (e) {
       print('❌ Error creating product: $e');
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text("Failed to post product: ${e.toString()}"),
-          backgroundColor: Colors.red,
-          duration: const Duration(seconds: 5), // Make it stay longer
-          action: SnackBarAction(
-            label: 'Dismiss',
-            textColor: Colors.white,
-            onPressed: () {
-              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-            },
+      print('❌ Error type: ${e.runtimeType}');
+      print('❌ Error message: ${e.toString()}');
+      
+      // Check if it's a downloaded product exception
+      // Also check the error message in case the type check doesn't work
+      if (e is DownloadedProductException || 
+          (e.toString().contains('belongs to another user') || 
+           e.toString().contains('downloaded from MarketSafe'))) {
+        print('✅ Detected downloaded product exception, showing dialog...');
+        // Show dialog for downloaded products
+        if (mounted) {
+          await showDialog(
+            context: context,
+            barrierDismissible: false,
+            builder: (dialogContext) => AlertDialog(
+              backgroundColor: Colors.grey[900],
+              title: Row(
+                children: [
+                  Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      'Product from Another User',
+                      style: TextStyle(color: Colors.white, fontSize: 20),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Text(
+                    'This product belongs to another user and cannot be reposted.',
+                    style: TextStyle(color: Colors.white70, fontSize: 16),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'Please use your own original images or videos.',
+                    style: TextStyle(color: Colors.white54, fontSize: 14),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+              actionsAlignment: MainAxisAlignment.center,
+              actions: [
+                ElevatedButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.red,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 12),
+                  ),
+                  child: const Text('OK', style: TextStyle(color: Colors.white)),
+                ),
+              ],
+            ),
+          );
+        }
+      } else {
+        // Show SnackBar for other errors
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Failed to post product: ${e.toString()}"),
+            backgroundColor: Colors.red,
+            duration: const Duration(seconds: 5), // Make it stay longer
+            action: SnackBarAction(
+              label: 'Dismiss',
+              textColor: Colors.white,
+              onPressed: () {
+                ScaffoldMessenger.of(context).hideCurrentSnackBar();
+              },
+            ),
           ),
-        ),
-      );
+        );
+      }
     } finally {
       if (mounted) {
         setState(() {

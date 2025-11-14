@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'face_login_screen.dart';
 import 'signup_screen.dart';
 import '../services/network_service.dart';
+import '../widgets/terms_and_conditions_dialog.dart';
 
 class WelcomeScreen extends StatefulWidget {
   const WelcomeScreen({super.key});
@@ -284,27 +285,46 @@ class _WelcomeScreenState extends State<WelcomeScreen>
     );
   }
 
-  void _navigateToSignUp() {
-    Navigator.push(
-      context,
-      PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) =>
-            const SignUpScreen(),
-        transitionsBuilder: (context, animation, secondaryAnimation, child) {
-          return FadeTransition(
-            opacity: animation,
-            child: SlideTransition(
-              position: Tween<Offset>(
-                begin: const Offset(0.0, 0.1),
-                end: Offset.zero,
-              ).animate(animation),
-              child: child,
+  void _navigateToSignUp() async {
+    // Show terms and conditions first
+    final agreed = await TermsAndConditionsDialog.show(context);
+    
+    // Ensure context is still valid
+    if (!mounted) return;
+    
+    // Wait a bit longer to ensure dialog is fully dismissed
+    await Future.delayed(const Duration(milliseconds: 500));
+    
+    if (!mounted) return;
+    
+    if (agreed == true) {
+      // Navigate to signup screen with agreement status
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => SignUpScreen(
+              hasAgreedToTerms: true,
             ),
-          );
-        },
-        transitionDuration: const Duration(milliseconds: 400),
-      ),
-    );
+          ),
+        );
+      }
+    } else if (agreed == false) {
+      // User declined, show message
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('You must agree to the terms and conditions to use MarketSafe.'),
+            backgroundColor: Colors.red,
+            duration: Duration(seconds: 3),
+          ),
+        );
+      }
+    }
+  }
+
+  void _showTermsAndConditions() {
+    TermsAndConditionsDialog.show(context);
   }
 
   @override
@@ -531,7 +551,22 @@ class _WelcomeScreenState extends State<WelcomeScreen>
                         ),
                       ),
                     ),
-                    SizedBox(height: screenHeight * 0.06),
+                    SizedBox(height: screenHeight * 0.04),
+                    // Terms and Conditions Link
+                    GestureDetector(
+                      onTap: _showTermsAndConditions,
+                      child: Text(
+                        'By continuing, you agree to our Terms and Conditions',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white.withOpacity(0.7),
+                          fontSize: 12,
+                          decoration: TextDecoration.underline,
+                          decorationColor: Colors.white.withOpacity(0.7),
+                        ),
+                      ),
+                    ),
+                    SizedBox(height: screenHeight * 0.02),
                   ],
                 ),
               ),

@@ -643,7 +643,7 @@ Future<void> _processImageFromFile() async {
         _instructionColor == targetColor) {
       return;
     }
-
+    
     if (_instructionMessage == message && _instructionColor == targetColor) {
       return;
     }
@@ -830,7 +830,7 @@ Future<void> _processImageFromFile() async {
   bool _evaluateLiveness(Face face) {
     final now = DateTime.now();
     _livenessStartTime ??= now;
-
+    
     final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
     final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
     final yaw = face.headEulerAngleY ?? 0.0;
@@ -2398,20 +2398,20 @@ Future<void> _processImageFromFile() async {
             ),
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20.0, vertical: 10.0),
-              child: Column(
+            child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: [
+              children: [
                   // Logo
                   Image.asset(
                     'assets/logo.png', 
                     height: 50,
                   ),
                   
-                  const SizedBox(height: 20),
+                const SizedBox(height: 20),
                   
                   // Title
                   Text(
-                    "FACE LOGIN",
+                  "FACE LOGIN",
                     textAlign: TextAlign.center,
                     style: TextStyle(
                       fontWeight: FontWeight.bold, 
@@ -2419,16 +2419,16 @@ Future<void> _processImageFromFile() async {
                       color: _emailOrPhoneEntered ? Colors.black : Colors.white,
                       letterSpacing: 0.5,
                     ),
-                  ),
+                ),
                   
                   const SizedBox(height: 20),
-                    
-                  // Email/Phone input section (shown before camera)
-                  if (!_emailOrPhoneEntered) ...[
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 40),
-                      child: Column(
-                        children: [
+                
+                // Email/Phone input section (shown before camera)
+                if (!_emailOrPhoneEntered) ...[
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 40),
+                    child: Column(
+                      children: [
                         TextField(
                           controller: _emailOrPhoneController,
                           focusNode: _emailOrPhoneFocusNode,
@@ -2509,7 +2509,7 @@ Future<void> _processImageFromFile() async {
                           child: const Text(
                             "Don't have an account? Sign up",
                             style: TextStyle(
-                              color: Colors.red,
+                              color: Colors.white,
                               decoration: TextDecoration.underline,
                             ),
                           ),
@@ -2517,38 +2517,38 @@ Future<void> _processImageFromFile() async {
                       ],
                     ),
                   ),
-                  ] else ...[
-                    // Camera section (shown after email/phone is verified)
-                    // Show verified email/phone
-                    Container(
+                ] else ...[
+                  // Camera section (shown after email/phone is verified)
+                  // Show verified email/phone
+                  Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       margin: const EdgeInsets.symmetric(horizontal: 20),
-                      decoration: BoxDecoration(
-                        color: Colors.green[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.green[200]!),
-                      ),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
+                    decoration: BoxDecoration(
+                      color: Colors.green[50],
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.green[200]!),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
                           Icon(Icons.check_circle, color: Colors.green[700], size: 14),
                           const SizedBox(width: 6),
                           Flexible(
-                            child: Text(
-                              'Verified: $_verifiedEmailOrPhone',
-                              style: TextStyle(
+                          child: Text(
+                            'Verified: $_verifiedEmailOrPhone',
+                            style: TextStyle(
                                 color: Colors.green[800],
                                 fontSize: 11,
-                                fontWeight: FontWeight.w500,
-                              ),
-                              textAlign: TextAlign.center,
-                              overflow: TextOverflow.ellipsis,
+                              fontWeight: FontWeight.w500,
                             ),
+                            textAlign: TextAlign.center,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ],
-                      ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 20),
+                  ),
+                  const SizedBox(height: 20),
                     // Camera preview with elliptical shape and progress border (matching blink twice)
                     SizedBox(
                       width: 250,
@@ -2558,13 +2558,13 @@ Future<void> _processImageFromFile() async {
                         children: [
                           // Progress border
                           SizedBox(
-                            width: 250,
-                            height: 350,
-                            child: CircularProgressIndicator(
+                              width: 250,
+                              height: 350,
+                              child: CircularProgressIndicator(
                               value: normalizedProgress,
-                              strokeWidth: 8,
-                              backgroundColor: Colors.grey[300],
-                              valueColor: AlwaysStoppedAnimation<Color>(
+                                strokeWidth: 8,
+                                backgroundColor: Colors.grey[300],
+                                valueColor: AlwaysStoppedAnimation<Color>(
                                 _authenticationSuccess 
                                     ? Colors.green 
                                     : _isAuthenticating 
@@ -2572,40 +2572,47 @@ Future<void> _processImageFromFile() async {
                                         : _isFaceDetected 
                                             ? Colors.green 
                                             : Colors.red,
+                                ),
                               ),
                             ),
-                          ),
                           // Camera preview container
                           Container(
-                            width: 240,
-                            height: 340,
-                            decoration: BoxDecoration(
-                              borderRadius: BorderRadius.only(
-                                topLeft: Radius.elliptical(120, 170),
-                                topRight: Radius.elliptical(120, 170),
-                                bottomLeft: Radius.elliptical(120, 170),
-                                bottomRight: Radius.elliptical(120, 170),
+                              width: 240,
+                              height: 340,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.only(
+                                  topLeft: Radius.elliptical(120, 170),
+                                  topRight: Radius.elliptical(120, 170),
+                                  bottomLeft: Radius.elliptical(120, 170),
+                                  bottomRight: Radius.elliptical(120, 170),
+                                ),
                               ),
-                            ),
-                            child: ClipRRect(
-                              borderRadius: BorderRadius.only(
-                                topLeft: Radius.elliptical(120, 170),
-                                topRight: Radius.elliptical(120, 170),
-                                bottomLeft: Radius.elliptical(120, 170),
-                                bottomRight: Radius.elliptical(120, 170),
-                              ),
-                              child: _isCameraInitialized &&
-                                      _cameraController != null &&
-                                      _cameraController!.value.isInitialized
-                                  ? CameraPreview(_cameraController!)
-                                  : Container(
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.only(
+                                  topLeft: Radius.elliptical(120, 170),
+                                  topRight: Radius.elliptical(120, 170),
+                                  bottomLeft: Radius.elliptical(120, 170),
+                                  bottomRight: Radius.elliptical(120, 170),
+                                ),
+                                child: _isCameraInitialized &&
+                                        _cameraController != null &&
+                                        _cameraController!.value.isInitialized
+                                  ? FittedBox(
+                                      fit: BoxFit.cover,
+                                      child: SizedBox(
+                                        width: _cameraController!.value.previewSize?.height.toDouble() ?? 240,
+                                        height: _cameraController!.value.previewSize?.width.toDouble() ?? 340,
+                                        child: CameraPreview(_cameraController!),
+                                      ),
+                                    )
+                                    : Container(
                                       color: Colors.grey[200],
-                                      child: const Center(
+                                        child: const Center(
                                         child: CircularProgressIndicator(
                                           color: Colors.red,
                                         ),
                                       ),
-                                    ),
+                              ),
                             ),
                           ),
                         ],
@@ -2634,7 +2641,7 @@ Future<void> _processImageFromFile() async {
                     const SizedBox(height: 8),
                     
                     // Instruction text
-                    Text(
+                  Text(
                       _authenticationSuccess 
                           ? "Great job! Moving to next step..." 
                           : _isAuthenticating
@@ -2643,37 +2650,37 @@ Future<void> _processImageFromFile() async {
                                   ? "Hold steady..."
                                   : _instructionMessage,
                       textAlign: TextAlign.center,
-                      style: TextStyle(
+                    style: TextStyle(
                         fontSize: 13,
                         color: _isAuthenticating 
                             ? Colors.green 
                             : _instructionColor,
-                      ),
                     ),
+                  ),
                     
                     const SizedBox(height: 12),
                     // Combined buttons: Change Email/Phone and Sign up
                     Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        TextButton(
-                          onPressed: () {
-                            setState(() {
-                              _emailOrPhoneEntered = false;
-                              _verifiedEmailOrPhone = null;
-                              _emailOrPhoneController.clear();
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _emailOrPhoneEntered = false;
+                        _verifiedEmailOrPhone = null;
+                        _emailOrPhoneController.clear();
                               _authenticationSuccess = false;
-                              _stopCamera();
-                            });
-                          },
+                        _stopCamera();
+                      });
+                    },
                           child: Text(
-                            "Change Email/Phone",
-                            style: TextStyle(
+                      "Change Email/Phone",
+                      style: TextStyle(
                               color: _emailOrPhoneEntered ? Colors.grey[700] : Colors.grey,
-                              decoration: TextDecoration.underline,
-                            ),
-                          ),
-                        ),
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
                         Text(
                           " • ",
                           style: TextStyle(
@@ -2681,30 +2688,30 @@ Future<void> _processImageFromFile() async {
                             fontSize: 16,
                           ),
                         ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pushReplacement(
-                              context,
-                              MaterialPageRoute(builder: (_) => const SignUpScreen()),
-                            );
-                          },
-                          child: const Text(
+                  TextButton(
+                    onPressed: () {
+                      Navigator.pushReplacement(
+                        context,
+                        MaterialPageRoute(builder: (_) => const SignUpScreen()),
+                      );
+                    },
+                    child: const Text(
                             "Sign up",
-                            style: TextStyle(
-                              color: Colors.red,
-                              decoration: TextDecoration.underline,
-                            ),
-                          ),
-                        ),
+                      style: TextStyle(
+                        color: Colors.red,
+                        decoration: TextDecoration.underline,
+                      ),
+                    ),
+                  ),
                       ],
                     ),
                     const SizedBox(height: 8),
-                  ],
                 ],
+              ],
               ),
             ),
+            ),
           ),
-        ),
         ),
       ),
     );

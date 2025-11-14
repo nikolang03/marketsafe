@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'conversation_screen.dart';
+import 'user_profile_view_screen.dart' as profile_screen;
 import '../services/message_service.dart';
 
 class MessageListScreen extends StatefulWidget {
@@ -16,6 +16,7 @@ class _MessageListScreenState extends State<MessageListScreen> {
   List<Map<String, dynamic>> _conversations = [];
   bool _isLoading = true;
   String? _currentUserId;
+  String? _navigatingToConversationId; // Track which conversation is being opened
 
   @override
   void initState() {
@@ -75,76 +76,221 @@ class _MessageListScreenState extends State<MessageListScreen> {
     }
   }
 
-  Future<void> _showStartConversationDialog() async {
-    final TextEditingController emailController = TextEditingController();
+  Future<void> _showSearchDialog() async {
+    final TextEditingController searchController = TextEditingController();
+    List<Map<String, dynamic>> searchResults = [];
+    bool isSearching = false;
     
-    showDialog(
+    await showDialog(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: const Color(0xFF2C0000),
-          title: const Text(
-            'Start Conversation',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Enter the email of the user you want to chat with:',
-                style: TextStyle(color: Colors.white70),
+      builder: (BuildContext dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            // Debounce search
+            void performSearch(String query) async {
+              if (query.trim().isEmpty) {
+                setDialogState(() {
+                  searchResults = [];
+                  isSearching = false;
+                });
+                return;
+              }
+
+              setDialogState(() {
+                isSearching = true;
+              });
+
+              final results = await MessageService.searchUsers(
+                query,
+                _currentUserId ?? '',
+              );
+
+              if (mounted) {
+                setDialogState(() {
+                  searchResults = results;
+                  isSearching = false;
+                });
+              }
+            }
+
+            return Dialog(
+              backgroundColor: const Color(0xFF2C0000),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(16),
               ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: emailController,
-                style: const TextStyle(color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: 'user@example.com',
-                  hintStyle: const TextStyle(color: Colors.white54),
-                  filled: true,
-                  fillColor: Colors.white.withOpacity(0.1),
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.white24),
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: BorderSide(color: Colors.white24),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    borderSide: const BorderSide(color: Colors.red),
-                  ),
+              child: Container(
+                width: MediaQuery.of(context).size.width * 0.9,
+                height: MediaQuery.of(context).size.height * 0.7,
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  children: [
+                    // Title and close button
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Search Users',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white),
+                          onPressed: () => Navigator.pop(dialogContext),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    // Search field
+                    TextField(
+                      controller: searchController,
+                      autofocus: true,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        hintText: 'Search by name or username...',
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                        filled: true,
+                        fillColor: Colors.white.withOpacity(0.1),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.white24),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: Colors.white24),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: const BorderSide(color: Colors.red),
+                        ),
+                      ),
+                      onChanged: (value) {
+                        performSearch(value);
+                      },
+                    ),
+                    const SizedBox(height: 16),
+                    // Results list
+                    Expanded(
+                      child: isSearching
+                          ? const Center(
+                              child: CircularProgressIndicator(
+                                color: Colors.red,
+                              ),
+                            )
+                          : searchController.text.trim().isEmpty
+                              ? Center(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      Icon(
+                                        Icons.search,
+                                        size: 64,
+                                        color: Colors.white.withOpacity(0.3),
+                                      ),
+                                      const SizedBox(height: 16),
+                                      Text(
+                                        'Start typing to search users',
+                                        style: TextStyle(
+                                          color: Colors.white.withOpacity(0.5),
+                                          fontSize: 16,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                )
+                              : searchResults.isEmpty
+                                  ? Center(
+                                      child: Column(
+                                        mainAxisAlignment: MainAxisAlignment.center,
+                                        children: [
+                                          Icon(
+                                            Icons.person_off,
+                                            size: 64,
+                                            color: Colors.white.withOpacity(0.3),
+                                          ),
+                                          const SizedBox(height: 16),
+                                          Text(
+                                            'No users found',
+                                            style: TextStyle(
+                                              color: Colors.white.withOpacity(0.5),
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  : ListView.builder(
+                                      itemCount: searchResults.length,
+                                      itemBuilder: (context, index) {
+                                        final user = searchResults[index];
+                                        return ListTile(
+                                          contentPadding: const EdgeInsets.symmetric(
+                                            horizontal: 8,
+                                            vertical: 4,
+                                          ),
+                                          leading: CircleAvatar(
+                                            radius: 24,
+                                            backgroundColor: Colors.grey,
+                                            backgroundImage: user['profilePictureUrl'] != null &&
+                                                    user['profilePictureUrl'].toString().isNotEmpty
+                                                ? NetworkImage(user['profilePictureUrl'].toString())
+                                                : null,
+                                            child: user['profilePictureUrl'] == null ||
+                                                    user['profilePictureUrl'].toString().isEmpty
+                                                ? Text(
+                                                    (user['name']?.toString().substring(0, 1).toUpperCase() ?? 'U'),
+                                                    style: const TextStyle(
+                                                      color: Colors.white,
+                                                      fontWeight: FontWeight.bold,
+                                                    ),
+                                                  )
+                                                : null,
+                                          ),
+                                          title: Text(
+                                            user['name']?.toString() ?? 'Unknown User',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.w500,
+                                            ),
+                                          ),
+                                          subtitle: user['username'] != null &&
+                                                  user['username'].toString().isNotEmpty &&
+                                                  user['username'] != user['name']
+                                              ? Text(
+                                                  '@${user['username']}',
+                                                  style: TextStyle(
+                                                    color: Colors.white.withOpacity(0.7),
+                                                    fontSize: 12,
+                                                  ),
+                                                )
+                                              : null,
+                                          trailing: const Icon(
+                                            Icons.arrow_forward_ios,
+                                            color: Colors.white54,
+                                            size: 16,
+                                          ),
+                                          onTap: () async {
+                                            Navigator.pop(dialogContext);
+                                            await _startConversationWithUserId(user['id'].toString());
+                                          },
+                                        );
+                                      },
+                                    ),
+                    ),
+                  ],
                 ),
               ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white70)),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final email = emailController.text.trim();
-                if (email.isNotEmpty) {
-                  Navigator.pop(context);
-                  await _startConversationWithUser(email);
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-              ),
-              child: const Text('Start Chat'),
-            ),
-          ],
+            );
+          },
         );
       },
     );
   }
 
-  Future<void> _startConversationWithUser(String email) async {
+  Future<void> _startConversationWithUserId(String otherUserId) async {
     try {
       if (_currentUserId == null) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -156,27 +302,6 @@ class _MessageListScreenState extends State<MessageListScreen> {
         return;
       }
 
-      // Find user by email
-      final usersSnapshot = await FirebaseFirestore.instanceFor(
-        app: Firebase.app(),
-        databaseId: 'marketsafe',
-      ).collection('users')
-          .where('email', isEqualTo: email)
-          .limit(1)
-          .get();
-
-      if (usersSnapshot.docs.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('User not found with this email'),
-            backgroundColor: Colors.red,
-          ),
-        );
-        return;
-      }
-
-      final otherUserId = usersSnapshot.docs.first.id;
-      
       if (otherUserId == _currentUserId) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -257,9 +382,9 @@ class _MessageListScreenState extends State<MessageListScreen> {
                     style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.person_add, color: Colors.white),
-                    onPressed: _showStartConversationDialog,
-                    tooltip: 'Start Conversation',
+                    icon: const Icon(Icons.search, color: Colors.white),
+                    onPressed: _showSearchDialog,
+                    tooltip: 'Search Users',
                   ),
                 ],
               ),
@@ -326,51 +451,103 @@ class _MessageListScreenState extends State<MessageListScreen> {
                             final lastMessage = conversation['lastMessage'] as String;
                             final lastMessageAt = conversation['lastMessageAt'];
 
+                            final conversationId = conversation['conversationId'] as String;
+                            final isNavigating = _navigatingToConversationId == conversationId;
+                            
                             return ListTile(
                               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                              onTap: () async {
-                                // Mark messages as read when opening conversation
-                                await MessageService.markMessagesAsRead(
-                                  conversation['conversationId'],
-                                  _currentUserId!,
-                                );
+                              enabled: !isNavigating,
+                              onTap: isNavigating ? null : () async {
+                                // Prevent multiple taps
+                                if (_navigatingToConversationId != null) return;
+                                
+                                setState(() {
+                                  _navigatingToConversationId = conversationId;
+                                });
 
-                                // Go to conversation
-                                await Navigator.push(
-                                  context,
-                                  MaterialPageRoute(
-                                    builder: (_) => ConversationScreen(
-                                      conversationId: conversation['conversationId'],
-                                      otherUser: otherUser,
-                                      currentUserId: _currentUserId!,
+                                try {
+                                  // Mark messages as read when opening conversation
+                                  await MessageService.markMessagesAsRead(
+                                    conversationId,
+                                    _currentUserId!,
+                                  );
+
+                                  // Go to conversation
+                                  await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (_) => ConversationScreen(
+                                        conversationId: conversationId,
+                                        otherUser: otherUser,
+                                        currentUserId: _currentUserId!,
+                                      ),
                                     ),
-                                  ),
-                                );
+                                  );
 
-                                // Refresh conversations after returning
-                                _loadConversations();
+                                  // Refresh conversations after returning
+                                  _loadConversations();
+                                } finally {
+                                  // Reset navigation flag
+                                  if (mounted) {
+                                    setState(() {
+                                      _navigatingToConversationId = null;
+                                    });
+                                  }
+                                }
                               },
-                              leading: CircleAvatar(
-                                radius: 22,
-                                backgroundColor: Colors.grey,
-                                backgroundImage: otherUser['profilePictureUrl'] != null && 
-                                    otherUser['profilePictureUrl'].isNotEmpty
-                                    ? NetworkImage(otherUser['profilePictureUrl'])
-                                    : null,
-                                child: otherUser['profilePictureUrl'] == null || 
-                                    otherUser['profilePictureUrl'].isEmpty
-                                    ? Text(
-                                        otherUser['name']?.substring(0, 1).toUpperCase() ?? 'U',
-                                        style: const TextStyle(
-                                          color: Colors.white,
-                                          fontWeight: FontWeight.bold,
+                              leading: GestureDetector(
+                                behavior: HitTestBehavior.deferToChild,
+                                onTap: () {
+                                  final otherUserId = otherUser['id']?.toString();
+                                  if (otherUserId != null && otherUserId.isNotEmpty) {
+                                    Navigator.push(
+                                      context,
+                                      MaterialPageRoute(
+                                        builder: (context) => profile_screen.UserProfileViewScreen(
+                                          targetUserId: otherUserId,
+                                          targetUsername: otherUser['name']?.toString(),
                                         ),
-                                      )
-                                    : null,
+                                      ),
+                                    );
+                                  }
+                                },
+                                child: CircleAvatar(
+                                  radius: 22,
+                                  backgroundColor: Colors.grey,
+                                  backgroundImage: otherUser['profilePictureUrl'] != null && 
+                                      otherUser['profilePictureUrl'].isNotEmpty
+                                      ? NetworkImage(otherUser['profilePictureUrl'])
+                                      : null,
+                                  child: otherUser['profilePictureUrl'] == null || 
+                                      otherUser['profilePictureUrl'].isEmpty
+                                      ? Text(
+                                          otherUser['name']?.substring(0, 1).toUpperCase() ?? 'U',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        )
+                                      : null,
+                                ),
                               ),
                               title: Row(
                                 children: [
-                                  Expanded(
+                                  GestureDetector(
+                                    behavior: HitTestBehavior.deferToChild,
+                                    onTap: () {
+                                      final otherUserId = otherUser['id']?.toString();
+                                      if (otherUserId != null && otherUserId.isNotEmpty) {
+                                        Navigator.push(
+                                          context,
+                                          MaterialPageRoute(
+                                            builder: (context) => profile_screen.UserProfileViewScreen(
+                                              targetUserId: otherUserId,
+                                              targetUsername: otherUser['name']?.toString(),
+                                            ),
+                                          ),
+                                        );
+                                      }
+                                    },
                                     child: Text(
                                       otherUser['name'] ?? 'Unknown User',
                                       style: TextStyle(
@@ -379,6 +556,7 @@ class _MessageListScreenState extends State<MessageListScreen> {
                                       ),
                                     ),
                                   ),
+                                  const Spacer(),
                                   if (unreadCount > 0)
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),

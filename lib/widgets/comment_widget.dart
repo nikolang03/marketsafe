@@ -24,6 +24,10 @@ class _CommentWidgetState extends State<CommentWidget> {
   bool _isLikeLoading = false;
   bool _isReplyLoading = false;
   bool _showReplies = false;
+  bool _showReplyInput = false;
+  String? _replyingToUserId; // Track which user we're replying to
+  String? _replyingToUsername; // Track which username we're replying to
+  String? _replyingToCommentId; // Track which comment/reply ID we're replying to
   List<Map<String, dynamic>> _replies = [];
   final TextEditingController _replyController = TextEditingController();
 
@@ -99,15 +103,28 @@ class _CommentWidgetState extends State<CommentWidget> {
     });
 
     try {
+      // Use the stored comment ID if replying to a specific reply
+      // Otherwise, use the main comment's ID
+      final parentId = _replyingToCommentId ?? widget.comment['commentId'];
+      
       final success = await CommentService.addComment(
         productId: widget.productId,
         content: _replyController.text.trim(),
-        parentCommentId: widget.comment['commentId'],
+        parentCommentId: parentId,
       );
 
       if (success) {
         _replyController.clear();
-        await _loadReplies(); // Reload replies
+        // Ensure replies are shown after adding a reply
+        setState(() {
+          _showReplyInput = false;
+          _showReplies = true; // Ensure replies section is visible
+          _replyingToUserId = null;
+          _replyingToUsername = null;
+          _replyingToCommentId = null;
+        });
+        // Reload replies to get the newly added reply
+        await _loadReplies();
         if (widget.onReply != null) {
           widget.onReply!();
         }
@@ -256,75 +273,160 @@ class _CommentWidgetState extends State<CommentWidget> {
               // Like Button
               GestureDetector(
                 onTap: _toggleLike,
-                child: Row(
-                  children: [
-                    _isLikeLoading
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              color: Colors.red,
-                              strokeWidth: 2,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      _isLikeLoading
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(
+                                color: Colors.red,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : Icon(
+                              _isLiked ? Icons.favorite : Icons.favorite_border,
+                              color: _isLiked ? Colors.red : Colors.grey,
+                              size: 20,
                             ),
-                          )
-                        : Icon(
-                            _isLiked ? Icons.favorite : Icons.favorite_border,
-                            color: _isLiked ? Colors.red : Colors.grey,
-                            size: 20,
-                          ),
-                    const SizedBox(width: 4),
-                    Text(
-                      '${widget.comment['likes'] ?? 0}',
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
+                      const SizedBox(width: 4),
+                      Text(
+                        '${widget.comment['likes'] ?? 0}',
+                        style: const TextStyle(
+                          color: Colors.grey,
+                          fontSize: 12,
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
               
-              const SizedBox(width: 20),
+              const SizedBox(width: 12),
               
-              // Reply Button
+              // Reply Button - Always visible for all users
               GestureDetector(
                 onTap: () {
                   setState(() {
-                    _showReplies = !_showReplies;
+                    _showReplies = true;
+                    _showReplyInput = true;
+                    _replyingToUserId = widget.comment['userId'];
+                    _replyingToUsername = widget.comment['username'];
+                    _replyingToCommentId = widget.comment['commentId'];
                   });
                 },
-                child: Row(
-                  children: [
-                    const Icon(
-                      Icons.reply,
-                      color: Colors.grey,
-                      size: 20,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: Colors.grey.withOpacity(0.3),
+                      width: 1,
                     ),
-                    const SizedBox(width: 4),
-                    Text(
-                      'Reply (${_replies.length})',
-                      style: const TextStyle(
-                        color: Colors.grey,
-                        fontSize: 12,
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(
+                        Icons.reply,
+                        color: Colors.red,
+                        size: 18,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 4),
+                      Text(
+                        'Reply${_replies.isNotEmpty ? ' (${_replies.length})' : ''}',
+                        style: const TextStyle(
+                          color: Colors.red,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
+              
+              // Show/Hide Replies Toggle
+              if (_replies.isNotEmpty) ...[
+                const SizedBox(width: 12),
+                GestureDetector(
+                  onTap: () {
+                    setState(() {
+                      _showReplies = !_showReplies;
+                      if (!_showReplies) {
+                        _showReplyInput = false;
+                        _replyingToUserId = null;
+                        _replyingToUsername = null;
+                        _replyingToCommentId = null;
+                      }
+                    });
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.transparent,
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(
+                          _showReplies ? Icons.expand_less : Icons.expand_more,
+                          color: Colors.grey,
+                          size: 18,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          _showReplies ? 'Hide' : 'Show Replies',
+                          style: const TextStyle(
+                            color: Colors.grey,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ],
           ),
           
           // Reply Input
-          if (_showReplies) ...[
+          if (_showReplyInput) ...[
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
                 color: Colors.grey[800],
                 borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.red.withOpacity(0.3)),
               ),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
+                  // Show who you're replying to
+                  if (_replyingToUsername != null) ...[
+                    Row(
+                      children: [
+                        const Icon(Icons.reply, color: Colors.red, size: 16),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Replying to ${_replyingToUsername}',
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                  ],
                   TextField(
                     controller: _replyController,
                     style: const TextStyle(color: Colors.white),
@@ -335,6 +437,7 @@ class _CommentWidgetState extends State<CommentWidget> {
                     ),
                     maxLines: 3,
                     minLines: 1,
+                    autofocus: true,
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -343,7 +446,10 @@ class _CommentWidgetState extends State<CommentWidget> {
                       TextButton(
                         onPressed: () {
                           setState(() {
-                            _showReplies = false;
+                            _showReplyInput = false;
+                            _replyingToUserId = null;
+                            _replyingToUsername = null;
+                            _replyingToCommentId = null;
                           });
                           _replyController.clear();
                         },
@@ -372,22 +478,40 @@ class _CommentWidgetState extends State<CommentWidget> {
                 ],
               ),
             ),
-            
+          ],
+          
+          // Replies List
+          if (_showReplies && _replies.isNotEmpty) ...[
             const SizedBox(height: 12),
-            
-            // Replies List
-            if (_replies.isNotEmpty) ...[
-              const Text(
-                'Replies:',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
+            Container(
+              padding: const EdgeInsets.only(left: 16),
+              decoration: BoxDecoration(
+                border: Border(
+                  left: BorderSide(color: Colors.grey[700]!, width: 2),
                 ),
               ),
-              const SizedBox(height: 8),
-              ..._replies.map((reply) => _buildReplyWidget(reply)),
-            ],
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.reply, color: Colors.grey, size: 16),
+                      const SizedBox(width: 4),
+                      Text(
+                        '${_replies.length} ${_replies.length == 1 ? 'reply' : 'replies'}',
+                        style: const TextStyle(
+                          color: Colors.grey,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  ..._replies.map((reply) => _buildReplyWidget(reply)),
+                ],
+              ),
+            ),
           ],
         ],
       ),
@@ -395,13 +519,20 @@ class _CommentWidgetState extends State<CommentWidget> {
   }
 
   Widget _buildReplyWidget(Map<String, dynamic> reply) {
+    final isReplyingToThis = _replyingToUserId == reply['userId'] && 
+                             _replyingToUsername == reply['username'] &&
+                             _showReplyInput;
+    
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.grey[800],
+        color: isReplyingToThis ? Colors.grey[750] : Colors.grey[800],
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.grey[700]!),
+        border: Border.all(
+          color: isReplyingToThis ? Colors.red.withOpacity(0.5) : Colors.grey[700]!,
+          width: isReplyingToThis ? 2 : 1,
+        ),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -465,6 +596,50 @@ class _CommentWidgetState extends State<CommentWidget> {
                       ),
                     ),
                   ],
+                ),
+              ),
+              // Reply to this reply button - Always visible for all users
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _showReplies = true;
+                    _showReplyInput = true;
+                    _replyingToUserId = reply['userId'];
+                    _replyingToUsername = reply['username'];
+                    _replyingToCommentId = reply['commentId'];
+                    // Pre-fill with @username for better UX
+                    _replyController.text = '@${reply['username']} ';
+                  });
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(
+                      color: Colors.red.withOpacity(0.3),
+                      width: 1,
+                    ),
+                  ),
+                  child: const Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        Icons.reply,
+                        color: Colors.red,
+                        size: 14,
+                      ),
+                      SizedBox(width: 2),
+                      Text(
+                        'Reply',
+                        style: TextStyle(
+                          color: Colors.red,
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

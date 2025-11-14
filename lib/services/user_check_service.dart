@@ -90,6 +90,48 @@ class UserCheckService {
     return result;
   }
 
+  /// Check if username is already taken
+  /// [excludeUserId] - Optional user ID to exclude from check (useful when editing profile)
+  static Future<bool> isUsernameTaken(String username, {String? excludeUserId}) async {
+    try {
+      if (username.trim().isEmpty) {
+        return false; // Empty username is not considered "taken"
+      }
+
+      final usernameLower = username.trim().toLowerCase();
+      
+      // Check in Firestore users collection for users who have completed signup
+      final querySnapshot = await _firestore
+          .collection('users')
+          .where('username', isEqualTo: usernameLower)
+          .where('signupCompleted', isEqualTo: true)
+          .limit(1)
+          .get();
+      
+      // If no results, username is available
+      if (querySnapshot.docs.isEmpty) {
+        return false;
+      }
+      
+      // If excludeUserId is provided, check if the found user is the same user
+      if (excludeUserId != null) {
+        final foundUserId = querySnapshot.docs.first.id;
+        if (foundUserId == excludeUserId) {
+          // Same user, so username is not taken (they're keeping their own username)
+          return false;
+        }
+      }
+      
+      // Username is taken by another user
+      return true;
+    } catch (e) {
+      print('❌ Error checking username: $e');
+      // On error, return false to allow signup/edit to continue (fail open)
+      // This prevents blocking users due to network issues
+      return false;
+    }
+  }
+
   /// Check if user was previously rejected (for informational purposes)
   static Future<bool> wasUserPreviouslyRejected(String input) async {
     try {

@@ -3,9 +3,15 @@ import 'package:capstone2/services/user_check_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'otp_screen.dart';
+import '../widgets/terms_and_conditions_dialog.dart';
 
 class SignUpScreen extends StatefulWidget {
-  const SignUpScreen({super.key});
+  final bool? hasAgreedToTerms;
+  
+  const SignUpScreen({
+    super.key,
+    this.hasAgreedToTerms,
+  });
 
   @override
   State<SignUpScreen> createState() => _SignUpScreenState();
@@ -16,6 +22,14 @@ class _SignUpScreenState extends State<SignUpScreen> {
   bool _isLoading = false;
   String? _errorMessage;
   String? _inputType; // 'phone' or 'email'
+  late bool _hasAgreedToTerms;
+
+  @override
+  void initState() {
+    super.initState();
+    // If coming from welcome screen with agreement, set it to true
+    _hasAgreedToTerms = widget.hasAgreedToTerms ?? false;
+  }
 
   void _detectInputType(String input) {
     // Check if it's a Philippine phone number (starts with 09, 10 digits total)
@@ -37,6 +51,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   Future<void> _sendOtp() async {
+    // Check if user has agreed to terms
+    if (!_hasAgreedToTerms) {
+      final agreed = await TermsAndConditionsDialog.show(context);
+      if (agreed != true) {
+        setState(() => _errorMessage = 'You must agree to the Terms and Conditions to continue');
+        return;
+      }
+      setState(() => _hasAgreedToTerms = true);
+    }
+
     final input = _inputController.text.trim();
 
     if (input.isEmpty) {
@@ -162,29 +186,119 @@ class _SignUpScreenState extends State<SignUpScreen> {
                     ),
                     const SizedBox(height: 40),
 
+                    // Terms and Conditions Agreement
+                    if (!_hasAgreedToTerms)
+                      Container(
+                        padding: const EdgeInsets.all(16),
+                        margin: const EdgeInsets.only(bottom: 20),
+                        decoration: BoxDecoration(
+                          color: Colors.red.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.red.withOpacity(0.5)),
+                        ),
+                        child: Column(
+                          children: [
+                            const Row(
+                              children: [
+                                Icon(Icons.info_outline, color: Colors.red, size: 24),
+                                SizedBox(width: 8),
+                                Expanded(
+                                  child: Text(
+                                    'You must agree to the Terms and Conditions to continue',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 12),
+                            SizedBox(
+                              width: double.infinity,
+                              child: ElevatedButton(
+                                onPressed: () async {
+                                  final agreed = await TermsAndConditionsDialog.show(context);
+                                  if (agreed == true) {
+                                    setState(() {
+                                      _hasAgreedToTerms = true;
+                                    });
+                                  }
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.red,
+                                  padding: const EdgeInsets.symmetric(vertical: 12),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(8),
+                                  ),
+                                ),
+                                child: const Text(
+                                  'View Terms and Conditions',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
                     // Single input field for phone or email
                     TextField(
                       controller: _inputController,
+                      enabled: _hasAgreedToTerms,
                       keyboardType: TextInputType.text,
-                      decoration: const InputDecoration(
+                      decoration: InputDecoration(
                         labelText: "Phone Number or Email",
-                        hintText: "Enter 09123456789 or your@email.com",
-                        prefixIcon: Icon(Icons.person, color: Colors.white),
-                        labelStyle: TextStyle(color: Colors.white),
-                        hintStyle: TextStyle(color: Colors.grey),
-                        enabledBorder: UnderlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white),
+                        hintText: _hasAgreedToTerms 
+                            ? "Enter 09123456789 or your@email.com"
+                            : "Please agree to Terms and Conditions first",
+                        prefixIcon: const Icon(Icons.person, color: Colors.white),
+                        labelStyle: TextStyle(
+                          color: _hasAgreedToTerms ? Colors.white : Colors.white54,
                         ),
-                        focusedBorder: UnderlineInputBorder(
+                        hintStyle: TextStyle(
+                          color: _hasAgreedToTerms ? Colors.grey : Colors.white38,
+                        ),
+                        enabledBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(
+                            color: _hasAgreedToTerms ? Colors.white : Colors.white38,
+                          ),
+                        ),
+                        focusedBorder: const UnderlineInputBorder(
                           borderSide: BorderSide(color: Colors.red),
                         ),
+                        disabledBorder: UnderlineInputBorder(
+                          borderSide: BorderSide(color: Colors.white38),
+                        ),
                       ),
-                      style: const TextStyle(color: Colors.white),
+                      style: TextStyle(
+                        color: _hasAgreedToTerms ? Colors.white : Colors.white54,
+                      ),
+                      onTap: () {
+                        if (!_hasAgreedToTerms) {
+                          // Show terms dialog when user tries to interact with field
+                          TermsAndConditionsDialog.show(context).then((agreed) {
+                            if (agreed == true) {
+                              setState(() {
+                                _hasAgreedToTerms = true;
+                              });
+                            }
+                          });
+                        }
+                      },
                       onChanged: (value) {
                         // Clear error message when user starts typing
                         if (_errorMessage != null) {
                           setState(() => _errorMessage = null);
                         }
+                        // Detect input type as user types
+                        _detectInputType(value);
+                        setState(() {}); // Update UI to show detected type
                       },
                     ),
 

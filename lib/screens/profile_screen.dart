@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'dart:ui';
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -9,7 +10,10 @@ import 'dart:io';
 import 'simple_profile_photo_screen.dart';
 import '../models/product_model.dart';
 import '../services/product_service.dart';
+import '../services/follow_service.dart';
+import '../services/user_check_service.dart';
 import 'product_preview_screen.dart';
+import 'followers_following_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -26,12 +30,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
   String? profilePhotoUrl;
   List<Product> userProducts = [];
   bool isLoadingProducts = false;
+  Map<String, int> followCounts = {'followers': 0, 'following': 0};
 
   @override
   void initState() {
     super.initState();
     _loadUserData();
     _loadUserProducts();
+    _loadFollowCounts();
   }
 
   @override
@@ -41,6 +47,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _refreshUserData();
       _loadUserProducts();
+      _loadFollowCounts();
     });
   }
 
@@ -134,8 +141,34 @@ class _ProfileScreenState extends State<ProfileScreen> {
           print('🔄 Refreshed profile image path: $profileImagePath');
         });
       }
+      
+      // Also refresh products and follow counts when refreshing user data
+      await _loadUserProducts();
+      await _loadFollowCounts();
     } catch (e) {
       print('❌ Error refreshing user data: $e');
+    }
+  }
+
+  Future<void> _loadFollowCounts() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final userId = prefs.getString('signup_user_id') ?? 
+                    prefs.getString('current_user_id') ?? '';
+      
+      if (userId.isEmpty) return;
+
+      print('🔍 Loading follow counts for user: $userId');
+      
+      final counts = await FollowService.getFollowCounts(userId);
+      
+      setState(() {
+        followCounts = counts;
+      });
+      
+      print('✅ Loaded follow counts: ${counts['followers']} followers, ${counts['following']} following');
+    } catch (e) {
+      print('❌ Error loading follow counts: $e');
     }
   }
 
@@ -162,9 +195,9 @@ class _ProfileScreenState extends State<ProfileScreen> {
       // Fetch user's products
       final allProducts = await ProductService.getUserProducts(userId);
       
-      // Filter products: only show approved products in profile
+      // Filter products: only show approved and active products in profile
       final filteredProducts = allProducts.where((product) {
-        return product.moderationStatus == 'approved';
+        return product.moderationStatus == 'approved' && product.status == 'active';
       }).toList();
       
       setState(() {
@@ -588,11 +621,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
                                   Row(
                                     mainAxisAlignment: MainAxisAlignment.center,
                                     children: [
-                                      _buildStatItem(userProducts.length.toString(), "posts"),
+                                      _buildStatItem(userProducts.length.toString(), "posts", null),
                                       const SizedBox(width: 30),
-                                      _buildStatItem("0", "followers"),
+                                      _buildStatItem(followCounts['followers'].toString(), "followers", true),
                                       const SizedBox(width: 30),
-                                      _buildStatItem("0", "following"),
+                                      _buildStatItem(followCounts['following'].toString(), "following", false),
                                     ],
                                   ),
                                 ],
@@ -755,8 +788,8 @@ class _ProfileScreenState extends State<ProfileScreen> {
     return "@username";
   }
 
-  Widget _buildStatItem(String number, String label) {
-    return Column(
+  Widget _buildStatItem(String number, String label, bool? isFollowers) {
+    Widget content = Column(
       children: [
         Text(
           number,
@@ -775,6 +808,35 @@ class _ProfileScreenState extends State<ProfileScreen> {
         ),
       ],
     );
+
+    // Make followers and following clickable
+    if (isFollowers != null) {
+      return GestureDetector(
+        onTap: () async {
+          final prefs = await SharedPreferences.getInstance();
+          final userId = userData?['userId'] ?? 
+                         prefs.getString('signup_user_id') ?? 
+                         prefs.getString('current_user_id') ?? '';
+          final username = _getUsername();
+          
+          if (userId.isNotEmpty) {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (context) => FollowersFollowingScreen(
+                  userId: userId,
+                  username: username,
+                  isFollowers: isFollowers,
+                ),
+              ),
+            );
+          }
+        },
+        child: content,
+      );
+    }
+
+    return content;
   }
 
   Widget _buildActionButton(String text) {
@@ -834,12 +896,84 @@ class _ProfileScreenState extends State<ProfileScreen> {
       text: currentData['username'] ?? '',
     );
     String? selectedGender = currentData['gender']?.toString();
+    
+    // Username validation state
+    String? usernameErrorMessage;
+    bool isCheckingUsername = false;
+    Timer? usernameCheckTimer;
+    final originalUsername = (currentData['username'] ?? '').toString().trim();
 
     await showDialog(
       context: context,
       barrierColor: Colors.black.withOpacity(0.5),
       builder: (context) => StatefulBuilder(
-        builder: (context, setDialogState) => BackdropFilter(
+        builder: (context, setDialogState) {
+          // Username validation function with debouncing
+          void checkUsernameAvailability(String username) {
+            // Cancel previous timer
+            usernameCheckTimer?.cancel();
+            
+            final trimmedUsername = username.trim();
+            
+            // Check minimum length requirement first
+            if (trimmedUsername.isNotEmpty && trimmedUsername.length < 8) {
+              setDialogState(() {
+                usernameErrorMessage = 'Username must be at least 8 characters';
+                isCheckingUsername = false;
+              });
+              return;
+            }
+            
+            // Clear error if username is empty or same as original
+            if (trimmedUsername.isEmpty || trimmedUsername.toLowerCase() == originalUsername.toLowerCase()) {
+              setDialogState(() {
+                usernameErrorMessage = null;
+                isCheckingUsername = false;
+              });
+              return;
+            }
+            
+            // Debounce: wait 500ms after user stops typing
+            usernameCheckTimer = Timer(const Duration(milliseconds: 500), () async {
+              setDialogState(() {
+                isCheckingUsername = true;
+                usernameErrorMessage = null;
+              });
+              
+              try {
+                final isTaken = await UserCheckService.isUsernameTaken(
+                  trimmedUsername,
+                  excludeUserId: userId,
+                );
+                
+                if (context.mounted) {
+                  setDialogState(() {
+                    isCheckingUsername = false;
+                    if (isTaken) {
+                      usernameErrorMessage = 'Username already exists';
+                    } else {
+                      usernameErrorMessage = null;
+                    }
+                  });
+                }
+              } catch (e) {
+                print('❌ Error checking username: $e');
+                if (context.mounted) {
+                  setDialogState(() {
+                    isCheckingUsername = false;
+                    usernameErrorMessage = null; // Don't show error on network issues
+                  });
+                }
+              }
+            });
+          }
+          
+          // Add listener to username controller
+          usernameController.addListener(() {
+            checkUsernameAvailability(usernameController.text);
+          });
+          
+          return BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 5, sigmaY: 5),
           child: Dialog(
             backgroundColor: Colors.transparent,
@@ -891,10 +1025,50 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   ),
                   const SizedBox(height: 16),
                   
-                  // Username field
-                  _buildEditField(
-                    label: 'Username',
-                    controller: usernameController,
+                  // Username field with validation
+                  Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _buildEditField(
+                        label: 'Username',
+                        controller: usernameController,
+                      ),
+                      if (isCheckingUsername)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, left: 16),
+                          child: Row(
+                            children: [
+                              SizedBox(
+                                width: 12,
+                                height: 12,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.white.withOpacity(0.5),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                'Checking availability...',
+                                style: TextStyle(
+                                  color: Colors.white.withOpacity(0.5),
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                          ),
+                        )
+                      else if (usernameErrorMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4, left: 16),
+                          child: Text(
+                            usernameErrorMessage!,
+                            style: const TextStyle(
+                              color: Colors.red,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(height: 16),
                   
@@ -932,7 +1106,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   
                   // Save button
                   ElevatedButton(
-                    onPressed: () async {
+                    onPressed: (usernameErrorMessage != null || 
+                               isCheckingUsername || 
+                               usernameController.text.trim().length < 8) ? null : () async {
+                      usernameCheckTimer?.cancel(); // Cancel any pending checks
                       await _saveProfileChanges(
                         userId: userId,
                         firstName: firstNameController.text.trim(),
@@ -965,7 +1142,10 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   
                   // Cancel button
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () {
+                      usernameCheckTimer?.cancel(); // Clean up timer
+                      Navigator.pop(context);
+                    },
                     child: const Text(
                       'Cancel',
                       style: TextStyle(color: Colors.grey),
@@ -975,10 +1155,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
               ),
             ),
           ),
-          ),
         ),
-      ),
-    );
+          ); // BackdropFilter
+          }, // StatefulBuilder builder function
+        ), // StatefulBuilder
+    ); // showDialog
   }
 
   Widget _buildEditField({
@@ -1020,6 +1201,39 @@ class _ProfileScreenState extends State<ProfileScreen> {
         isLoading = true;
       });
 
+      // Check username uniqueness (excluding current user)
+      final usernameTrimmed = username.trim();
+      if (usernameTrimmed.isEmpty) {
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+          });
+          _showErrorDialog('Invalid Username', 'Username cannot be empty');
+        }
+        return;
+      }
+
+      if (usernameTrimmed.length < 8) {
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+          });
+          _showErrorDialog('Invalid Username', 'Username must be at least 8 characters long');
+        }
+        return;
+      }
+
+      final usernameTaken = await UserCheckService.isUsernameTaken(usernameTrimmed, excludeUserId: userId);
+      if (usernameTaken) {
+        if (mounted) {
+          setState(() {
+            isLoading = false;
+          });
+          _showErrorDialog('Username Taken', 'This username is already taken. Please choose a different username.');
+        }
+        return;
+      }
+
       final firestore = FirebaseFirestore.instanceFor(
         app: Firebase.app(),
         databaseId: 'marketsafe',
@@ -1030,7 +1244,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
         'firstName': firstName,
         'lastName': lastName,
         'fullName': '$firstName $lastName'.trim(),
-        'username': username.trim(),
+        'username': usernameTrimmed.toLowerCase(), // Store username in lowercase for consistency
         if (gender != null) 'gender': gender,
         'updatedAt': FieldValue.serverTimestamp(),
       });
@@ -1201,7 +1415,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
   Widget _buildProductGridItem(Product product) {
     return GestureDetector(
-      onTap: () {
+      onTap: () async {
+        // Get the current user ID from SharedPreferences
+        final prefs = await SharedPreferences.getInstance();
+        final currentUserId = prefs.getString('signup_user_id') ?? 
+                              prefs.getString('current_user_id') ?? '';
+        
         // Navigate to product preview screen
         final productMap = {
           'id': product.id,
@@ -1223,7 +1442,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
           MaterialPageRoute(
             builder: (context) => ProductPreviewScreen(
               product: productMap,
-              currentUserId: userData?['id'] ?? '',
+              currentUserId: currentUserId,
             ),
           ),
         );

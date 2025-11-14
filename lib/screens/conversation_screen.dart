@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/message_service.dart';
+import 'user_profile_view_screen.dart' as profile_screen;
 
 class ConversationScreen extends StatefulWidget {
   final String conversationId;
@@ -101,36 +102,70 @@ class _ConversationScreenState extends State<ConversationScreen> {
                     onPressed: () => Navigator.pop(context),
                   ),
                   const SizedBox(width: 8),
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: Colors.grey,
-                    backgroundImage: widget.otherUser['profilePictureUrl'] != null && 
-                        widget.otherUser['profilePictureUrl'].isNotEmpty
-                        ? NetworkImage(widget.otherUser['profilePictureUrl'])
-                        : null,
-                    child: widget.otherUser['profilePictureUrl'] == null || 
-                        widget.otherUser['profilePictureUrl'].isEmpty
-                        ? Text(
-                            widget.otherUser['name']?.substring(0, 1).toUpperCase() ?? 'U',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 16,
+                  GestureDetector(
+                    behavior: HitTestBehavior.deferToChild,
+                    onTap: () {
+                      final otherUserId = widget.otherUser['id']?.toString();
+                      if (otherUserId != null && otherUserId.isNotEmpty) {
+                        Navigator.push(
+                          context,
+                          MaterialPageRoute(
+                            builder: (context) => profile_screen.UserProfileViewScreen(
+                              targetUserId: otherUserId,
+                              targetUsername: widget.otherUser['name']?.toString(),
                             ),
-                          )
-                        : null,
+                          ),
+                        );
+                      }
+                    },
+                    child: CircleAvatar(
+                      radius: 18,
+                      backgroundColor: Colors.grey,
+                      backgroundImage: widget.otherUser['profilePictureUrl'] != null && 
+                          widget.otherUser['profilePictureUrl'].isNotEmpty
+                          ? NetworkImage(widget.otherUser['profilePictureUrl'])
+                          : null,
+                      child: widget.otherUser['profilePictureUrl'] == null || 
+                          widget.otherUser['profilePictureUrl'].isEmpty
+                          ? Text(
+                              widget.otherUser['name']?.substring(0, 1).toUpperCase() ?? 'U',
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 16,
+                              ),
+                            )
+                          : null,
+                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          widget.otherUser['name'] ?? 'Unknown User',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
+                        GestureDetector(
+                          behavior: HitTestBehavior.deferToChild,
+                          onTap: () {
+                            final otherUserId = widget.otherUser['id']?.toString();
+                            if (otherUserId != null && otherUserId.isNotEmpty) {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (context) => profile_screen.UserProfileViewScreen(
+                                    targetUserId: otherUserId,
+                                    targetUsername: widget.otherUser['name']?.toString(),
+                                  ),
+                                ),
+                              );
+                            }
+                          },
+                          child: Text(
+                            widget.otherUser['name'] ?? 'Unknown User',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
                           ),
                         ),
                         Text(

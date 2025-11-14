@@ -6,9 +6,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../services/follow_service.dart';
 import '../services/product_service.dart';
 import '../services/report_service.dart';
+import '../services/message_service.dart';
 import '../models/product_model.dart';
 import 'product_preview_screen.dart';
 import 'followers_following_screen.dart';
+import 'conversation_screen.dart';
 
 class UserProfileViewScreen extends StatefulWidget {
   final String targetUserId;
@@ -286,6 +288,98 @@ class _UserProfileViewScreenState extends State<UserProfileViewScreen> {
     );
   }
 
+  Widget _buildMessageButton() {
+    return GestureDetector(
+      onTap: _navigateToMessage,
+      child: Container(
+        height: 40,
+        decoration: BoxDecoration(
+          color: Colors.red,
+          border: Border.all(
+            color: Colors.red,
+            width: 1,
+          ),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: const Center(
+          child: Text(
+            'Message',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _navigateToMessage() async {
+    try {
+      // Get current user ID
+      final prefs = await SharedPreferences.getInstance();
+      final currentUserId = prefs.getString('signup_user_id') ?? 
+                            prefs.getString('current_user_id') ?? '';
+      
+      if (currentUserId.isEmpty) {
+        _showErrorSnackBar('Unable to identify current user');
+        return;
+      }
+
+      // Don't allow messaging yourself
+      if (currentUserId == widget.targetUserId) {
+        _showErrorSnackBar('You cannot message yourself');
+        return;
+      }
+
+      // Show loading indicator
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (context) => const Center(
+          child: CircularProgressIndicator(color: Colors.red),
+        ),
+      );
+
+      // Get or create conversation
+      final conversationId = await MessageService.getOrCreateConversation(
+        currentUserId,
+        widget.targetUserId,
+      );
+
+      // Get other user data
+      final otherUser = {
+        'userId': widget.targetUserId,
+        'username': _userData?['username'] ?? widget.targetUsername ?? 'User',
+        'profilePictureUrl': _userData?['profilePictureUrl'],
+        'email': _userData?['email'],
+      };
+
+      // Close loading dialog
+      if (mounted) Navigator.of(context).pop();
+
+      // Navigate to conversation screen
+      if (mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => ConversationScreen(
+              conversationId: conversationId,
+              otherUser: otherUser,
+              currentUserId: currentUserId,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      // Close loading dialog if still open
+      if (mounted) Navigator.of(context).pop();
+      print('❌ Error navigating to message: $e');
+      _showErrorSnackBar('Failed to open conversation: $e');
+    }
+  }
+
   Widget _buildProfileImage() {
     final profilePhotoUrl = _userData?['profilePictureUrl'];
     
@@ -422,8 +516,18 @@ class _UserProfileViewScreenState extends State<UserProfileViewScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 20),
-                                // Follow Button
-                                _buildFollowButton(),
+                                // Follow and Message Buttons
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: _buildFollowButton(),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: _buildMessageButton(),
+                                    ),
+                                  ],
+                                ),
                               ],
                             ),
                           ),

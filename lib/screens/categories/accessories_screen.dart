@@ -49,8 +49,8 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
   }
 
   void _showFilterDialog() {
-    final TextEditingController minController = TextEditingController(text: selectedMin.toInt().toString());
-    final TextEditingController maxController = TextEditingController(text: selectedMax.toInt().toString());
+    final TextEditingController minController = TextEditingController(text: selectedMin == minPrice ? '' : selectedMin.toInt().toString());
+    final TextEditingController maxController = TextEditingController(text: selectedMax == maxPrice ? '' : selectedMax.toInt().toString());
     
     showDialog(
       context: context,
@@ -81,7 +81,7 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: minController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
                           hintText: "0",
@@ -117,7 +117,7 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
                       const SizedBox(height: 8),
                       TextField(
                         controller: maxController,
-                        keyboardType: TextInputType.number,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
                         style: const TextStyle(color: Colors.white),
                         decoration: InputDecoration(
                           hintText: "100000",
@@ -148,21 +148,45 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
         actions: [
           TextButton(
             onPressed: () {
-              minController.text = minPrice.toInt().toString();
-              maxController.text = maxPrice.toInt().toString();
+              setState(() {
+                selectedMin = minPrice;
+                selectedMax = maxPrice;
+              });
+              Navigator.pop(context);
             },
             child: const Text("Reset", style: TextStyle(color: Colors.white70)),
           ),
           TextButton(
             onPressed: () {
-              final minValue = double.tryParse(minController.text) ?? minPrice;
-              final maxValue = double.tryParse(maxController.text) ?? maxPrice;
+              // Parse values, defaulting to min/max if empty or invalid
+              double? minValue = minController.text.trim().isEmpty 
+                  ? null 
+                  : double.tryParse(minController.text.trim());
+              double? maxValue = maxController.text.trim().isEmpty 
+                  ? null 
+                  : double.tryParse(maxController.text.trim());
+              
+              // Validate and set values
+              final newMin = minValue ?? minPrice;
+              final newMax = maxValue ?? maxPrice;
+              
+              // Ensure min <= max
+              if (newMin > newMax) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text("Minimum price must be less than or equal to maximum price"),
+                    backgroundColor: Colors.red,
+                  ),
+                );
+                return;
+              }
               
               setState(() {
-                selectedMin = minValue.clamp(minPrice, maxPrice);
-                selectedMax = maxValue.clamp(minPrice, maxPrice);
+                selectedMin = newMin.clamp(minPrice, maxPrice);
+                selectedMax = newMax.clamp(minPrice, maxPrice);
               });
               
+              print('✅ Filter applied: ₱${selectedMin.toInt()} - ₱${selectedMax.toInt()}');
               Navigator.pop(context);
             },
             child: const Text("Apply", style: TextStyle(color: Colors.red)),
@@ -195,7 +219,7 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
             onTap: () {
               Navigator.pop(context);
             },
-            child: Image.asset("assets/logo.png"),
+          child: Image.asset("assets/logo.png"),
           ),
         ),
         actions: [
@@ -215,79 +239,79 @@ class _AccessoriesScreenState extends State<AccessoriesScreen> {
                 child: SizedBox(
                   height: 600,
                   child: Center(
-                    child: CircularProgressIndicator(color: Colors.white),
+              child: CircularProgressIndicator(color: Colors.white),
                   ),
                 ),
-              )
-            : _error != null
+            )
+          : _error != null
                 ? SingleChildScrollView(
                     physics: const AlwaysScrollableScrollPhysics(),
                     child: SizedBox(
                       height: MediaQuery.of(context).size.height - 200,
                       child: Center(
-                        child: Column(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            const Icon(Icons.error, color: Colors.red, size: 50),
-                            const SizedBox(height: 16),
-                            const Text(
-                              'Error loading products',
-                              style: TextStyle(color: Colors.white, fontSize: 18),
-                            ),
-                            const SizedBox(height: 8),
-                            Text(
-                              _error!,
-                              style: const TextStyle(color: Colors.white70),
-                              textAlign: TextAlign.center,
-                            ),
-                            const SizedBox(height: 16),
-                            ElevatedButton(
-                              onPressed: _loadProducts,
-                              child: const Text('Retry'),
-                            ),
-                          ],
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      const Icon(Icons.error, color: Colors.red, size: 50),
+                      const SizedBox(height: 16),
+                      const Text(
+                        'Error loading products',
+                        style: TextStyle(color: Colors.white, fontSize: 18),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        _error!,
+                        style: const TextStyle(color: Colors.white70),
+                        textAlign: TextAlign.center,
+                      ),
+                      const SizedBox(height: 16),
+                      ElevatedButton(
+                        onPressed: _loadProducts,
+                        child: const Text('Retry'),
+                      ),
+                    ],
                         ),
                       ),
-                    ),
-                  )
-                : _products.isEmpty
+                  ),
+                )
+              : _products.isEmpty
                     ? SingleChildScrollView(
                         physics: const AlwaysScrollableScrollPhysics(),
                         child: SizedBox(
                           height: MediaQuery.of(context).size.height - 200,
                           child: const Center(
-                            child: Column(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(Icons.inventory_2_outlined, color: Colors.white70, size: 50),
-                                SizedBox(height: 16),
-                                Text(
-                                  'No accessories found',
-                                  style: TextStyle(color: Colors.white70, fontSize: 18),
-                                ),
-                                SizedBox(height: 8),
-                                Text(
-                                  'Be the first to post an accessory item!',
-                                  style: TextStyle(color: Colors.white54),
-                                ),
-                              ],
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.inventory_2_outlined, color: Colors.white70, size: 50),
+                          SizedBox(height: 16),
+                          Text(
+                            'No accessories found',
+                            style: TextStyle(color: Colors.white70, fontSize: 18),
+                          ),
+                          SizedBox(height: 8),
+                          Text(
+                            'Be the first to post an accessory item!',
+                            style: TextStyle(color: Colors.white54),
+                          ),
+                        ],
                             ),
                           ),
-                        ),
-                      )
-                    : ListView.builder(
-                        itemCount: _products.length,
-                        itemBuilder: (context, index) {
-                          final product = _products[index];
-                          return ProductCard(
-                            product: product,
-                            onRefresh: _loadProducts,
-                            selectedMin: selectedMin,
-                            selectedMax: selectedMax,
-                          );
-                        },
                       ),
-      ),
+                    )
+                  : ListView.builder(
+                      itemCount: _products.length,
+                      itemBuilder: (context, index) {
+                        final product = _products[index];
+                        return ProductCard(
+                          product: product,
+                          onRefresh: _loadProducts,
+                          selectedMin: selectedMin,
+                          selectedMax: selectedMax,
+                        );
+                      },
+                      ),
+                    ),
     );
   }
 }
