@@ -137,3 +137,8 @@ yarn-error.log*
 !/examples/**/.gitignore
 !/examples/**/.metadata
 !/examples/**/pubspec.yaml
+
+# APK files
+*.apk
+web/*.apk
+build/app/outputs/flutter-apk/*.apk
