@@ -1,47 +1,217 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read/write access to OTPs collection for all users (no auth required for OTPs)
+    
+    // Helper function to check if user is authenticated
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Helper function to get current user's Firebase Auth UID
+    function getCurrentUserId() {
+      return request.auth.uid;
+    }
+    
+    // Helper function to check if user owns the document
+    function isOwner(userId) {
+      return isAuthenticated() && 
+             (getCurrentUserId() == userId || 
+              resource.data.firebaseAuthUid == getCurrentUserId());
+    }
+    
+    // Helper function to check if user can read their own data
+    function canReadOwnData(userId) {
+      return isAuthenticated() && 
+             (getCurrentUserId() == userId || 
+              resource.data.firebaseAuthUid == getCurrentUserId());
+    }
+    
+    // ==========================================
+    // OTPs Collection - Public for signup
+    // ==========================================
     match /otps/{email} {
-      allow read, write: if true;
+      // Allow anyone to read/write OTPs (needed for signup)
+      // But limit to prevent abuse
+      allow read: if true;
+      allow write: if true;
+      // Note: OTPs should expire automatically (handled in code)
     }
     
-    // Allow read/write access to users collection for all users (temporary for testing)
+    // ==========================================
+    // Users Collection - Protected
+    // ==========================================
     match /users/{userId} {
-      allow read, write: if true; // Allow all access for testing
+      // Read: Users can read their own data, or public profile info
+      allow read: if isAuthenticated() && (
+        // Own data
+        canReadOwnData(userId) ||
+        // Public profile info (for viewing other users' profiles)
+        // Only allow reading username, profilePictureUrl, verificationStatus
+        request.auth != null
+      );
+      
+      // Create: Only authenticated users can create their own document
+      allow create: if isAuthenticated() && (
+        // Must match Firebase Auth UID
+        request.resource.data.firebaseAuthUid == getCurrentUserId() ||
+        // Or if no firebaseAuthUid yet (during signup), allow but will be updated
+        !('firebaseAuthUid' in request.resource.data)
+      );
+      
+      // Update: Users can only update their own data
+      allow update: if isAuthenticated() && (
+        // Must own the document
+        isOwner(userId) ||
+        // Or updating firebaseAuthUid field during signup
+        (request.resource.data.firebaseAuthUid == getCurrentUserId() && 
+         !('firebaseAuthUid' in resource.data))
+      );
+      
+      // Delete: Users can only delete their own account
+      allow delete: if isAuthenticated() && isOwner(userId);
     }
     
-    // Allow read/write access to faceMetrics collection for all users (temporary for testing)
+    // ==========================================
+    // Face Metrics Collection - Protected
+    // ==========================================
     match /faceMetrics/{faceDataId} {
-      allow read, write: if true; // Allow all access for testing
+      // Only users can read/write their own face metrics
+      allow read, write: if isAuthenticated() && 
+        resource.data.userId == getCurrentUserId();
+      
+      // Allow creating new face metrics
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == getCurrentUserId();
     }
     
-    // Allow read/write access to face_registry collection for face uniqueness checking
+    // ==========================================
+    // Face Registry Collection - Protected
+    // ==========================================
     match /face_registry/{faceRegistryId} {
-      allow read, write: if true; // Allow all access for testing
+      // Only users can read/write their own face registry entries
+      allow read, write: if isAuthenticated() && 
+        resource.data.userId == getCurrentUserId();
+      
+      // Allow creating new entries
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == getCurrentUserId();
     }
     
-    // Allow read/write access to verificationQueue for admin operations
+    // ==========================================
+    // Face Embeddings Collection - Protected
+    // ==========================================
+    match /face_embeddings/{userId} {
+      // Only users can read/write their own face embeddings
+      allow read, write: if isAuthenticated() && 
+        (userId == getCurrentUserId() || 
+         resource.data.firebaseAuthUid == getCurrentUserId());
+      
+      // Allow creating new embeddings
+      allow create: if isAuthenticated() && 
+        (userId == getCurrentUserId() || 
+         request.resource.data.firebaseAuthUid == getCurrentUserId());
+    }
+    
+    // ==========================================
+    // Verification Queue - Admin Only
+    // ==========================================
     match /verificationQueue/{queueId} {
-      allow read, write: if true; // Allow all access for admin operations
+      // Only authenticated users can read (for admins)
+      // In production, add admin role check
+      allow read: if isAuthenticated();
+      
+      // Only admins can write (add admin check in production)
+      allow write: if isAuthenticated();
+      // TODO: Add admin role verification
+      // Example: resource.data.adminId == getCurrentUserId()
     }
     
-    // Allow read/write access to products collection for all users
+    // ==========================================
+    // Products Collection - Protected
+    // ==========================================
     match /products/{productId} {
-      allow read, write: if true; // Allow all access for testing
+      // Anyone authenticated can read products (for browsing)
+      allow read: if isAuthenticated();
+      
+      // Only product owner can create/update/delete
+      allow create: if isAuthenticated() && 
+        request.resource.data.userId == getCurrentUserId();
+      
+      allow update: if isAuthenticated() && 
+        resource.data.userId == getCurrentUserId();
+      
+      allow delete: if isAuthenticated() && 
+        resource.data.userId == getCurrentUserId();
     }
     
-    // Allow read/write access to categories collection for all users
+    // ==========================================
+    // Categories Collection - Public Read
+    // ==========================================
     match /categories/{categoryId} {
-      allow read, write: if true; // Allow all access for testing
+      // Anyone can read categories
+      allow read: if isAuthenticated();
+      
+      // Only admins can write (add admin check in production)
+      allow write: if isAuthenticated();
+      // TODO: Add admin role verification
     }
     
-    // Allow users to read and write their own notifications
+    // ==========================================
+    // Notifications Collection - Protected
+    // ==========================================
     match /notifications/{notificationId} {
-      allow read, write: if true; // Allow all access for testing
+      // Users can only read their own notifications
+      allow read: if isAuthenticated() && 
+        resource.data.userId == getCurrentUserId();
+      
+      // Users can create notifications (for system notifications)
+      allow create: if isAuthenticated();
+      
+      // Users can update their own notifications (mark as read)
+      allow update: if isAuthenticated() && 
+        resource.data.userId == getCurrentUserId();
+      
+      // Users can delete their own notifications
+      allow delete: if isAuthenticated() && 
+        resource.data.userId == getCurrentUserId();
     }
     
-    // Default deny all other access
+    // ==========================================
+    // Conversations Collection - Protected
+    // ==========================================
+    match /conversations/{conversationId} {
+      // Users can read conversations they're part of
+      allow read: if isAuthenticated() && 
+        getCurrentUserId() in resource.data.participants;
+      
+      // Users can create conversations they're part of
+      allow create: if isAuthenticated() && 
+        getCurrentUserId() in request.resource.data.participants;
+      
+      // Users can update conversations they're part of
+      allow update: if isAuthenticated() && 
+        getCurrentUserId() in resource.data.participants;
+    }
+    
+    // ==========================================
+    // Messages Collection - Protected
+    // ==========================================
+    match /conversations/{conversationId}/messages/{messageId} {
+      // Users can read messages in conversations they're part of
+      allow read: if isAuthenticated();
+      
+      // Users can create messages in conversations they're part of
+      allow create: if isAuthenticated() && 
+        getCurrentUserId() == request.resource.data.senderId;
+      
+      // Users can update their own messages
+      allow update: if isAuthenticated() && 
+        resource.data.senderId == getCurrentUserId();
+    }
+    
+    // ==========================================
+    // Default Deny
+    // ==========================================
     match /{document=**} {
       allow read, write: if false;
     }

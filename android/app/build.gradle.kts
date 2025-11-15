@@ -49,6 +49,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            // Ensure APK is properly aligned and signed
+            isDebuggable = false
         }
     }
     

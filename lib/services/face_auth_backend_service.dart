@@ -310,6 +310,66 @@ class FaceAuthBackendService {
     }
   }
 
+  /// Delete a person from Luxand by UUID or email
+  /// Returns: { ok: bool, message: string?, error: string? }
+  Future<Map<String, dynamic>> deletePerson({
+    String? email,
+    String? uuid,
+  }) async {
+    try {
+      if (email == null && uuid == null) {
+        return {
+          'ok': false,
+          'error': 'Either email or uuid must be provided',
+        };
+      }
+      
+      final uri = Uri.parse('$backendUrl/api/delete-person');
+      
+      print('🔍 Deleting person from backend: $backendUrl/api/delete-person');
+      
+      final requestBody = <String, dynamic>{};
+      if (email != null) requestBody['email'] = email;
+      if (uuid != null) requestBody['uuid'] = uuid;
+      
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
+      ).timeout(
+        const Duration(seconds: 30),
+        onTimeout: () {
+          throw TimeoutException('Connection timeout after 30 seconds');
+        },
+      );
+
+      if (response.statusCode ~/ 100 != 2) {
+        final errorBody = jsonDecode(response.body) as Map<String, dynamic>?;
+        return {
+          'ok': false,
+          'error': errorBody?['error']?.toString() ?? 'Delete failed',
+        };
+      }
+
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final bool ok = body['ok'] == true;
+
+      return {
+        'ok': ok,
+        'success': ok,
+        'message': body['message']?.toString(),
+        'error': ok ? null : (body['error']?.toString() ?? 'Delete failed'),
+      };
+    } catch (e) {
+      print('❌ Backend delete person error: $e');
+      return {
+        'ok': false,
+        'success': false,
+        'error': 'Delete person error: $e',
+      };
+    }
+  }
+
   /// Health check
   Future<bool> healthCheck() async {
     try {

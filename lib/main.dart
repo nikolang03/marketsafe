@@ -74,7 +74,7 @@ Future<void> main() async {
 
       // Force clear lockout for testing
       debugPrint('🔄 Force clearing lockout for testing...');
-      LockoutService.forceClearLockout();
+      await LockoutService.forceClearLockout();
       debugPrint('✅ Lockout force cleared successfully');
       
     }
@@ -92,6 +92,9 @@ Future<void> main() async {
   // Start network monitoring
   NetworkService.startMonitoring();
   
+  // Setup lifecycle observer for network monitoring
+  NetworkService.setupLifecycleObserver();
+  
   runApp(const MarketSafeApp());
 }
 
@@ -105,10 +108,11 @@ class MarketSafeApp extends StatelessWidget {
       debugShowCheckedModeBanner: false,
       // Performance optimizations
       builder: (context, child) {
-        // Enable performance overlay only in debug mode
-        if (kDebugMode) {
-          return child!;
-        }
+        // Set global context for network monitoring (update on every build to handle navigation)
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          NetworkService.setGlobalContext(context);
+        });
+        
         return child!;
       },
       home: FutureBuilder(

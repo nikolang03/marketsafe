@@ -22,16 +22,12 @@ class ImageCropper extends StatefulWidget {
 
 class _ImageCropperState extends State<ImageCropper> {
   late TransformationController _transformationController;
-  late ImageProvider _imageProvider;
   double _scale = 1.0;
-  Offset _offset = Offset.zero;
-  bool _isDragging = false;
 
   @override
   void initState() {
     super.initState();
     _transformationController = TransformationController();
-    _imageProvider = FileImage(widget.imageFile);
   }
 
   @override
@@ -41,37 +37,28 @@ class _ImageCropperState extends State<ImageCropper> {
   }
 
   void _onInteractionStart(ScaleStartDetails details) {
-    setState(() {
-      _isDragging = true;
-    });
+    // Interaction started
   }
 
   void _onInteractionUpdate(ScaleUpdateDetails details) {
     setState(() {
       _scale = (_scale * details.scale).clamp(0.5, 5.0);
-      _offset += details.focalPointDelta;
     });
   }
 
   void _onInteractionEnd(ScaleEndDetails details) {
-    setState(() {
-      _isDragging = false;
-    });
+    // Interaction ended
   }
 
   void _resetCrop() {
     setState(() {
       _scale = 1.0;
-      _offset = Offset.zero;
     });
     _transformationController.value = Matrix4.identity();
   }
 
   void _applyCrop() async {
     try {
-      // Get the current transformation matrix
-      final Matrix4 matrix = _transformationController.value;
-      
       // For now, we'll just save the original image
       // In a real implementation, you'd apply the crop transformation
       if (widget.onCropSave != null) {

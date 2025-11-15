@@ -31,12 +31,23 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
       List.generate(6, (_) => TextEditingController());
   final List<FocusNode> _focusNodes = List.generate(6, (_) => FocusNode());
   bool _isLoading = false;
+  bool _isInitializing = true; // Track if screen is initializing after returning from Chrome
 
   @override
   void initState() {
     super.initState();
     _currentVerificationId = widget.verificationId;
     _startTimer();
+    
+    // Hide loading after a short delay to allow screen to render
+    // This handles the case where there's a delay after returning from Chrome
+    Future.delayed(const Duration(milliseconds: 500), () {
+      if (mounted) {
+        setState(() {
+          _isInitializing = false;
+        });
+      }
+    });
   }
 
   void _startTimer() {
@@ -352,107 +363,135 @@ class _OtpVerificationScreenState extends State<OtpVerificationScreen> {
     return Scaffold(
       backgroundColor: const Color(0xFF2C0000),
       resizeToAvoidBottomInset: true,
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(20.0),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Spacer(flex: 2),
-              Image.asset('assets/logo.png', height: 80),
-              const SizedBox(height: 20),
-                
-              const Text(
-                "We sent a 6 digit verification code to",
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white, fontSize: 14),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                widget.phoneNumber,
-                textAlign: TextAlign.center,
-                style: const TextStyle(
-                  color: Colors.white, 
-                  fontWeight: FontWeight.bold,
-                  fontSize: 16,
-                ),
-              ),
-              
-              const SizedBox(height: 30),
-              
-              const Text(
-                "Enter OTP", 
-                style: TextStyle(color: Colors.white, fontSize: 16),
-              ),
-              
-              const SizedBox(height: 15),
-              
-              // OTP Input Boxes
-              Row(
+      body: Stack(
+        children: [
+          SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(20.0),
+              child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(
-                    6,
-                    (index) => Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 4.0),
-                          child: _buildOtpBox(index),
-                        )),
-              ),
-              
-              const SizedBox(height: 15),
-              
-              GestureDetector(
-                onTap: _secondsRemaining == 0 ? _resendOtp : null,
-                child: Text(
-                  _secondsRemaining == 0
-                      ? "Resend"
-                      : "Resend ${_secondsRemaining}s",
-                  style: TextStyle(
-                    color: _secondsRemaining == 0 ? Colors.redAccent : Colors.grey,
-                    decoration: _secondsRemaining == 0
-                        ? TextDecoration.underline
-                        : null,
-                    fontSize: 14,
+                children: [
+                  const Spacer(flex: 2),
+                  Image.asset('assets/logo.png', height: 80),
+                  const SizedBox(height: 20),
+                    
+                  const Text(
+                    "We sent a 6 digit verification code to",
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white, fontSize: 14),
                   ),
-                ),
-              ),
-              
-              const SizedBox(height: 30),
-                
-              SizedBox(
-                width: 180,
-                height: 40,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _verifyOtp,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                  const SizedBox(height: 5),
+                  Text(
+                    widget.phoneNumber,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white, 
+                      fontWeight: FontWeight.bold,
+                      fontSize: 16,
                     ),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 18,
-                          width: 18,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 2,
-                          ),
-                        )
-                      : const Text(
-                          "VERIFY",
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 14,
-                            fontWeight: FontWeight.w500,
-                          ),
+                  
+                  const SizedBox(height: 30),
+                  
+                  const Text(
+                    "Enter OTP", 
+                    style: TextStyle(color: Colors.white, fontSize: 16),
+                  ),
+                  
+                  const SizedBox(height: 15),
+                  
+                  // OTP Input Boxes
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: List.generate(
+                        6,
+                        (index) => Padding(
+                              padding: const EdgeInsets.symmetric(horizontal: 4.0),
+                              child: _buildOtpBox(index),
+                            )),
+                  ),
+                  
+                  const SizedBox(height: 15),
+                  
+                  GestureDetector(
+                    onTap: _secondsRemaining == 0 ? _resendOtp : null,
+                    child: Text(
+                      _secondsRemaining == 0
+                          ? "Resend"
+                          : "Resend ${_secondsRemaining}s",
+                      style: TextStyle(
+                        color: _secondsRemaining == 0 ? Colors.redAccent : Colors.grey,
+                        decoration: _secondsRemaining == 0
+                            ? TextDecoration.underline
+                            : null,
+                        fontSize: 14,
+                      ),
+                    ),
+                  ),
+                  
+                  const SizedBox(height: 30),
+                    
+                  SizedBox(
+                    width: 180,
+                    height: 40,
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _verifyOtp,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.red,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(20),
                         ),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 18,
+                              width: 18,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 2,
+                              ),
+                            )
+                          : const Text(
+                              "VERIFY",
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                    ),
+                  ),
+                  
+                  const Spacer(flex: 3),
+                ],
+              ),
+            ),
+          ),
+          // Loading overlay when initializing (after returning from Chrome)
+          if (_isInitializing)
+            Container(
+              color: Colors.black.withOpacity(0.7),
+              child: const Center(
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    CircularProgressIndicator(
+                      color: Colors.red,
+                      strokeWidth: 3,
+                    ),
+                    SizedBox(height: 20),
+                    Text(
+                      "Preparing OTP screen...",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              
-              const Spacer(flex: 3),
-            ],
-          ),
-        ),
+            ),
+        ],
       ),
     );
   }

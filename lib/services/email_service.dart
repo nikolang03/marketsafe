@@ -7,10 +7,17 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 
 class EmailService {
-  // Gmail SMTP configuration
-  static const String _gmailUser = 'kincunanan33@gmail.com'; // Your Gmail
-  static const String _gmailPassword =
-      'urif udrb lkuq xkgi'; // Your App Password
+  // Gmail SMTP configuration - using environment variables for security
+  // Get from environment variables (fallback to hardcoded for backward compatibility)
+  static String get _gmailUser {
+    const envUser = String.fromEnvironment('GMAIL_USER');
+    return envUser.isNotEmpty ? envUser : 'kincunanan33@gmail.com';
+  }
+  
+  static String get _gmailPassword {
+    const envPassword = String.fromEnvironment('GMAIL_PASSWORD');
+    return envPassword.isNotEmpty ? envPassword : 'urif udrb lkuq xkgi';
+  }
 
   // OTP storage key for SharedPreferences
   static const String _otpStorageKey = 'otp_storage';

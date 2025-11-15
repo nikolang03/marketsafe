@@ -1054,67 +1054,117 @@ app.post('/api/delete-persons-by-email', async (req, res) => {
 // DELETE USER ENDPOINT (with automatic Luxand cleanup)
 // ==========================================
 // POST /api/delete-user
-// Body: { email: string, userId?: string }
+// Body: { email?: string, phoneNumber?: string, userId?: string, luxandUuid?: string }
 // Returns: { ok: bool, message: string, luxandDeleted: number }
 // This endpoint should be called when deleting a user from Firestore
 // It automatically deletes all faces for that user from Luxand
 app.post('/api/delete-user', async (req, res) => {
   try {
-    const { email, userId } = req.body;
+    const { email, phoneNumber, userId, luxandUuid } = req.body;
 
-    if (!email || typeof email !== 'string' || email.trim().length === 0) {
+    // At least one identifier must be provided
+    if ((!email || typeof email !== 'string' || email.trim().length === 0) &&
+        (!phoneNumber || typeof phoneNumber !== 'string' || phoneNumber.trim().length === 0) &&
+        (!luxandUuid || typeof luxandUuid !== 'string' || luxandUuid.trim().length === 0)) {
       return res.status(400).json({
         ok: false,
-        error: 'Email is required'
+        error: 'At least one of email, phoneNumber, or luxandUuid is required'
       });
     }
 
-    const emailToFind = email.toLowerCase().trim();
-    console.log(`🗑️ Deleting user: ${emailToFind}${userId ? ` (userId: ${userId})` : ''}`);
-    console.log(`🔍 Searching for all faces in Luxand for this email...`);
+    const emailToFind = email ? email.toLowerCase().trim() : null;
+    const phoneToFind = phoneNumber ? phoneNumber.trim().replace(/\s+/g, '') : null;
+    const uuidToDelete = luxandUuid ? luxandUuid.trim() : null;
     
-    // Get all persons from Luxand
-    const allPersons = await listPersons();
-    const persons = allPersons.persons || allPersons.data || allPersons || [];
-    
-    // Filter persons by email
-    const matchingPersons = persons.filter(person => 
-      (person.name || '').toLowerCase().trim() === emailToFind
-    );
+    console.log(`🗑️ Deleting user: ${emailToFind || phoneToFind || 'by UUID'}${userId ? ` (userId: ${userId})` : ''}`);
+    console.log(`🔍 Searching for all faces in Luxand...`);
     
     let deletedCount = 0;
     const deletedUuids = [];
     const errors = [];
+    const searchMethods = [];
     
-    if (matchingPersons.length > 0) {
-      console.log(`📋 Found ${matchingPersons.length} face(s) in Luxand for ${emailToFind}`);
-      
-      // Delete all matching persons from Luxand
-      for (const person of matchingPersons) {
-        const personUuid = person.uuid || person.id;
-        if (personUuid) {
-          try {
-            await deletePerson(personUuid);
-            deletedUuids.push(personUuid);
-            deletedCount++;
-            console.log(`✅ Deleted face from Luxand: ${personUuid}`);
-          } catch (deleteError) {
-            errors.push({ uuid: personUuid, error: deleteError.message });
-            console.error(`❌ Failed to delete face ${personUuid}: ${deleteError.message}`);
-          }
-        }
+    // Method 1: Direct UUID deletion (fastest and most reliable)
+    if (uuidToDelete) {
+      searchMethods.push('direct_uuid');
+      try {
+        console.log(`🔍 Method 1: Deleting by direct UUID: ${uuidToDelete}`);
+        await deletePerson(uuidToDelete);
+        deletedUuids.push(uuidToDelete);
+        deletedCount++;
+        console.log(`✅ Deleted face from Luxand by UUID: ${uuidToDelete}`);
+      } catch (deleteError) {
+        errors.push({ uuid: uuidToDelete, method: 'direct_uuid', error: deleteError.message });
+        console.error(`❌ Failed to delete face by UUID ${uuidToDelete}: ${deleteError.message}`);
       }
-    } else {
-      console.log(`ℹ️ No faces found in Luxand for ${emailToFind}`);
+    }
+    
+    // Method 2: Search by email or phone number
+    if (emailToFind || phoneToFind) {
+      searchMethods.push('search_by_identifier');
+      try {
+        // Get all persons from Luxand
+        const allPersons = await listPersons();
+        const persons = allPersons.persons || allPersons.data || allPersons || [];
+        
+        // Filter persons by email or phone number
+        const matchingPersons = persons.filter(person => {
+          const personName = (person.name || '').toLowerCase().trim();
+          const personNameClean = personName.replace(/\s+/g, '');
+          
+          // Match by email
+          if (emailToFind && personName === emailToFind) {
+            return true;
+          }
+          
+          // Match by phone number (handle various formats)
+          if (phoneToFind) {
+            const phoneClean = phoneToFind.replace(/[^\d+]/g, '');
+            const personNamePhoneOnly = personNameClean.replace(/[^\d+]/g, '');
+            if (personNamePhoneOnly === phoneClean || personNameClean === phoneToFind) {
+              return true;
+            }
+          }
+          
+          return false;
+        });
+        
+        if (matchingPersons.length > 0) {
+          console.log(`📋 Found ${matchingPersons.length} face(s) in Luxand for ${emailToFind || phoneToFind}`);
+          
+          // Delete all matching persons from Luxand
+          for (const person of matchingPersons) {
+            const personUuid = person.uuid || person.id;
+            if (personUuid && !deletedUuids.includes(personUuid)) { // Avoid duplicate deletion
+              try {
+                await deletePerson(personUuid);
+                deletedUuids.push(personUuid);
+                deletedCount++;
+                console.log(`✅ Deleted face from Luxand: ${personUuid}`);
+              } catch (deleteError) {
+                errors.push({ uuid: personUuid, method: 'search_by_identifier', error: deleteError.message });
+                console.error(`❌ Failed to delete face ${personUuid}: ${deleteError.message}`);
+              }
+            }
+          }
+        } else {
+          console.log(`ℹ️ No faces found in Luxand for ${emailToFind || phoneToFind}`);
+        }
+      } catch (searchError) {
+        errors.push({ method: 'search_by_identifier', error: searchError.message });
+        console.error(`❌ Error searching Luxand: ${searchError.message}`);
+      }
     }
     
     return res.json({
       ok: true,
       message: `User deletion processed. ${deletedCount} face(s) deleted from Luxand.`,
-      email: emailToFind,
+      email: emailToFind || null,
+      phoneNumber: phoneToFind || null,
       userId: userId || null,
+      luxandUuid: uuidToDelete || null,
       luxandDeleted: deletedCount,
-      totalFound: matchingPersons.length,
+      searchMethods: searchMethods,
       uuids: deletedUuids,
       errors: errors.length > 0 ? errors : undefined,
       note: 'This endpoint only deletes from Luxand. You must still delete the user from Firestore separately.'

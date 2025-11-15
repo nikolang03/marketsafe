@@ -29,8 +29,6 @@ class FaceRecognitionService {
 
   // Enhanced security thresholds for mathematical face recognition
   static const double _similarityThreshold = 0.85; // 85% similarity required for security
-  static const double _uniquenessThreshold = 0.30; // 30% difference between best and second-best
-  static const double _maxSecondBestSimilarity = 0.50; // Second-best must be below 50%
 
   /// Recognize a user by their face during login
   /// Returns user ID if match found, null otherwise
@@ -162,69 +160,6 @@ class FaceRecognitionService {
     }
     return sqrt(sum);
   }
-
-  /// Get all stored face embeddings from Firebase (legacy helper)
-  static Future<List<Map<String, dynamic>>> _getAllStoredEmbeddings() async {
-    try {
-      print('🔍 Looking for face embeddings in users collection...');
-      
-      // Get all users who have completed signup
-      final usersSnapshot = await _firestore
-          .collection('users')
-          .where('signupCompleted', isEqualTo: true)
-          .get();
-      
-      print('📊 Found ${usersSnapshot.docs.length} users who completed signup');
-      
-      final embeddings = <Map<String, dynamic>>[];
-      
-      // For each user, check if they have face embeddings
-      for (final userDoc in usersSnapshot.docs) {
-        final userData = userDoc.data();
-        final String userId = userDoc.id;
-        
-        print('🔍 Checking user: $userId');
-        print('🔍 User data keys: ${userData.keys.toList()}');
-        
-        // Check if user has biometricFeatures with biometricSignature
-        if (userData.containsKey('biometricFeatures')) {
-          final biometricFeatures = userData['biometricFeatures'] as Map<String, dynamic>?;
-          
-          if (biometricFeatures != null && biometricFeatures.containsKey('biometricSignature')) {
-            final biometricSignature = biometricFeatures['biometricSignature'] as List<dynamic>?;
-            
-            if (biometricSignature != null && biometricSignature.isNotEmpty) {
-              final faceEmbedding = biometricSignature.cast<double>();
-              
-              print('📊 Face embedding size: ${faceEmbedding.length}D');
-              print('📊 Sample values: ${faceEmbedding.take(5).toList()}');
-              
-              embeddings.add({
-                'userId': userId,
-                'faceEmbedding': faceEmbedding,
-                'email': userData['email'] ?? '',
-                'phoneNumber': userData['phoneNumber'] ?? '',
-              });
-              print('✅ Added face embedding for user: $userId');
-            } else {
-              print('⚠️ No biometricSignature found for user: $userId');
-            }
-          } else {
-            print('⚠️ No biometricSignature found in biometricFeatures for user: $userId');
-          }
-        } else {
-          print('⚠️ No biometricFeatures field found for user: $userId');
-        }
-      }
-      
-      print('📊 Total embeddings found: ${embeddings.length}');
-      return embeddings;
-    } catch (e) {
-      print('❌ Error getting stored embeddings: $e');
-      return [];
-    }
-  }
-
 
   /// Log recognition events for monitoring
   static Future<void> _logRecognitionEvent(String? userId, double similarity, bool success, [String? reason]) async {

@@ -1,5 +1,6 @@
 import 'package:capstone2/services/email_service.dart';
 import 'package:capstone2/services/user_check_service.dart';
+import 'package:capstone2/services/network_service.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'otp_screen.dart';
@@ -83,9 +84,16 @@ class _SignUpScreenState extends State<SignUpScreen> {
     });
 
     try {
-      // Check if user already exists
+      // Check if user already exists with network retry and loading
       print('🔍 Checking if user already exists...');
-      final userCheck = await UserCheckService.checkUserExists(input);
+      final userCheck = await NetworkService.executeWithRetry(
+        () => UserCheckService.checkUserExists(input),
+        maxRetries: 3,
+        retryDelay: const Duration(seconds: 2),
+        loadingMessage: 'Checking if user exists...',
+        context: context,
+        showNetworkErrors: true,
+      );
       
       if (userCheck['exists']) {
         setState(() {
@@ -101,33 +109,114 @@ class _SignUpScreenState extends State<SignUpScreen> {
         // Phone verification - convert to international format
         String phoneNumber = _formatPhoneNumber(input);
 
-        await FirebaseAuth.instance.verifyPhoneNumber(
-          phoneNumber: phoneNumber,
-          timeout: const Duration(seconds: 60),
-          verificationCompleted: (PhoneAuthCredential credential) async {
-            // Auto sign-in
-          },
-          verificationFailed: (FirebaseAuthException e) {
-            setState(() => _errorMessage = e.message);
-          },
-          codeSent: (String verificationId, int? resendToken) {
-            Navigator.push(
+        // Check network before starting phone verification
+        final isConnected = await NetworkService.checkConnectivity();
+        if (!isConnected) {
+          if (mounted) {
+            setState(() => _isLoading = false);
+            NetworkService.showNetworkErrorDialog(
               context,
-              MaterialPageRoute(
-                builder: (_) => OtpVerificationScreen(
-                  verificationId: verificationId,
-                  phoneNumber: input, // Keep original format for display
-                  verificationType: 'phone',
-                ),
-              ),
+              'No internet connection',
+              onRetry: () => _sendOtp(),
             );
-          },
-          codeAutoRetrievalTimeout: (_) {},
-        );
-      } else {
-        // Email verification
-        await EmailService.sendOtp(input);
+          }
+          return;
+        }
 
+        // Keep loading indicator showing while waiting for Chrome/reCAPTCHA
+        // Note: verifyPhoneNumber uses callbacks, so we can't wrap it in executeWithRetry
+        // Instead, we check network before calling it and show loading via _isLoading state
+        try {
+          await FirebaseAuth.instance.verifyPhoneNumber(
+            phoneNumber: phoneNumber,
+            timeout: const Duration(seconds: 60),
+            verificationCompleted: (PhoneAuthCredential credential) async {
+              // Auto sign-in
+              if (mounted) {
+                setState(() => _isLoading = false);
+              }
+            },
+            verificationFailed: (FirebaseAuthException e) {
+              if (mounted) {
+                // Check if it's a network error
+                final isNetworkError = e.code == 'network-request-failed' || 
+                                      e.message?.toLowerCase().contains('network') == true ||
+                                      e.message?.toLowerCase().contains('connection') == true;
+                
+                if (isNetworkError) {
+                  NetworkService.showNetworkErrorDialog(
+                    context,
+                    e.message ?? 'Network error during phone verification',
+                    onRetry: () => _sendOtp(),
+                  );
+                } else {
+                  setState(() {
+                    _isLoading = false;
+                    _errorMessage = e.message;
+                  });
+                }
+              }
+            },
+            codeSent: (String verificationId, int? resendToken) {
+              // Hide loading when code is sent (user returned from Chrome)
+              if (mounted) {
+                setState(() => _isLoading = false);
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OtpVerificationScreen(
+                      verificationId: verificationId,
+                      phoneNumber: input, // Keep original format for display
+                      verificationType: 'phone',
+                    ),
+                  ),
+                );
+              }
+            },
+            codeAutoRetrievalTimeout: (_) {
+              // Timeout - hide loading
+              if (mounted) {
+                setState(() => _isLoading = false);
+              }
+            },
+          );
+        } catch (e) {
+          // Handle any synchronous errors
+          if (mounted) {
+            final errorStr = e.toString();
+            final isNetworkError = errorStr.toLowerCase().contains('network') ||
+                                  errorStr.toLowerCase().contains('connection');
+            
+            if (isNetworkError) {
+              setState(() => _isLoading = false);
+              NetworkService.showNetworkErrorDialog(
+                context,
+                'Network error: $errorStr',
+                onRetry: () => _sendOtp(),
+              );
+            } else {
+              setState(() {
+                _isLoading = false;
+                _errorMessage = errorStr;
+              });
+            }
+          }
+        }
+        // Note: Don't set _isLoading = false here - wait for codeSent callback
+        // This keeps the loading indicator showing while Chrome opens and user completes reCAPTCHA
+      } else {
+        // Email verification with network retry and loading
+        await NetworkService.executeWithRetry(
+          () => EmailService.sendOtp(input),
+          maxRetries: 3,
+          retryDelay: const Duration(seconds: 2),
+          loadingMessage: 'Sending verification email...',
+          context: context,
+          showNetworkErrors: true,
+        );
+
+        setState(() => _isLoading = false);
+        
         Navigator.push(
           context,
           MaterialPageRoute(
@@ -140,10 +229,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
         );
       }
     } catch (e) {
-      setState(() => _errorMessage = e.toString());
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _errorMessage = e.toString();
+        });
+      }
     }
-
-    setState(() => _isLoading = false);
   }
 
   @override
@@ -341,13 +433,30 @@ class _SignUpScreenState extends State<SignUpScreen> {
                           ),
                         ),
                         child: _isLoading
-                            ? const SizedBox(
-                                height: 18,
-                                width: 18,
-                                child: CircularProgressIndicator(
-                                  color: Colors.white,
-                                  strokeWidth: 2,
-                                ),
+                            ? Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const SizedBox(
+                                    height: 18,
+                                    width: 18,
+                                    child: CircularProgressIndicator(
+                                      color: Colors.white,
+                                      strokeWidth: 2,
+                                    ),
+                                  ),
+                                  if (_inputType == 'phone') ...[
+                                    const SizedBox(width: 8),
+                                    const Text(
+                                      "Opening...",
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w500,
+                                      ),
+                                    ),
+                                  ],
+                                ],
                               )
                             : const Text(
                                 "SEND OTP",
@@ -359,6 +468,20 @@ class _SignUpScreenState extends State<SignUpScreen> {
                               ),
                       ),
                     ),
+                    
+                    // Show helpful message when loading for phone verification
+                    if (_isLoading && _inputType == 'phone')
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12.0),
+                        child: Text(
+                          "Please complete the verification in Chrome...",
+                          style: TextStyle(
+                            color: Colors.white.withOpacity(0.8),
+                            fontSize: 12,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                      ),
 
                     const SizedBox(height: 20),
 

@@ -1,6 +1,5 @@
 import 'dart:typed_data';
 import 'dart:async';
-import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -11,6 +10,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import '../services/lockout_service.dart';
 import '../services/production_face_recognition_service.dart';
+import '../services/network_service.dart';
 import 'signup_screen.dart';
 import 'welcome_screen.dart';
 import 'under_verification_screen.dart';
@@ -46,29 +46,12 @@ class _FaceLoginScreenState extends State<FaceLoginScreen> with SingleTickerProv
   static const Duration _lockoutDuration = Duration(minutes: 3); // REDUCED for better UX
   static const int _maxFailedAttempts = 5; // Already optimized
 
-  // Deep scan & liveness state
-  final List<List<double>> _embeddingBuffer = [];
-  final List<Rect> _faceBoxBuffer = [];
-  DateTime? _bufferStartTime;
-  bool _livenessConfirmed = false;
-  bool _blinkDetected = false;
-  bool _headMovementDetected = false;
-  double? _initialHeadYaw;
-  bool _awaitingBlinkRecovery = false;
-  DateTime? _lastBlinkDetectedAt;
-  DateTime? _livenessStartTime;
-  bool _qualityAcceptableLastFrame = false;
-  static const int _requiredStableEmbeddings = 4;
-  static const Duration _deepScanWindow = Duration(seconds: 3);
-  static const double _maxEmbeddingDistanceForStability = 0.08;
-  static const double _minEmbeddingVariance = 0.0005;
+  // Deep scan & liveness state (kept for reset method compatibility)
   static const Duration _instructionUpdateThrottle = Duration(milliseconds: 400);
-  static const Duration _embeddingCaptureInterval = Duration(milliseconds: 250);
   static const String _defaultInstruction = 'Position your face in the oval and maintain a natural expression';
   String _instructionMessage = _defaultInstruction;
   Color _instructionColor = const Color(0xFF616161);
   DateTime? _lastInstructionUpdate;
-  DateTime? _lastEmbeddingCaptureTime;
   
   
   // Email/Phone input state
@@ -566,66 +549,7 @@ Future<void> _processImageFromFile() async {
     return bytes;
   }
 
-  /// Estimate brightness of face region for lighting quality assessment
-  double _estimateFaceRegionBrightness(CameraImage image, Rect faceBox) {
-    try {
-      // Sample pixels from face region to estimate brightness
-      final plane = image.planes[0];
-      final bytes = plane.bytes;
-      final width = image.width;
-      final height = image.height;
-      
-      // Sample center region of face (more reliable)
-      final sampleWidth = (faceBox.width * 0.6).round();
-      final sampleHeight = (faceBox.height * 0.6).round();
-      final startX = (faceBox.left + faceBox.width * 0.2).round();
-      final startY = (faceBox.top + faceBox.height * 0.2).round();
-      
-      int totalBrightness = 0;
-      int sampleCount = 0;
-      
-      // Sample every 5th pixel for performance
-      for (int y = startY; y < startY + sampleHeight && y < height; y += 5) {
-        for (int x = startX; x < startX + sampleWidth && x < width; x += 5) {
-          final index = y * width + x;
-          if (index < bytes.length) {
-            final pixelValue = bytes[index];
-            totalBrightness += pixelValue;
-            sampleCount++;
-          }
-        }
-      }
-      
-      if (sampleCount > 0) {
-        return (totalBrightness / sampleCount).toDouble();
-      }
-      return 128.0; // Default medium brightness
-    } catch (e) {
-      print('⚠️ Error estimating face brightness: $e');
-      return 128.0; // Default medium brightness
-    }
-  }
-
-  void _resetDeepScanBuffers() {
-    _embeddingBuffer.clear();
-    _faceBoxBuffer.clear();
-    _bufferStartTime = null;
-  }
-
-  void _resetLivenessTracking() {
-    _livenessConfirmed = false;
-    _blinkDetected = false;
-    _headMovementDetected = false;
-    _initialHeadYaw = null;
-    _awaitingBlinkRecovery = false;
-    _lastBlinkDetectedAt = null;
-    _livenessStartTime = null;
-  }
-
   void _resetDeepScanState({bool resetInstruction = false}) {
-    _resetDeepScanBuffers();
-    _resetLivenessTracking();
-    _qualityAcceptableLastFrame = false;
     if (resetInstruction) {
       _updateInstruction(_defaultInstruction, color: const Color(0xFF616161), force: true);
     }
@@ -655,36 +579,6 @@ Future<void> _processImageFromFile() async {
     });
   }
 
-  void _appendDeepScanFrame(List<double> embedding, Rect boundingBox) {
-    final now = DateTime.now();
-    _bufferStartTime ??= now;
-
-    if (_bufferStartTime != null && now.difference(_bufferStartTime!) > _deepScanWindow) {
-      _resetDeepScanBuffers();
-      _bufferStartTime = now;
-    }
-
-    _embeddingBuffer.add(embedding);
-    _faceBoxBuffer.add(boundingBox);
-
-    if (_embeddingBuffer.length > _requiredStableEmbeddings) {
-      _embeddingBuffer.removeAt(0);
-    }
-    if (_faceBoxBuffer.length > _requiredStableEmbeddings) {
-      _faceBoxBuffer.removeAt(0);
-    }
-  }
-
-  double _calculateEmbeddingDistance(List<double> a, List<double> b) {
-    final int length = math.min(a.length, b.length);
-    double sum = 0.0;
-    for (int i = 0; i < length; i++) {
-      final diff = a[i] - b[i];
-      sum += diff * diff;
-    }
-    return math.sqrt(sum);
-  }
-
   double _calculateEmbeddingVariance(List<double> embedding) {
     if (embedding.isEmpty) return 0.0;
     final mean = embedding.reduce((a, b) => a + b) / embedding.length;
@@ -694,181 +588,6 @@ Future<void> _processImageFromFile() async {
       variance += diff * diff;
     }
     return variance / embedding.length;
-  }
-
-  List<double> _averageEmbeddings(List<List<double>> embeddings) {
-    if (embeddings.isEmpty) return const [];
-    final int length = embeddings.first.length;
-    final List<double> sums = List<double>.filled(length, 0.0);
-
-    for (final embedding in embeddings) {
-      final int currentLength = math.min(length, embedding.length);
-      for (int i = 0; i < currentLength; i++) {
-        sums[i] += embedding[i];
-      }
-    }
-
-    for (int i = 0; i < length; i++) {
-      sums[i] /= embeddings.length;
-    }
-
-    return sums;
-  }
-
-  List<double> _normalizeEmbedding(List<double> embedding) {
-    if (embedding.isEmpty) return embedding;
-    double sumSquares = 0.0;
-    for (final value in embedding) {
-      sumSquares += value * value;
-    }
-    if (sumSquares <= 0.0) {
-      return embedding;
-    }
-
-    final norm = math.sqrt(sumSquares);
-    if (norm == 0.0) return embedding;
-
-    return embedding.map((value) => value / norm).toList();
-  }
-
-  double _calculateEmbeddingStability(List<List<double>> embeddings) {
-    if (embeddings.length < 2) {
-      return 1.0;
-    }
-
-    double totalDistance = 0.0;
-    int pairs = 0;
-
-    for (int i = 0; i < embeddings.length; i++) {
-      for (int j = i + 1; j < embeddings.length; j++) {
-        totalDistance += _calculateEmbeddingDistance(embeddings[i], embeddings[j]);
-        pairs++;
-      }
-    }
-
-    if (pairs == 0) return 1.0;
-
-    final avgDistance = totalDistance / pairs;
-    final normalized = 1.0 - (avgDistance / _maxEmbeddingDistanceForStability);
-    return normalized.clamp(0.0, 1.0);
-  }
-
-  double _calculateBoundingBoxStability(List<Rect> boxes) {
-    if (boxes.length < 2) {
-      return 1.0;
-    }
-
-    double totalCenterDistance = 0.0;
-    int pairs = 0;
-    for (int i = 0; i < boxes.length; i++) {
-      final centerI = boxes[i].center;
-      for (int j = i + 1; j < boxes.length; j++) {
-        final centerJ = boxes[j].center;
-        final dx = centerI.dx - centerJ.dx;
-        final dy = centerI.dy - centerJ.dy;
-        totalCenterDistance += math.sqrt(dx * dx + dy * dy);
-        pairs++;
-      }
-    }
-
-    if (pairs == 0) return 1.0;
-
-    final avgCenterDistance = totalCenterDistance / pairs;
-
-    double diagonalSum = 0.0;
-    for (final box in boxes) {
-      diagonalSum += math.sqrt(box.width * box.width + box.height * box.height);
-    }
-    final avgDiagonal = diagonalSum / boxes.length;
-    if (avgDiagonal <= 0.0) {
-      return 0.0;
-    }
-
-    final maxAllowedCenterMovement = avgDiagonal * 0.12;
-    final centerStability = 1.0 - (avgCenterDistance / maxAllowedCenterMovement).clamp(0.0, 1.0);
-
-    double widthDeviation = 0.0;
-    double heightDeviation = 0.0;
-    double totalWidth = 0.0;
-    double totalHeight = 0.0;
-    for (final box in boxes) {
-      totalWidth += box.width;
-      totalHeight += box.height;
-    }
-    final avgWidth = totalWidth / boxes.length;
-    final avgHeight = totalHeight / boxes.length;
-
-    for (final box in boxes) {
-      widthDeviation += (box.width - avgWidth).abs();
-      heightDeviation += (box.height - avgHeight).abs();
-    }
-
-    final widthVariance = widthDeviation / boxes.length;
-    final heightVariance = heightDeviation / boxes.length;
-
-    final maxWidthVariance = (avgWidth.abs() * 0.12).clamp(1.0, double.infinity);
-    final maxHeightVariance = (avgHeight.abs() * 0.12).clamp(1.0, double.infinity);
-
-    final widthStability = 1.0 - (widthVariance / maxWidthVariance).clamp(0.0, 1.0);
-    final heightStability = 1.0 - (heightVariance / maxHeightVariance).clamp(0.0, 1.0);
-
-    final combined = math.min(centerStability, math.min(widthStability, heightStability));
-    return combined.clamp(0.0, 1.0);
-  }
-
-  bool _isEmbeddingValid(List<double> embedding) {
-    if (embedding.isEmpty) {
-      return false;
-    }
-    final variance = _calculateEmbeddingVariance(embedding);
-    if (variance.isNaN) {
-      return false;
-    }
-    return variance >= _minEmbeddingVariance;
-  }
-
-  bool _evaluateLiveness(Face face) {
-    final now = DateTime.now();
-    _livenessStartTime ??= now;
-    
-    final leftEyeOpen = face.leftEyeOpenProbability ?? 0.0;
-    final rightEyeOpen = face.rightEyeOpenProbability ?? 0.0;
-    final yaw = face.headEulerAngleY ?? 0.0;
-
-    if (!_blinkDetected) {
-      if (!_awaitingBlinkRecovery && leftEyeOpen < 0.3 && rightEyeOpen < 0.3) {
-        _awaitingBlinkRecovery = true;
-      } else if (_awaitingBlinkRecovery && leftEyeOpen > 0.6 && rightEyeOpen > 0.6) {
-        _blinkDetected = true;
-        _awaitingBlinkRecovery = false;
-        _lastBlinkDetectedAt = now;
-        _updateInstruction('Blink detected. Hold steady for deep scan...', color: Colors.green);
-      }
-    }
-
-    if (_initialHeadYaw == null) {
-      _initialHeadYaw = yaw;
-    } else if (!_headMovementDetected) {
-      if ((_initialHeadYaw! - yaw).abs() > 15) {
-        _headMovementDetected = true;
-        _updateInstruction('Movement detected. Hold steady for deep scan...', color: Colors.green);
-      }
-    }
-
-    if ((_blinkDetected && (now.difference(_lastBlinkDetectedAt ?? now) < const Duration(seconds: 5))) ||
-        _headMovementDetected) {
-      _livenessConfirmed = true;
-      return true;
-    }
-
-    if (!_livenessConfirmed && now.difference(_livenessStartTime!) > const Duration(seconds: 2)) {
-      _updateInstruction(
-        'Blink or gently turn your head to confirm liveness',
-        color: Colors.deepOrange,
-      );
-    }
-
-    return false;
   }
 
   void _detectFaceForLogin(Face face, [CameraImage? cameraImage, Uint8List? imageBytes]) async {
@@ -1005,32 +724,47 @@ Future<void> _processImageFromFile() async {
       print('🔍 Verifying email/phone: $input');
       
       // Find user by email or phone (check ALL users, not just completed signups)
+      // Wrap with network retry and loading
       final firestore = FirebaseFirestore.instanceFor(
         app: Firebase.app(),
         databaseId: 'marketsafe',
       );
       
-      // Try email first (check all users, not just signupCompleted=true)
-      var query = await firestore
-          .collection('users')
-          .where('email', isEqualTo: input.toLowerCase())
-          .limit(1)
-          .get();
-      
       String? userId;
       Map<String, dynamic>? userData;
+      
+      // Try email first (check all users, not just signupCompleted=true) with network retry
+      var query = await NetworkService.executeWithRetry(
+        () => firestore
+            .collection('users')
+            .where('email', isEqualTo: input.toLowerCase())
+            .limit(1)
+            .get(),
+        maxRetries: 3,
+        retryDelay: const Duration(seconds: 2),
+        loadingMessage: 'Checking account...',
+        context: context,
+        showNetworkErrors: true,
+      );
       
       if (query.docs.isNotEmpty) {
         userId = query.docs.first.id;
         userData = query.docs.first.data();
         print('✅ Found user by email: $userId');
       } else {
-        // Try phone number (check all users)
-        query = await firestore
-            .collection('users')
-            .where('phoneNumber', isEqualTo: input)
-            .limit(1)
-            .get();
+        // Try phone number (check all users) with network retry
+        query = await NetworkService.executeWithRetry(
+          () => firestore
+              .collection('users')
+              .where('phoneNumber', isEqualTo: input)
+              .limit(1)
+              .get(),
+          maxRetries: 3,
+          retryDelay: const Duration(seconds: 2),
+          loadingMessage: 'Checking account...',
+          context: context,
+          showNetworkErrors: true,
+        );
         
         if (query.docs.isNotEmpty) {
           userId = query.docs.first.id;
@@ -1128,7 +862,27 @@ Future<void> _processImageFromFile() async {
         setState(() {
           _isVerifyingEmailPhone = false;
         });
-        _showErrorDialog('Error', 'Error verifying account. Please try again.');
+        
+        // Check if it's a network error
+        final errorStr = e.toString().toLowerCase();
+        final isNetworkError = errorStr.contains('network') ||
+                              errorStr.contains('connection') ||
+                              errorStr.contains('timeout') ||
+                              errorStr.contains('internet') ||
+                              errorStr.contains('failed host lookup');
+        
+        if (isNetworkError) {
+          NetworkService.showNetworkErrorDialog(
+            context,
+            'Network error while verifying account',
+            onRetry: () => _verifyEmailOrPhone(),
+            onCancel: () {
+              // User cancelled, just reset state
+            },
+          );
+        } else {
+          _showErrorDialog('Error', 'Error verifying account. Please try again.');
+        }
       }
     }
   }
@@ -1177,7 +931,7 @@ Future<void> _processImageFromFile() async {
 
     try {
       // Check lockout status for debugging
-      final lockoutStatus = LockoutService.getLockoutStatus();
+      final lockoutStatus = await LockoutService.getLockoutStatus();
       print('🔍 LOCKOUT STATUS: $lockoutStatus');
       
       // Use 1:1 face verification with email/phone
@@ -1199,15 +953,28 @@ Future<void> _processImageFromFile() async {
       
       Map<String, dynamic>? authResult;
       try {
-        authResult = await ProductionFaceRecognitionService.verifyUserFace(
-          emailOrPhone: _verifiedEmailOrPhone!,
-          detectedFace: face,
-          cameraImage: cameraImage,
-          imageBytes: imageBytes,
-          precomputedEmbedding: precomputedEmbedding,
-          stabilityScore: stabilityScore,
+        // Wrap face verification with network retry and loading
+        authResult = await NetworkService.executeWithRetry(
+          () => ProductionFaceRecognitionService.verifyUserFace(
+            emailOrPhone: _verifiedEmailOrPhone!,
+            detectedFace: face,
+            cameraImage: cameraImage,
+            imageBytes: imageBytes,
+            precomputedEmbedding: precomputedEmbedding,
+            stabilityScore: stabilityScore,
+          ),
+          maxRetries: 3,
+          retryDelay: const Duration(seconds: 2),
+          loadingMessage: 'Verifying face...',
+          context: context,
+          showNetworkErrors: true,
         );
 
+        // Ensure authResult is not null
+        if (authResult == null) {
+          authResult = {'success': false, 'error': 'Face verification failed'};
+        }
+        
         if (stabilityScore != null) {
           authResult['deepScanStability'] = stabilityScore;
         }
@@ -1269,9 +1036,60 @@ Future<void> _processImageFromFile() async {
       } catch (faceRecognitionError) {
         print('❌ 1:1 face verification service error: $faceRecognitionError');
         print('Full error details: ${faceRecognitionError.toString()}');
-        authResult = {'success': false, 'error': 'Face verification error'};
+        
+        // Check if it's a network error
+        final errorStr = faceRecognitionError.toString().toLowerCase();
+        final isNetworkError = errorStr.contains('network') ||
+                              errorStr.contains('connection') ||
+                              errorStr.contains('timeout') ||
+                              errorStr.contains('internet') ||
+                              errorStr.contains('failed host lookup');
+        
+        if (isNetworkError && mounted) {
+          // Show network error dialog
+          NetworkService.showNetworkErrorDialog(
+            context,
+            'Network error during face verification',
+            onRetry: () {
+              // Retry authentication
+              _authenticateFace(
+                face,
+                cameraImage: cameraImage,
+                imageBytes: imageBytes,
+                precomputedEmbedding: precomputedEmbedding,
+                stabilityScore: stabilityScore,
+              );
+            },
+            onCancel: () {
+              // Cancel and reset state
+              if (mounted) {
+                setState(() {
+                  _isAuthenticating = false;
+                  _isFaceDetected = false;
+                });
+                _targetProgress = 0.0;
+                _progressAnimation = Tween<double>(
+                  begin: _progressAnimation.value,
+                  end: 0.0,
+                ).animate(CurvedAnimation(
+                  parent: _progressAnimationController,
+                  curve: Curves.easeOutCubic,
+                ));
+                _progressAnimationController.forward(from: 0.0);
+                _updateInstruction(
+                  'Network error. Please check your connection.',
+                  color: Colors.red,
+                );
+              }
+            },
+          );
+        }
+        
+        // Set authResult to failure
+        authResult = {'success': false, 'error': isNetworkError ? 'Network error during face verification' : 'Face verification error'};
       }
       
+      // authResult is guaranteed to be non-null at this point (set in try or catch)
       final userId = authResult['userId'] as String?;
       final similarity = authResult['similarity'] as double?;
       bool success = authResult['success'] == true;
@@ -2297,7 +2115,9 @@ Future<void> _processImageFromFile() async {
 
   void _showLockoutDialog() {
     _stopCamera(); // Stop camera during lockout
-    LockoutService.setLockout(); // Set global lockout
+    LockoutService.setLockout().then((_) {
+      // Lockout set successfully
+    }); // Set global lockout
     showDialog(
       context: context,
       barrierDismissible: false,

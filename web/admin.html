@@ -2719,10 +2719,12 @@
         }
 
         const userEmail = user.email || '';
+        const userPhone = user.phoneNumber || '';
+        const userLuxandUuid = user.luxandUuid || (user.luxand && user.luxand.uuid) || '';
         const userName = user.firstName || user.username || 'User';
         
         // Confirmation dialog
-        const confirmMessage = `Are you sure you want to delete "${userName}" (${userEmail})?\n\n` +
+        const confirmMessage = `Are you sure you want to delete "${userName}" (${userEmail || userPhone})?\n\n` +
             'This will permanently delete:\n' +
             '• User account from Firestore\n' +
             '• Face data from Luxand\n' +
@@ -2743,6 +2745,8 @@
             console.log('🗑️ Starting user deletion process...');
             console.log('User ID:', selectedUserId);
             console.log('User Email:', userEmail);
+            console.log('User Phone:', userPhone);
+            console.log('User Luxand UUID:', userLuxandUuid);
             
             // Show loading state
             const deleteBtn = document.getElementById('deleteUserBtn');
@@ -2762,14 +2766,22 @@
                 followRelations: 0
             };
 
-            // Step 1: Delete from Luxand
-            if (userEmail) {
+            // Step 1: Delete from Luxand (try all available identifiers)
+            if (userEmail || userPhone || userLuxandUuid) {
                 try {
                     console.log('🔍 Step 1: Deleting from Luxand...');
+                    const deletePayload = {
+                        userId: selectedUserId
+                    };
+                    if (userEmail) deletePayload.email = userEmail;
+                    if (userPhone) deletePayload.phoneNumber = userPhone;
+                    if (userLuxandUuid) deletePayload.luxandUuid = userLuxandUuid;
+                    
+                    console.log('📤 Sending delete request with payload:', deletePayload);
                     const luxandResponse = await fetch(`${BACKEND_API_URL}/api/delete-user`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ email: userEmail, userId: selectedUserId })
+                        body: JSON.stringify(deletePayload)
                     });
                     
                     if (luxandResponse.ok) {

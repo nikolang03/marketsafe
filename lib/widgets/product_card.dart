@@ -7,7 +7,6 @@ import '../models/product_model.dart';
 import '../screens/edit_product_screen.dart';
 import '../screens/product_preview_screen.dart';
 import '../screens/user_profile_view_screen.dart' as profile_screen;
-import '../screens/comments_screen.dart';
 import '../services/product_service.dart';
 import '../services/comment_service.dart';
 import '../services/follow_service.dart';
@@ -248,17 +247,6 @@ class _ProductCardState extends State<ProductCard> with WidgetsBindingObserver {
     );
   }
 
-  void _navigateToComments() {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (context) => CommentsScreen(
-          productId: _currentProduct.id,
-          productTitle: _currentProduct.title,
-        ),
-      ),
-    );
-  }
 
   void _handleDownload() {
     // Check if product has video
@@ -2318,26 +2306,6 @@ class _CommentsDialogState extends State<_CommentsDialog> {
     );
   }
 
-  String _formatDate(String? dateString) {
-    if (dateString == null) return '';
-    try {
-      final date = DateTime.parse(dateString);
-      final now = DateTime.now();
-      final difference = now.difference(date);
-      
-      if (difference.inDays > 0) {
-        return '${difference.inDays}d ago';
-      } else if (difference.inHours > 0) {
-        return '${difference.inHours}h ago';
-      } else if (difference.inMinutes > 0) {
-        return '${difference.inMinutes}m ago';
-      } else {
-        return 'Just now';
-      }
-    } catch (e) {
-      return '';
-    }
-  }
 }
 
 class _VideoPlayerDialog extends StatefulWidget {
