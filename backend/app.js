@@ -741,8 +741,19 @@ app.post('/api/verify', async (req, res) => {
 
       // SECURITY: Must find a match with the expected email OR phone
       if (!matchingCandidate) {
-        console.error(`🚨 SECURITY: No candidate found matching expected email: "${expectedEmail}" or phone: "${expectedPhone}"`);
+        console.error(`🚨 SECURITY: No candidate found matching expected email: "${expectedEmail}" or phone: "${expectedPhone || '(not provided)'}"`);
         console.error(`🚨 SECURITY: This face does not belong to this user - REJECTING`);
+        
+        // Check if any candidates were found with 95%+ similarity (but wrong identifier)
+        const highSimilarityCandidates = candidates.filter(candidate => {
+          let score = 0;
+          if (candidate.probability !== undefined) score = parseFloat(candidate.probability);
+          else if (candidate.similarity !== undefined) score = parseFloat(candidate.similarity);
+          else if (candidate.confidence !== undefined) score = parseFloat(candidate.confidence);
+          else if (candidate.score !== undefined) score = parseFloat(candidate.score);
+          if (score > 1.0 && score <= 100) score = score / 100.0;
+          return score >= MIN_MATCH_THRESHOLD; // 95%+
+        });
         
         // Log all candidates found for debugging
         if (candidates.length > 0) {
@@ -756,12 +767,22 @@ app.post('/api/verify', async (req, res) => {
             else if (candidate.confidence !== undefined) score = parseFloat(candidate.confidence);
             else if (candidate.score !== undefined) score = parseFloat(candidate.score);
             if (score > 1.0 && score <= 100) score = score / 100.0;
-            console.error(`  ${idx + 1}. Name: "${candidateName}", ID: ${candidateId}, Score: ${score.toFixed(3)}`);
+            const isHighSimilarity = score >= MIN_MATCH_THRESHOLD;
+            console.error(`  ${idx + 1}. Name: "${candidateName}", ID: ${candidateId}, Score: ${score.toFixed(3)} ${isHighSimilarity ? '(95%+ - high similarity)' : '(below 95% - likely different person)'}`);
           });
-          console.error(`🔍 DEBUG: Your face may not be enrolled, or was enrolled with a different identifier.`);
-          console.error(`🔍 DEBUG: Please check if your face was enrolled with email "${expectedEmail}" or phone "${expectedPhone}"`);
+          
+          if (highSimilarityCandidates.length > 0) {
+            console.error(`🔍 DEBUG: Found ${highSimilarityCandidates.length} candidate(s) with 95%+ similarity but wrong identifier.`);
+            console.error(`🔍 DEBUG: This suggests your face might be enrolled with a different identifier.`);
+            console.error(`🔍 DEBUG: Please check if your face was enrolled with email "${expectedEmail}" or phone "${expectedPhone || '(no phone in account)'}"`);
+          } else {
+            console.error(`🔍 DEBUG: No candidates with 95%+ similarity found. Your face is likely NOT enrolled in Luxand.`);
+            console.error(`🔍 DEBUG: The candidates found (70-94% similarity) are likely different people.`);
+            console.error(`🔍 DEBUG: ACTION REQUIRED: Please complete the 3 facial verification steps to enroll your face.`);
+          }
         } else {
-          console.error(`🔍 DEBUG: No candidates found at all. Your face may not be enrolled in the system.`);
+          console.error(`🔍 DEBUG: No candidates found at all. Your face is NOT enrolled in the system.`);
+          console.error(`🔍 DEBUG: ACTION REQUIRED: Please complete the 3 facial verification steps to enroll your face.`);
         }
         
         return res.json({
@@ -769,9 +790,13 @@ app.post('/api/verify', async (req, res) => {
           similarity: 0,
           threshold: SIMILARITY_THRESHOLD,
           message: 'not_verified',
-          error: 'Face does not match this account. Your face may not be enrolled, or was enrolled with a different identifier. Please complete the 3 facial verification steps again.',
+          error: 'Face does not match this account. Your face may not be enrolled, or was enrolled with a different identifier. Please complete the 3 facial verification steps again to enroll your face.',
           security: 'Email/phone mismatch - face belongs to different user or not enrolled',
-          debug: candidates.length > 0 ? `Found ${candidates.length} candidate(s) but none matched your email/phone` : 'No candidates found - face may not be enrolled'
+          debug: candidates.length > 0 
+            ? (highSimilarityCandidates.length > 0 
+                ? `Found ${highSimilarityCandidates.length} candidate(s) with 95%+ similarity but wrong identifier - face may be enrolled with different identifier`
+                : `Found ${candidates.length} candidate(s) but all below 95% similarity - your face is likely NOT enrolled`)
+            : 'No candidates found - face is NOT enrolled in the system'
         });
       }
 
