@@ -490,7 +490,12 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
             if (enrollResult['success'] == true) {
               final luxandUuid = enrollResult['luxandUuid']?.toString();
               final enrolledCount = enrollResult['enrolledCount'] as int? ?? 0;
+              final errors = enrollResult['errors'] as List<String>?;
               print('✅ Enrolled $enrolledCount face(s) from 3 verification steps. UUID: $luxandUuid');
+              print('🔍 Enrollment identifier used: $identifier');
+              if (errors != null && errors.isNotEmpty) {
+                print('⚠️ Enrollment had some errors: ${errors.join(", ")}');
+              }
               
               // Clean up test enrollment if it exists
               if (_pendingTestUuidCleanup.isNotEmpty) {

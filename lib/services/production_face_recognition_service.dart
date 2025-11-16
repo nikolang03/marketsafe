@@ -286,6 +286,10 @@ class ProductionFaceRecognitionService {
       }
 
       if (luxandUuid == null || luxandUuid.isEmpty) {
+        print('❌❌❌ CRITICAL: Enrollment failed - no UUID returned!');
+        print('❌ Enrollment identifier: $email');
+        print('❌ Errors: ${errors.join("; ")}');
+        print('❌ Enrolled count: $enrolledCount');
         return {
           'success': false,
           'error': 'Failed to enroll any faces. ${errors.join('; ')}',
@@ -293,6 +297,10 @@ class ProductionFaceRecognitionService {
           'errors': errors,
         };
       }
+      
+      print('✅✅✅ Enrollment SUCCESS: UUID = $luxandUuid');
+      print('✅ Enrollment identifier: $email');
+      print('✅ Enrolled $enrolledCount face(s)');
 
       // Store uuid on user's document
       await _firestore.collection('users').doc(finalUserId).set({
