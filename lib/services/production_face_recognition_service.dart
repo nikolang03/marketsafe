@@ -8,6 +8,8 @@ import 'dart:typed_data';
 import 'dart:io';
 import 'dart:async';
 import 'dart:math';
+import 'package:image/image.dart' as img;
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 
 // import 'face_net_service.dart';  // Removed - TensorFlow Lite no longer used
 // import 'face_uniqueness_service.dart';  // Removed - using backend for duplicate detection
@@ -276,10 +278,24 @@ class ProductionFaceRecognitionService {
             continue;
           }
 
-          final imageBytes = await imageFile.readAsBytes();
+          var imageBytes = await imageFile.readAsBytes();
           if (imageBytes.isEmpty) {
             print('⚠️ Image file is empty: ${imagePaths[i]}');
             errors.add('Image ${i + 1} is empty');
+            continue;
+          }
+
+          // CRITICAL: Preprocess image to ensure it's in the correct format for Luxand
+          // Luxand requires JPEG format and specific size constraints
+          print('🔧 Preprocessing image ${i + 1} for Luxand compatibility...');
+          try {
+            imageBytes = await _preprocessImageForLuxand(imageBytes, imagePaths[i]);
+            print('✅ Image ${i + 1} preprocessed successfully. New size: ${imageBytes.length} bytes');
+          } catch (preprocessError) {
+            print('❌❌❌ CRITICAL: Image preprocessing failed for image ${i + 1}!');
+            print('❌ Error: $preprocessError');
+            print('❌ This image may not work with Luxand - skipping...');
+            errors.add('Image ${i + 1}: Failed to process image. Please retake with better quality.');
             continue;
           }
 
@@ -2921,6 +2937,103 @@ class ProductionFaceRecognitionService {
         'success': false,
         'error': 'Face verification failed. Please try again.',
       };
+    }
+  }
+
+  /// Preprocess image for Luxand compatibility
+  /// - Resizes if too large (max 1920x1920)
+  /// - Ensures minimum size (at least 200x200)
+  /// - Converts to JPEG format
+  /// - Compresses to reasonable quality (85%)
+  static Future<Uint8List> _preprocessImageForLuxand(Uint8List imageBytes, String imagePath) async {
+    try {
+      print('🔧 Preprocessing image for Luxand...');
+      print('   - Original size: ${imageBytes.length} bytes');
+      
+      // Decode image
+      img.Image? decodedImage = img.decodeImage(imageBytes);
+      if (decodedImage == null) {
+        print('❌ Failed to decode image, trying alternative method...');
+        // Try using flutter_image_compress as fallback
+        final tempFile = File(imagePath);
+        if (await tempFile.exists()) {
+          final compressed = await FlutterImageCompress.compressWithFile(
+            tempFile.absolute.path,
+            minWidth: 200,
+            minHeight: 200,
+            maxWidth: 1920,
+            maxHeight: 1920,
+            quality: 85,
+            format: CompressFormat.jpeg,
+          );
+          if (compressed != null) {
+            print('✅ Image compressed using FlutterImageCompress. New size: ${compressed.length} bytes');
+            return Uint8List.fromList(compressed);
+          }
+        }
+        throw Exception('Failed to decode image');
+      }
+      
+      print('   - Original dimensions: ${decodedImage.width}x${decodedImage.height}');
+      
+      // Check minimum size
+      if (decodedImage.width < 200 || decodedImage.height < 200) {
+        print('⚠️ Image is too small (${decodedImage.width}x${decodedImage.height}). Minimum: 200x200');
+        throw Exception('Image is too small. Minimum size: 200x200 pixels');
+      }
+      
+      // Resize if too large (Luxand may have size limits)
+      const maxDimension = 1920;
+      if (decodedImage.width > maxDimension || decodedImage.height > maxDimension) {
+        print('   - Resizing from ${decodedImage.width}x${decodedImage.height} to max ${maxDimension}x${maxDimension}');
+        final aspectRatio = decodedImage.width / decodedImage.height;
+        int newWidth, newHeight;
+        if (decodedImage.width > decodedImage.height) {
+          newWidth = maxDimension;
+          newHeight = (maxDimension / aspectRatio).round();
+        } else {
+          newHeight = maxDimension;
+          newWidth = (maxDimension * aspectRatio).round();
+        }
+        decodedImage = img.copyResize(decodedImage, width: newWidth, height: newHeight);
+        print('   - New dimensions: ${decodedImage.width}x${decodedImage.height}');
+      }
+      
+      // Convert to JPEG format (Luxand requires JPEG)
+      final jpegBytes = img.encodeJpg(decodedImage, quality: 85);
+      print('   - JPEG encoded size: ${jpegBytes.length} bytes');
+      print('   - Compression ratio: ${((1 - jpegBytes.length / imageBytes.length) * 100).toStringAsFixed(1)}%');
+      
+      if (jpegBytes.isEmpty) {
+        throw Exception('Failed to encode image as JPEG');
+      }
+      
+      return Uint8List.fromList(jpegBytes);
+    } catch (e) {
+      print('❌ Image preprocessing error: $e');
+      // If preprocessing fails, try using flutter_image_compress as fallback
+      try {
+        final tempFile = File(imagePath);
+        if (await tempFile.exists()) {
+          print('🔄 Trying FlutterImageCompress as fallback...');
+          final compressed = await FlutterImageCompress.compressWithFile(
+            tempFile.absolute.path,
+            minWidth: 200,
+            minHeight: 200,
+            maxWidth: 1920,
+            maxHeight: 1920,
+            quality: 85,
+            format: CompressFormat.jpeg,
+          );
+          if (compressed != null && compressed.isNotEmpty) {
+            print('✅ Image compressed using FlutterImageCompress fallback. New size: ${compressed.length} bytes');
+            return Uint8List.fromList(compressed);
+          }
+        }
+      } catch (fallbackError) {
+        print('❌ FlutterImageCompress fallback also failed: $fallbackError');
+      }
+      rethrow;
     }
   }
 }
