@@ -347,8 +347,10 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         final avgX = _headXHistory.reduce((a, b) => a + b) / _headXHistory.length;
         final varianceX = _headXHistory.map((x) => (x - avgX) * (x - avgX)).reduce((a, b) => a + b) / _headXHistory.length;
         
-        if (varianceX < 75.0) { // Even more lenient threshold for Android devices
+        // More lenient threshold - allow faster initialization
+        if (varianceX < 100.0) { // Even more lenient threshold for Android devices
           _initialX = avgX;
+          print('✅ Initial head position set: ${_initialX!.toStringAsFixed(1)}° (variance: ${varianceX.toStringAsFixed(1)})');
         }
       }
       
