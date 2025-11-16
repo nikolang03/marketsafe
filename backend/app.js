@@ -147,9 +147,11 @@ app.post('/api/enroll', async (req, res) => {
       console.log('🔧 Removed data URL prefix from base64');
     }
 
-    // 1) Check for existing faces for this email and delete them (prevent duplicates)
+    // 1) Check for existing person for this email
+    // NOTE: Luxand's /v2/person endpoint automatically adds photos to existing person if name matches
+    // So we DON'T need to delete - we can just enroll and Luxand will add the photo to the existing person
     try {
-      console.log(`🔍 Checking for existing faces for email: ${email}`);
+      console.log(`🔍 Checking for existing person for email: ${email}`);
       const allPersons = await listPersons();
       const persons = allPersons.persons || allPersons.data || allPersons || [];
       
@@ -159,32 +161,17 @@ app.post('/api/enroll', async (req, res) => {
       );
       
       if (existingPersons.length > 0) {
-        console.log(`⚠️ Found ${existingPersons.length} existing face(s) for ${email}. Deleting duplicates...`);
-        
-        let deletedCount = 0;
-        for (const person of existingPersons) {
-          const personUuid = person.uuid || person.id;
-          if (personUuid) {
-            try {
-              await deletePerson(personUuid);
-              deletedCount++;
-              console.log(`✅ Deleted duplicate face: ${personUuid}`);
-            } catch (deleteError) {
-              console.warn(`⚠️ Failed to delete duplicate face ${personUuid}: ${deleteError.message}`);
-              // Continue anyway - we'll still enroll the new face
-            }
-          }
-        }
-        
-        if (deletedCount > 0) {
-          console.log(`🧹 Cleaned up ${deletedCount} duplicate face(s) for ${email}`);
-        }
+        const existingPerson = existingPersons[0];
+        const existingUuid = existingPerson.uuid || existingPerson.id;
+        const existingFaceCount = existingPerson.faces?.length || existingPerson.face?.length || 0;
+        console.log(`ℹ️ Found existing person for ${email}: UUID ${existingUuid}, ${existingFaceCount} face(s)`);
+        console.log(`ℹ️ Luxand will automatically add this new photo to the existing person (no deletion needed)`);
       } else {
-        console.log(`✅ No existing faces found for ${email}. Proceeding with enrollment.`);
+        console.log(`✅ No existing person found for ${email}. Creating new person.`);
       }
-    } catch (cleanupError) {
-      // If cleanup fails, log but continue with enrollment
-      console.warn(`⚠️ Failed to check/cleanup existing faces: ${cleanupError.message}. Continuing with enrollment...`);
+    } catch (checkError) {
+      // If check fails, log but continue with enrollment
+      console.warn(`⚠️ Failed to check for existing person: ${checkError.message}. Continuing with enrollment...`);
     }
 
     // 1.5) SECURITY: Check if this face already exists with a DIFFERENT email (prevent duplicate accounts)
