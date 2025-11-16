@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../services/product_service.dart';
 import '../services/production_face_recognition_service.dart';
@@ -56,14 +57,34 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
     });
 
     try {
-      // Get current user ID
+      // Get current user ID - use same logic as fill_information_screen to avoid ID mismatch
       final prefs = await SharedPreferences.getInstance();
-      final userId = prefs.getString('current_user_id') ?? prefs.getString('signup_user_id');
+      final firebaseUser = FirebaseAuth.instance.currentUser;
+      final firebaseAuthUid = firebaseUser?.uid ?? '';
       
-      if (userId == null) {
-        _showErrorDialog('Error', 'No user logged in');
+      String? userId;
+      
+      // CRITICAL: Use Firebase Auth UID first (same as fill_information_screen)
+      // This ensures we're looking at the same document where luxandUuid was saved
+      if (firebaseAuthUid.isNotEmpty) {
+        userId = firebaseAuthUid;
+        print('🔍 Using Firebase Auth UID as user ID: $userId');
+      } else {
+        // Fallback to SharedPreferences if Firebase Auth UID not available
+        userId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
+        print('⚠️ No Firebase Auth UID, using SharedPreferences user ID: $userId');
+      }
+      
+      if (userId == null || userId.isEmpty) {
+        print('❌❌❌ CRITICAL: No user ID found!');
+        print('❌ Firebase Auth UID: $firebaseAuthUid');
+        print('❌ signup_user_id: ${prefs.getString('signup_user_id')}');
+        print('❌ current_user_id: ${prefs.getString('current_user_id')}');
+        _showErrorDialog('Error', 'No user logged in. Please sign in again.');
         return;
       }
+      
+      print('🔍 Checking user document for userId: $userId');
 
       // Step 1: Face Detection and Verification
       print('🔍 Starting face verification...');
@@ -274,6 +295,12 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
       final email = userData['email']?.toString() ?? '';
       final phone = userData['phoneNumber']?.toString() ?? '';
       
+      print('🔍 User document data in _verifyFaceMatch:');
+      print('   - Email: $email');
+      print('   - Phone: $phone');
+      print('   - luxandUuid: ${userData['luxandUuid']}');
+      print('   - luxand.uuid: ${userData['luxand']?['uuid']}');
+      
       if (email.isEmpty && phone.isEmpty) {
         return {
           'success': false,
@@ -281,6 +308,23 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
           'similarity': 0.0,
         };
       }
+      
+      // Check if user has luxandUuid (face enrolled)
+      final luxandUuid = userData['luxandUuid']?.toString() ?? 
+                         userData['luxand']?['uuid']?.toString();
+      
+      if (luxandUuid == null || luxandUuid.isEmpty) {
+        print('❌❌❌ CRITICAL: User has no luxandUuid in _verifyFaceMatch!');
+        print('❌ User ID: $userId');
+        print('❌ This means enrollment did not complete successfully!');
+        return {
+          'success': false,
+          'error': 'Please complete the 3 facial verification steps (blink, move closer, head movement) before uploading your profile photo. Your face must be enrolled first.',
+          'similarity': 0.0,
+        };
+      }
+      
+      print('✅ Face enrollment verified. luxandUuid: $luxandUuid');
       
       // CRITICAL SECURITY: Use PERFECT RECOGNITION to verify face matches user's registered face
       // This ensures users can only upload their own face as profile photo
