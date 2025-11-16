@@ -146,22 +146,23 @@ export async function enrollPhoto(base64Image, name) {
       
       responseData = JSON.parse(cleanedResponse);
     } catch (parseError) {
-    console.error(`❌ Failed to parse JSON response:`, parseError.message);
-    console.error(`❌ Response text:`, responseText);
-    
-    // If it's HTML or plain text, it might be an error page
-    if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
-      throw new Error(`Luxand returned HTML instead of JSON. Response: ${responseText.substring(0, 200)}`);
+      console.error(`❌ Failed to parse JSON response:`, parseError.message);
+      console.error(`❌ Response text:`, responseText);
+      
+      // If it's HTML or plain text, it might be an error page
+      if (responseText.includes('<!DOCTYPE') || responseText.includes('<html')) {
+        throw new Error(`Luxand returned HTML instead of JSON. Response: ${responseText.substring(0, 200)}`);
+      }
+      
+      // Try to extract message even if JSON is malformed
+      const messageMatch = responseText.match(/"message":\s*"([^"]+)"/);
+      if (messageMatch) {
+        throw new Error(`Luxand error: ${messageMatch[1]}`);
+      }
+      
+      // Try to extract any useful info from the response
+      throw new Error(`Invalid JSON response from Luxand: ${responseText.substring(0, 200)}`);
     }
-    
-    // Try to extract message even if JSON is malformed
-    const messageMatch = responseText.match(/"message":\s*"([^"]+)"/);
-    if (messageMatch) {
-      throw new Error(`Luxand error: ${messageMatch[1]}`);
-    }
-    
-    // Try to extract any useful info from the response
-    throw new Error(`Invalid JSON response from Luxand: ${responseText.substring(0, 200)}`);
   }
   
   console.log(`✅ Luxand enroll success (status ${res.status}):`, JSON.stringify(responseData).substring(0, 200));
