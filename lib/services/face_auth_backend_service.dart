@@ -130,6 +130,7 @@ class FaceAuthBackendService {
   Future<Map<String, dynamic>> verify({
     required String email,
     required Uint8List photoBytes,
+    String? phone, // Optional: pass phone number to check both email and phone
     String? luxandUuid, // Optional: pass UUID for 1:1 verification
   }) async {
     try {
@@ -142,6 +143,11 @@ class FaceAuthBackendService {
         'email': email,
         'photoBase64': base64Image,
       };
+      
+      // Add phone if provided (allows checking both email and phone matches)
+      if (phone != null && phone.isNotEmpty) {
+        requestBody['phone'] = phone;
+      }
       
       // Add UUID if provided for 1:1 verification
       if (luxandUuid != null && luxandUuid.isNotEmpty) {
@@ -251,6 +257,86 @@ class FaceAuthBackendService {
       return {
         'ok': false,
         'error': errorMessage,
+      };
+    }
+  }
+
+  /// Check if a face is a duplicate (95%+ similar to another user's face)
+  /// Used during profile photo upload to prevent same person from having multiple accounts
+  /// Returns: { isDuplicate: bool, duplicateIdentifier?: string, similarity?: double, message?: string, error?: string }
+  Future<Map<String, dynamic>> checkDuplicate({
+    required String email,
+    required Uint8List photoBytes,
+    String? phone,
+  }) async {
+    try {
+      final base64Image = base64Encode(photoBytes);
+      final uri = Uri.parse('$backendUrl/api/check-duplicate');
+      
+      print('🔍 Checking for duplicate face with backend: $backendUrl/api/check-duplicate');
+      
+      final requestBody = <String, dynamic>{
+        'email': email,
+        'photoBase64': base64Image,
+      };
+      
+      // Add phone if provided
+      if (phone != null && phone.isNotEmpty) {
+        requestBody['phone'] = phone;
+      }
+      
+      final response = await http.post(
+        uri,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(requestBody),
+      ).timeout(
+        const Duration(seconds: 60),
+        onTimeout: () {
+          throw TimeoutException('Connection timeout after 60 seconds');
+        },
+      );
+
+      if (response.statusCode ~/ 100 != 2) {
+        final errorBody = jsonDecode(response.body) as Map<String, dynamic>?;
+        // On error, return no duplicate to allow upload (prevent false positives)
+        return {
+          'isDuplicate': false,
+          'error': errorBody?['error']?.toString() ?? 'Duplicate check failed',
+        };
+      }
+
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final bool isDuplicate = body['isDuplicate'] == true;
+      final String? duplicateIdentifier = body['duplicateIdentifier']?.toString();
+      final double? similarity = (body['similarity'] as num?)?.toDouble();
+      final String? message = body['message']?.toString();
+
+      return {
+        'isDuplicate': isDuplicate,
+        'duplicateIdentifier': duplicateIdentifier,
+        'similarity': similarity,
+        'message': message,
+      };
+    } on TimeoutException catch (e) {
+      print('❌ Backend duplicate check timeout: $e');
+      // On timeout, return no duplicate to allow upload (prevent false positives)
+      return {
+        'isDuplicate': false,
+        'error': 'Connection timeout',
+      };
+    } on SocketException catch (e) {
+      print('❌ Backend duplicate check socket error: $e');
+      // On network error, return no duplicate to allow upload (prevent false positives)
+      return {
+        'isDuplicate': false,
+        'error': 'Network error',
+      };
+    } catch (e) {
+      print('❌ Backend duplicate check error: $e');
+      // On error, return no duplicate to allow upload (prevent false positives)
+      return {
+        'isDuplicate': false,
+        'error': 'Duplicate check failed',
       };
     }
   }

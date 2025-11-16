@@ -11,6 +11,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import '../services/production_face_recognition_service.dart';
+import '../services/face_auth_backend_service.dart';
 
 class AddProfilePhotoScreen extends StatefulWidget {
   const AddProfilePhotoScreen({super.key});
@@ -164,10 +165,11 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
         final similarity = verificationResult['similarity'] as double?;
         print('✅ Profile photo face verification PASSED! Similarity: ${similarity?.toStringAsFixed(4) ?? 'unknown'}');
         
-        // CRITICAL: Verify similarity meets threshold (98.5%+ for profile photos, more lenient than login)
-        // Profile photos can have different lighting/angles, so we use 98.5%+ instead of 99%+
-        if (similarity == null || similarity < 0.985) {
-          print('🚨 PROFILE PHOTO REJECTION: Similarity ${similarity?.toStringAsFixed(4) ?? 'null'} < 0.985');
+        // CRITICAL: Verify similarity meets threshold (80%+ for profile photos, more lenient than login)
+        // Profile photos can have very different lighting/angles/conditions, so we use 80%+ instead of 99%+
+        // This accounts for natural variation between verification steps and profile photos
+        if (similarity == null || similarity < 0.80) {
+          print('🚨 PROFILE PHOTO REJECTION: Similarity ${similarity?.toStringAsFixed(4) ?? 'null'} < 0.80');
           _showErrorDialog(
             'Face Verification Failed',
             'The uploaded photo does not match your registered face with sufficient accuracy. Please upload a clear photo of yourself.',
@@ -176,6 +178,46 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
         }
         
         print('🎯 PERFECT RECOGNITION: Profile photo face matches registered face (similarity: ${similarity.toStringAsFixed(4)})');
+        
+        // CRITICAL SECURITY: Check if this face is 95%+ similar to ANY OTHER user's face
+        // This prevents the same person from having multiple accounts
+        print('🔍 [DUPLICATE CHECK] Checking if face is 95%+ similar to another user...');
+        try {
+          const backendUrl = String.fromEnvironment(
+            'FACE_AUTH_BACKEND_URL',
+            defaultValue: 'https://marketsafe-production.up.railway.app',
+          );
+          final backendService = FaceAuthBackendService(backendUrl: backendUrl);
+          
+          final duplicateCheckResult = await backendService.checkDuplicate(
+            email: email.isNotEmpty ? email : phone,
+            photoBytes: imageBytes,
+            phone: phone.isNotEmpty ? phone : null,
+          );
+          
+          if (duplicateCheckResult['isDuplicate'] == true) {
+            final duplicateIdentifier = duplicateCheckResult['duplicateIdentifier']?.toString() ?? 'another account';
+            final duplicateSimilarity = duplicateCheckResult['similarity'] as double?;
+            final duplicateMessage = duplicateCheckResult['message']?.toString() ?? 
+                'This face is already registered with a different account. You cannot use the same face for multiple accounts.';
+            
+            print('🚨🚨🚨 [DUPLICATE CHECK] DUPLICATE FACE DETECTED!');
+            print('🚨 Similarity to other user: ${duplicateSimilarity?.toStringAsFixed(3) ?? 'N/A'}');
+            print('🚨 Existing identifier: $duplicateIdentifier');
+            
+            _showErrorDialog(
+              'Duplicate Face Detected',
+              duplicateMessage,
+            );
+            return;
+          } else {
+            print('✅ [DUPLICATE CHECK] No duplicate faces found. Face is unique.');
+          }
+        } catch (duplicateCheckError) {
+          print('⚠️ [DUPLICATE CHECK] Error during duplicate check: $duplicateCheckError');
+          // On error, allow upload to proceed (prevent false positives from blocking legitimate users)
+          // The duplicate check is a security measure, but we don't want to block users if the check fails
+        }
         
         // Get email and phone for registration
         final signupEmail = prefs.getString('signup_email') ?? email;

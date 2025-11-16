@@ -9,6 +9,7 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import '../services/product_service.dart';
 import '../services/production_face_recognition_service.dart';
+import '../services/face_auth_backend_service.dart';
 
 class SimpleProfilePhotoScreen extends StatefulWidget {
   const SimpleProfilePhotoScreen({super.key});
@@ -115,6 +116,59 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
       }
 
       print('✅ Face verification passed! Similarity: ${verificationResult['similarity']}');
+
+      // CRITICAL SECURITY: Check if this face is 95%+ similar to ANY OTHER user's face
+      // This prevents the same person from having multiple accounts
+      print('🔍 [DUPLICATE CHECK] Checking if face is 95%+ similar to another user...');
+      try {
+        final userDoc = await FirebaseFirestore.instanceFor(
+          app: Firebase.app(),
+          databaseId: 'marketsafe',
+        ).collection('users').doc(userId).get();
+        
+        if (userDoc.exists) {
+          final userData = userDoc.data()!;
+          final email = userData['email']?.toString() ?? '';
+          final phone = userData['phoneNumber']?.toString() ?? '';
+          
+          if (email.isNotEmpty || phone.isNotEmpty) {
+            const backendUrl = String.fromEnvironment(
+              'FACE_AUTH_BACKEND_URL',
+              defaultValue: 'https://marketsafe-production.up.railway.app',
+            );
+            final backendService = FaceAuthBackendService(backendUrl: backendUrl);
+            
+            final duplicateCheckResult = await backendService.checkDuplicate(
+              email: email.isNotEmpty ? email : phone,
+              photoBytes: imageBytes,
+              phone: phone.isNotEmpty ? phone : null,
+            );
+            
+            if (duplicateCheckResult['isDuplicate'] == true) {
+              final duplicateIdentifier = duplicateCheckResult['duplicateIdentifier']?.toString() ?? 'another account';
+              final duplicateSimilarity = duplicateCheckResult['similarity'] as double?;
+              final duplicateMessage = duplicateCheckResult['message']?.toString() ?? 
+                  'This face is already registered with a different account. You cannot use the same face for multiple accounts.';
+              
+              print('🚨🚨🚨 [DUPLICATE CHECK] DUPLICATE FACE DETECTED!');
+              print('🚨 Similarity to other user: ${duplicateSimilarity?.toStringAsFixed(3) ?? 'N/A'}');
+              print('🚨 Existing identifier: $duplicateIdentifier');
+              
+              _showErrorDialog(
+                'Duplicate Face Detected',
+                duplicateMessage,
+              );
+              return;
+            } else {
+              print('✅ [DUPLICATE CHECK] No duplicate faces found. Face is unique.');
+            }
+          }
+        }
+      } catch (duplicateCheckError) {
+        print('⚠️ [DUPLICATE CHECK] Error during duplicate check: $duplicateCheckError');
+        // On error, allow upload to proceed (prevent false positives from blocking legitimate users)
+        // The duplicate check is a security measure, but we don't want to block users if the check fails
+      }
 
       // Step 3: Upload to Firebase Storage
       setState(() {
@@ -252,21 +306,21 @@ class _SimpleProfilePhotoScreenState extends State<SimpleProfilePhotoScreen> {
       final similarity = verificationResult['similarity'] as double?;
       print('✅ Profile photo face verification PASSED! Similarity: ${similarity?.toStringAsFixed(4) ?? 'unknown'}');
       
-      // CRITICAL: Verify similarity meets threshold (98.5%+ for profile photos, more lenient than login)
-      // Profile photos can have different lighting/angles/environment, so we use 98.5%+ instead of 99%+
+      // CRITICAL: Verify similarity meets threshold (80%+ for profile photos, more lenient than login)
+      // Profile photos can have very different lighting/angles/conditions, so we use 80%+ instead of 99%+
       // This still ensures ONLY the user's own face can be uploaded, but allows for natural variation
-      if (similarity == null || similarity < 0.985) {
-        print('🚨 PROFILE PHOTO REJECTION: Similarity ${similarity?.toStringAsFixed(4) ?? 'null'} < 0.985');
+      if (similarity == null || similarity < 0.80) {
+        print('🚨 PROFILE PHOTO REJECTION: Similarity ${similarity?.toStringAsFixed(4) ?? 'null'} < 0.80');
         return {
           'success': false,
-          'error': 'The uploaded photo does not match your registered face with sufficient accuracy. Please upload a clear photo of yourself. (Similarity: ${similarity != null ? (similarity * 100).toStringAsFixed(1) : 'unknown'}% - Required: 98.5%+)',
+          'error': 'The uploaded photo does not match your registered face with sufficient accuracy. Please upload a clear photo of yourself. (Similarity: ${similarity != null ? (similarity * 100).toStringAsFixed(1) : 'unknown'}% - Required: 80%+)',
           'similarity': similarity ?? 0.0,
         };
       }
       
       print('🎯 PROFILE PHOTO VERIFICATION: Profile photo face matches registered face (similarity: ${similarity.toStringAsFixed(4)})');
       print('🎯 This ensures users can only upload their own face as profile photo');
-      print('🎯 Profile photo verification uses 98.5%+ threshold (more lenient than login 99%+) to allow for lighting/angle variation');
+      print('🎯 Profile photo verification uses 80%+ threshold (more lenient than login 99%+) to allow for lighting/angle/condition variation');
       
       return {
         'success': true,

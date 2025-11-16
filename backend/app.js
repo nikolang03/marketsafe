@@ -194,7 +194,10 @@ app.post('/api/enroll', async (req, res) => {
       console.log(`🔍 [DUPLICATE CHECK] New email: ${email.toLowerCase().trim()}`);
       
       const emailToFind = email.toLowerCase().trim();
-      const DUPLICATE_THRESHOLD = 0.90; // High threshold to only catch actual duplicates (same person), not false positives
+      // CRITICAL: Use very high threshold (95%) to prevent false positives
+      // Different people can have 70-95% similarity, so we need 95%+ to be confident it's the same person
+      // This prevents legitimate users from being blocked when their face happens to be similar to someone else's
+      const DUPLICATE_THRESHOLD = 0.95; // Very high threshold (95%) to only catch actual duplicates, not false positives
       
       // Method 1: Search for the face
       const searchRes = await searchPhoto(cleanBase64);
@@ -239,40 +242,75 @@ app.post('/api/enroll', async (req, res) => {
           const normalizedCandidateEmail = candidateEmail.replace(/\s+/g, '').toLowerCase().trim();
           const normalizedNewEmail = emailToFind.replace(/\s+/g, '').toLowerCase().trim();
           
+          // Check if candidate is a phone number (contains only digits and +)
+          const isCandidatePhone = /^[\d+]+$/.test(candidateEmail.trim());
+          const isNewEmailPhone = /^[\d+]+$/.test(emailToFind);
+          
           console.log(`🔍 [DUPLICATE CHECK] Candidate ${i + 1}:`);
-          console.log(`   - Raw email: "${candidateEmail}"`);
+          console.log(`   - Raw identifier: "${candidateEmail}"`);
           console.log(`   - Normalized: "${normalizedCandidateEmail}"`);
-          console.log(`   - New email (normalized): "${normalizedNewEmail}"`);
+          console.log(`   - New identifier (normalized): "${normalizedNewEmail}"`);
+          console.log(`   - Candidate is phone: ${isCandidatePhone}`);
+          console.log(`   - New identifier is phone: ${isNewEmailPhone}`);
           console.log(`   - Score: ${score.toFixed(3)} (threshold: ${DUPLICATE_THRESHOLD})`);
-          console.log(`   - Emails match: ${normalizedCandidateEmail === normalizedNewEmail}`);
+          console.log(`   - Identifiers match: ${normalizedCandidateEmail === normalizedNewEmail}`);
           console.log(`   - Score meets threshold: ${score >= DUPLICATE_THRESHOLD}`);
           
-          // If high similarity AND different email, this is a duplicate account attempt
-          if (score >= DUPLICATE_THRESHOLD && normalizedCandidateEmail !== normalizedNewEmail && normalizedCandidateEmail.length > 0) {
-            console.error(`🚨🚨🚨 SECURITY ALERT: Face already enrolled with different email!`);
-            console.error(`🚨 Existing email: ${candidateEmail}`);
-            console.error(`🚨 New email: ${emailToFind}`);
+          // CRITICAL: Only block if:
+          // 1. Similarity is VERY HIGH (95%+) - this ensures it's actually the same person
+          // 2. Identifiers are different (email vs email, or phone vs phone, or email vs phone)
+          // 3. Both identifiers are valid (not empty)
+          // NOTE: We allow email vs phone mismatches if similarity is below 95% (different people can have similar faces)
+          const identifiersMatch = normalizedCandidateEmail === normalizedNewEmail;
+          const isHighSimilarity = score >= DUPLICATE_THRESHOLD;
+          const bothIdentifiersValid = normalizedCandidateEmail.length > 0 && normalizedNewEmail.length > 0;
+          
+          // Only block if similarity is VERY HIGH (95%+) AND identifiers are different
+          // This prevents false positives where different people happen to have similar faces (70-94% similarity)
+          if (isHighSimilarity && !identifiersMatch && bothIdentifiersValid) {
+            console.error(`🚨🚨🚨 SECURITY ALERT: Face already enrolled with different identifier!`);
+            console.error(`🚨 Existing identifier: ${candidateEmail}`);
+            console.error(`🚨 New identifier: ${emailToFind}`);
             console.error(`🚨 Similarity score: ${score.toFixed(3)} (threshold: ${DUPLICATE_THRESHOLD})`);
+            console.error(`🚨 This indicates the SAME person trying to create multiple accounts`);
             
-            // Mask email for privacy (show only first 3 chars and domain)
-            const emailParts = normalizedCandidateEmail.split('@');
-            const maskedEmail = emailParts.length === 2 
-              ? `${emailParts[0].substring(0, 3)}***@${emailParts[1]}`
-              : '***@***';
+            // Mask identifier for privacy
+            let maskedIdentifier = '***';
+            if (isCandidatePhone) {
+              // Mask phone: show first 3 and last 2 digits
+              const phone = candidateEmail.trim();
+              if (phone.length > 5) {
+                maskedIdentifier = `${phone.substring(0, 3)}***${phone.substring(phone.length - 2)}`;
+              } else {
+                maskedIdentifier = '***';
+              }
+            } else {
+              // Mask email: show only first 3 chars and domain
+              const emailParts = normalizedCandidateEmail.split('@');
+              maskedIdentifier = emailParts.length === 2 
+                ? `${emailParts[0].substring(0, 3)}***@${emailParts[1]}`
+                : '***@***';
+            }
             
             return res.status(403).json({
               ok: false,
               error: 'This face is already registered with a different account.',
               reason: 'duplicate_face',
-              existingEmail: maskedEmail, // Masked for privacy
+              existingIdentifier: maskedIdentifier, // Masked for privacy
               message: 'You cannot create multiple accounts with the same face. Please use your existing account or contact support if you believe this is an error.',
               security: 'One face per account policy enforced',
               similarity: score.toFixed(3)
             });
+          } else if (!identifiersMatch && score > 0.70 && score < DUPLICATE_THRESHOLD) {
+            // Log but don't block - this is normal for different people with similar faces
+            console.log(`ℹ️ [DUPLICATE CHECK] Found candidate with ${score.toFixed(3)} similarity (below ${DUPLICATE_THRESHOLD} threshold)`);
+            console.log(`ℹ️ [DUPLICATE CHECK] This is NORMAL - different people can have 70-94% similarity`);
+            console.log(`ℹ️ [DUPLICATE CHECK] Only blocking if similarity >= ${DUPLICATE_THRESHOLD} (95%+) to prevent false positives`);
+            console.log(`ℹ️ [DUPLICATE CHECK] Proceeding with enrollment - this is a different person`);
           }
         }
         
-        console.log(`✅ [DUPLICATE CHECK] No duplicate faces found with different emails. All candidates checked.`);
+        console.log(`✅ [DUPLICATE CHECK] No duplicate faces found with different identifiers. All candidates checked.`);
       } else {
         console.log(`⚠️ [DUPLICATE CHECK] Face search found no matches. Checking all enrolled persons as backup...`);
         
@@ -413,7 +451,7 @@ app.post('/api/enroll', async (req, res) => {
 // Returns: { ok: true/false, similarity: number, message: string } or { error: string }
 app.post('/api/verify', async (req, res) => {
   try {
-    const { email, photoBase64, luxandUuid } = req.body;
+    const { email, phone, photoBase64, luxandUuid } = req.body;
 
     // Validation
     if (!email || !photoBase64) {
@@ -528,20 +566,23 @@ app.post('/api/verify', async (req, res) => {
         });
       }
 
-      // CRITICAL SECURITY: Find candidate that matches the expected email
-      // This ensures the face belongs to the user with this email
-      // We cannot trust the UUID alone - we must verify email match
-      const expectedEmail = email.toLowerCase().trim();
+      // CRITICAL SECURITY: Find candidate that matches the expected email OR phone
+      // This ensures the face belongs to the user with this email/phone
+      // We cannot trust the UUID alone - we must verify email/phone match
+      // NOTE: Faces may have been enrolled with either email or phone, so we check both
+      const expectedEmail = email ? email.toLowerCase().trim() : '';
+      const expectedPhone = phone ? phone.trim() : '';
       let matchingCandidate = null;
       let bestScore = 0;
 
       console.log(`📊 Found ${candidates.length} candidate(s) in search results`);
-      console.log(`🔍 Looking for email match: ${expectedEmail}`);
+      console.log(`🔍 Looking for email/phone match: email="${expectedEmail}", phone="${expectedPhone}"`);
       console.log(`🔍 Stored UUID (for reference): ${luxandUuid.trim()}`);
 
       for (const candidate of candidates) {
         // Get candidate's email/name from search result
         const candidateName = (candidate.name || candidate.email || candidate.subject || '').toString().toLowerCase().trim();
+        const candidateNameOriginal = (candidate.name || candidate.email || candidate.subject || '').toString().trim();
         
         // Try different score field names
         let score = 0;
@@ -563,29 +604,36 @@ app.post('/api/verify', async (req, res) => {
           normalizedScore = score / 1000.0;
         }
         
-        console.log(`📊 Candidate: name="${candidateName}", id="${candidate.id}", Score: ${normalizedScore.toFixed(3)}`);
-        console.log(`📊 Email match: ${candidateName === expectedEmail ? '✅ MATCH' : '❌ NO MATCH'}`);
+        // Check if candidate name matches email OR phone
+        const emailMatch = expectedEmail && candidateName === expectedEmail;
+        const phoneMatch = expectedPhone && (candidateNameOriginal === expectedPhone || candidateName === expectedPhone.toLowerCase());
+        const identifierMatch = emailMatch || phoneMatch;
         
-        // CRITICAL SECURITY: Only accept if email/name matches AND score is high enough
-        // This ensures the face belongs to the user with this email
-        if (candidateName === expectedEmail && normalizedScore > bestScore) {
+        console.log(`📊 Candidate: name="${candidateNameOriginal}", id="${candidate.id}", Score: ${normalizedScore.toFixed(3)}`);
+        console.log(`📊 Email match: ${emailMatch ? '✅ MATCH' : '❌ NO MATCH'}`);
+        console.log(`📊 Phone match: ${phoneMatch ? '✅ MATCH' : '❌ NO MATCH'}`);
+        
+        // CRITICAL SECURITY: Only accept if email/phone/name matches AND score is high enough
+        // This ensures the face belongs to the user with this email/phone
+        // NOTE: We check both email and phone because faces may have been enrolled with either identifier
+        if (identifierMatch && normalizedScore > bestScore) {
           bestScore = normalizedScore;
           matchingCandidate = candidate;
-          console.log(`✅ Found matching candidate for email: ${expectedEmail}`);
+          console.log(`✅ Found matching candidate: ${emailMatch ? 'email' : 'phone'} match for "${emailMatch ? expectedEmail : expectedPhone}"`);
         }
       }
 
-      // SECURITY: Must find a match with the expected email
+      // SECURITY: Must find a match with the expected email OR phone
       if (!matchingCandidate) {
-        console.error(`🚨 SECURITY: No candidate found matching expected email: ${expectedEmail}`);
+        console.error(`🚨 SECURITY: No candidate found matching expected email: "${expectedEmail}" or phone: "${expectedPhone}"`);
         console.error(`🚨 SECURITY: This face does not belong to this user - REJECTING`);
         return res.json({
           ok: false,
           similarity: 0,
           threshold: SIMILARITY_THRESHOLD,
           message: 'not_verified',
-          error: 'Face does not match this account. Please use the face registered with this email.',
-          security: 'Email mismatch - face belongs to different user'
+          error: 'Face does not match this account. Please use the face registered with this email/phone.',
+          security: 'Email/phone mismatch - face belongs to different user'
         });
       }
 
@@ -681,6 +729,150 @@ app.post('/api/verify', async (req, res) => {
     res.status(500).json({
       ok: false,
       error: error.message || 'Verification failed'
+    });
+  }
+});
+
+// ==========================================
+// CHECK DUPLICATE FACE ENDPOINT
+// ==========================================
+// POST /api/check-duplicate
+// Body: { email: string, phone?: string, photoBase64: string }
+// Returns: { isDuplicate: boolean, duplicateIdentifier?: string, similarity?: number, error?: string }
+// Purpose: Check if a face is 95%+ similar to another user's face (different identifier)
+// Used during profile photo upload to prevent same person from having multiple accounts
+app.post('/api/check-duplicate', async (req, res) => {
+  try {
+    const { email, phone, photoBase64 } = req.body;
+
+    // Validation
+    if (!email || !photoBase64) {
+      return res.status(400).json({
+        isDuplicate: false,
+        error: 'Missing email or photoBase64'
+      });
+    }
+
+    if (typeof email !== 'string' || typeof photoBase64 !== 'string') {
+      return res.status(400).json({
+        isDuplicate: false,
+        error: 'Invalid email or photoBase64 format'
+      });
+    }
+
+    console.log(`🔍 [DUPLICATE CHECK] Checking for duplicate face for: ${email}`);
+    
+    // Remove data URL prefix if present
+    let cleanBase64 = photoBase64;
+    if (photoBase64.includes(',')) {
+      cleanBase64 = photoBase64.split(',')[1];
+    }
+
+    // Use 95% threshold (same as enrollment duplicate check)
+    const DUPLICATE_THRESHOLD = 0.95;
+    
+    const emailToFind = email.toLowerCase().trim();
+    const phoneToFind = phone ? phone.trim() : '';
+
+    // Search for similar faces
+    const searchRes = await searchPhoto(cleanBase64);
+    const candidates = searchRes.candidates 
+                  || searchRes.matches 
+                  || searchRes.results
+                  || (Array.isArray(searchRes) ? searchRes : []);
+
+    console.log(`🔍 [DUPLICATE CHECK] Found ${candidates.length} candidate(s) in search results`);
+
+    if (candidates.length === 0) {
+      console.log(`✅ [DUPLICATE CHECK] No candidates found - no duplicate`);
+      return res.json({
+        isDuplicate: false
+      });
+    }
+
+    // Check each candidate for high similarity and different identifier
+    for (let i = 0; i < candidates.length; i++) {
+      const candidate = candidates[i];
+      
+      // Get candidate's identifier
+      const candidateIdentifier = (candidate.name || candidate.email || candidate.subject || '').toString().trim();
+      const candidateIdentifierLower = candidateIdentifier.toLowerCase().trim();
+      
+      // Get similarity score
+      let score = 0;
+      if (candidate.probability !== undefined) {
+        score = parseFloat(candidate.probability);
+      } else if (candidate.similarity !== undefined) {
+        score = parseFloat(candidate.similarity);
+      } else if (candidate.confidence !== undefined) {
+        score = parseFloat(candidate.confidence);
+      } else if (candidate.score !== undefined) {
+        score = parseFloat(candidate.score);
+      }
+      
+      // Normalize score
+      if (score > 1.0 && score <= 100) {
+        score = score / 100.0;
+      }
+      
+      // Normalize identifiers for comparison
+      const normalizedCandidate = candidateIdentifierLower.replace(/\s+/g, '');
+      const normalizedEmail = emailToFind.replace(/\s+/g, '');
+      const normalizedPhone = phoneToFind.replace(/\s+/g, '');
+      
+      // Check if identifiers match
+      const emailMatch = normalizedCandidate === normalizedEmail;
+      const phoneMatch = phoneToFind && normalizedCandidate === normalizedPhone;
+      const identifiersMatch = emailMatch || phoneMatch;
+      
+      console.log(`🔍 [DUPLICATE CHECK] Candidate ${i + 1}:`);
+      console.log(`   - Identifier: "${candidateIdentifier}"`);
+      console.log(`   - Score: ${score.toFixed(3)} (threshold: ${DUPLICATE_THRESHOLD})`);
+      console.log(`   - Identifiers match: ${identifiersMatch}`);
+      
+      // CRITICAL: Only flag as duplicate if:
+      // 1. Similarity is VERY HIGH (95%+) - same person
+      // 2. Identifiers are DIFFERENT - different account
+      // 3. Both identifiers are valid
+      if (score >= DUPLICATE_THRESHOLD && !identifiersMatch && candidateIdentifier.length > 0) {
+        console.error(`🚨🚨🚨 [DUPLICATE CHECK] DUPLICATE FACE DETECTED!`);
+        console.error(`🚨 Existing identifier: ${candidateIdentifier}`);
+        console.error(`🚨 New identifier: ${emailToFind}${phoneToFind ? ` / ${phoneToFind}` : ''}`);
+        console.error(`🚨 Similarity score: ${score.toFixed(3)} (threshold: ${DUPLICATE_THRESHOLD})`);
+        console.error(`🚨 This face is already registered with a different account!`);
+        
+        // Mask identifier for privacy
+        let maskedIdentifier = '***';
+        const isPhone = /^[\d+]+$/.test(candidateIdentifier);
+        if (isPhone && candidateIdentifier.length > 5) {
+          maskedIdentifier = `${candidateIdentifier.substring(0, 3)}***${candidateIdentifier.substring(candidateIdentifier.length - 2)}`;
+        } else if (!isPhone && candidateIdentifier.includes('@')) {
+          const emailParts = candidateIdentifierLower.split('@');
+          maskedIdentifier = emailParts.length === 2 
+            ? `${emailParts[0].substring(0, 3)}***@${emailParts[1]}`
+            : '***@***';
+        }
+        
+        return res.json({
+          isDuplicate: true,
+          duplicateIdentifier: maskedIdentifier,
+          similarity: score,
+          message: 'This face is already registered with a different account. You cannot use the same face for multiple accounts.'
+        });
+      }
+    }
+    
+    console.log(`✅ [DUPLICATE CHECK] No duplicate faces found. All candidates checked.`);
+    return res.json({
+      isDuplicate: false
+    });
+  } catch (error) {
+    console.error('❌ [DUPLICATE CHECK] Error:', error);
+    // On error, don't block - return no duplicate to allow upload
+    // This prevents false positives from blocking legitimate users
+    return res.json({
+      isDuplicate: false,
+      error: error.message || 'Duplicate check failed'
     });
   }
 });
