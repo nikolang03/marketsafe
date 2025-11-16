@@ -447,6 +447,12 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
         final XFile imageFile = await _cameraController!.takePicture();
         final Uint8List imageBytes = await imageFile.readAsBytes();
         
+        // CRITICAL: Save image path to SharedPreferences for enrollAllThreeFaces
+        if (imageFile.path.isNotEmpty) {
+          await prefs.setString('face_verification_blinkImagePath', imageFile.path);
+          print('✅ Blink image path saved: ${imageFile.path}');
+        }
+        
         final inputImage = InputImage.fromFilePath(imageFile.path);
         final faces = await _faceDetector.processImage(inputImage);
         
