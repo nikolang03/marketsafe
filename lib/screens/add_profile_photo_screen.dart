@@ -142,6 +142,12 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
         final email = userData['email']?.toString() ?? '';
         final phone = userData['phoneNumber']?.toString() ?? '';
         
+        print('🔍 User document data:');
+        print('   - Email: $email');
+        print('   - Phone: $phone');
+        print('   - luxandUuid: ${userData['luxandUuid']}');
+        print('   - luxand.uuid: ${userData['luxand']?['uuid']}');
+        
         if (email.isEmpty && phone.isEmpty) {
           _showErrorDialog('Error', 'User account missing email/phone. Cannot verify face.');
           return;
@@ -150,10 +156,19 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
         // CRITICAL: User must have completed 3 facial verification steps first
         // The face should already be enrolled from those steps
         // We only verify the profile photo matches the enrolled face, we do NOT enroll a new face
-        String? luxandUuid = userData['luxandUuid']?.toString();
+        // Check both 'luxandUuid' and 'luxand.uuid' fields (in case it's stored in nested structure)
+        String? luxandUuid = userData['luxandUuid']?.toString() ?? 
+                             userData['luxand']?['uuid']?.toString();
         
         if (luxandUuid == null || luxandUuid.isEmpty) {
-          print('❌ User has no luxandUuid. Face verification steps must be completed first.');
+          print('❌❌❌ CRITICAL: User has no luxandUuid!');
+          print('❌ User ID: $userId');
+          print('❌ Email: $email');
+          print('❌ Phone: $phone');
+          print('❌ User document keys: ${userData.keys.toList()}');
+          print('❌ This means enrollment did not complete successfully!');
+          print('❌ User must complete the 3 facial verification steps again.');
+          
           _showErrorDialog(
             'Face Verification Required',
             'Please complete the 3 facial verification steps (blink, move closer, head movement) before uploading your profile photo. Your face must be enrolled first.',
