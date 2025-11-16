@@ -414,6 +414,29 @@ app.post('/api/enroll', async (req, res) => {
 
     if (!luxandUuid) {
       console.error('❌ No UUID found in Luxand response. Response structure:', JSON.stringify(luxandResp, null, 2));
+      
+      // Check for specific Luxand error messages
+      const luxandMessage = luxandResp?.message?.toString().toLowerCase() || '';
+      const luxandStatus = luxandResp?.status?.toString().toLowerCase() || '';
+      
+      if (luxandStatus === 'failure' || luxandMessage.contains("can't find faces") || luxandMessage.contains('no faces')) {
+        console.error('❌❌❌ CRITICAL: Luxand cannot detect faces in the image!');
+        console.error('❌ This usually means:');
+        console.error('   1. Image quality is too poor');
+        console.error('   2. Face is not clearly visible in the image');
+        console.error('   3. Face is too small or too large in the frame');
+        console.error('   4. Image is corrupted or invalid');
+        console.error('   5. Face is partially obscured or at wrong angle');
+        
+        return res.status(400).json({
+          ok: false,
+          error: 'Face not detected in image. Please ensure your face is clearly visible, well-lit, and centered in the frame.',
+          reason: 'no_face_detected',
+          message: 'Luxand could not detect a face in the uploaded image. Please retake the photo with better lighting and ensure your face is clearly visible.',
+          luxandResponse: luxandResp
+        });
+      }
+      
       return res.status(500).json({
         ok: false,
         error: 'Enrollment failed: No UUID returned from Luxand',

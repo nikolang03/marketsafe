@@ -283,6 +283,42 @@ class ProductionFaceRecognitionService {
             continue;
           }
 
+          // Validate image contains a face before sending to backend
+          // This prevents sending invalid images to Luxand
+          print('🔍 Validating image ${i + 1} contains a detectable face...');
+          try {
+            final inputImage = InputImage.fromFilePath(imagePaths[i]);
+            final faceDetector = FaceDetector(
+              options: FaceDetectorOptions(
+                enableClassification: false,
+                enableLandmarks: false,
+                enableTracking: false,
+                minFaceSize: 0.1, // Lower threshold to catch more faces
+              ),
+            );
+            
+            final faces = await faceDetector.processImage(inputImage);
+            await faceDetector.close();
+            
+            if (faces.isEmpty) {
+              print('❌❌❌ CRITICAL: No face detected in image ${i + 1}!');
+              print('❌ Image path: ${imagePaths[i]}');
+              print('❌ Image size: ${imageBytes.length} bytes');
+              print('❌ This image will be skipped - Luxand will reject it');
+              errors.add('Image ${i + 1}: No face detected in image. Please retake with face clearly visible.');
+              continue; // Skip this image
+            } else {
+              print('✅ Face detected in image ${i + 1}: ${faces.length} face(s) found');
+              final face = faces.first;
+              final boundingBox = face.boundingBox;
+              print('   - Face bounding box: ${boundingBox.width}x${boundingBox.height} at (${boundingBox.left}, ${boundingBox.top})');
+            }
+          } catch (faceDetectionError) {
+            print('⚠️ Face detection validation failed for image ${i + 1}: $faceDetectionError');
+            print('⚠️ Proceeding with enrollment anyway - backend will validate');
+            // Continue with enrollment - backend will also validate
+          }
+
           print('📸 Enrolling face ${i + 1}/${imagePaths.length} via backend...');
           print('📸 Image file: ${imagePaths[i]}');
           print('📸 Image size: ${imageBytes.length} bytes');

@@ -108,23 +108,44 @@ export async function enrollPhoto(base64Image, name) {
   const responseText = await res.text();
   console.log(`📥 Raw Luxand response (first 500 chars):`, responseText.substring(0, 500));
   
+  // Try to parse response to check for failure status
+  let responseData;
+  try {
+    let cleanedResponse = responseText;
+    cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+      return `"message": "${p1}\\"${p2}\\"${p3}"`;
+    });
+    responseData = JSON.parse(cleanedResponse);
+  } catch (parseError) {
+    // If parsing fails, continue with status check
+  }
+  
+  // Check if Luxand returned a failure status (even with 200 OK)
+  if (responseData && responseData.status === 'failure') {
+    const errorMessage = responseData.message || 'Enrollment failed';
+    console.error(`❌❌❌ Luxand enrollment FAILED with status "failure"`);
+    console.error(`❌ Error message: ${errorMessage}`);
+    throw new Error(`Luxand enrollment failed: ${errorMessage}`);
+  }
+  
   if (!res.ok && res.status !== 201) {
     console.error(`❌ Luxand enroll error response:`, responseText.substring(0, 500));
     throw new Error(`Luxand enroll error (${res.status}): ${responseText.substring(0, 200)}`);
   }
 
   // Try to parse JSON, but handle non-JSON responses
-  let responseData;
-  try {
-    // Fix unescaped quotes in response (Luxand API bug)
-    let cleanedResponse = responseText;
-    // Replace unescaped quotes in message values: "message": "text "word" text" -> "message": "text \"word\" text"
-    cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
-      return `"message": "${p1}\\"${p2}\\"${p3}"`;
-    });
-    
-    responseData = JSON.parse(cleanedResponse);
-  } catch (parseError) {
+  // Note: responseData may already be parsed above if status check was done
+  if (!responseData) {
+    try {
+      // Fix unescaped quotes in response (Luxand API bug)
+      let cleanedResponse = responseText;
+      // Replace unescaped quotes in message values: "message": "text "word" text" -> "message": "text \"word\" text"
+      cleanedResponse = cleanedResponse.replace(/"message":\s*"([^"]*)"([^"]*)"([^"]*)"/g, (match, p1, p2, p3) => {
+        return `"message": "${p1}\\"${p2}\\"${p3}"`;
+      });
+      
+      responseData = JSON.parse(cleanedResponse);
+    } catch (parseError) {
     console.error(`❌ Failed to parse JSON response:`, parseError.message);
     console.error(`❌ Response text:`, responseText);
     
