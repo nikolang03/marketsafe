@@ -651,6 +651,94 @@ app.post('/api/verify', async (req, res) => {
         }
       }
 
+      // CRITICAL: After finding user's own match, continue checking ALL candidates for duplicates
+      // This ensures we detect if the same face is registered to multiple accounts
+      let duplicateFound = false;
+      let duplicateIdentifier = '';
+      let duplicateScore = 0;
+      
+      console.log(`🔍 [DUPLICATE CHECK] Scanning all candidates for duplicate faces (95%+ similarity to different accounts)...`);
+      for (const candidate of candidates) {
+        const candidateName = (candidate.name || candidate.email || candidate.subject || '').toString().trim();
+        const candidateNameLower = candidateName.toLowerCase().trim();
+        
+        // Get similarity score
+        let score = 0;
+        if (candidate.probability !== undefined) {
+          score = parseFloat(candidate.probability);
+        } else if (candidate.similarity !== undefined) {
+          score = parseFloat(candidate.similarity);
+        } else if (candidate.confidence !== undefined) {
+          score = parseFloat(candidate.confidence);
+        } else if (candidate.score !== undefined) {
+          score = parseFloat(candidate.score);
+        }
+        
+        // Normalize score
+        let normalizedScore = score;
+        if (score > 1.0 && score <= 100) {
+          normalizedScore = score / 100.0;
+        } else if (score > 100) {
+          normalizedScore = score / 1000.0;
+        }
+        
+        // Only check for duplicates if similarity is 95%+ (very high confidence)
+        if (normalizedScore >= MIN_MATCH_THRESHOLD) {
+          // Check if this candidate matches a DIFFERENT identifier (duplicate account)
+          const normalizePhone = (phone) => {
+            if (!phone) return '';
+            return phone.replace(/[\s+\-()]/g, '').trim();
+          };
+          
+          const normalizedCandidatePhone = normalizePhone(candidateName);
+          const normalizedExpectedPhone = normalizePhone(expectedPhone);
+          
+          const emailMatch = expectedEmail && candidateNameLower === expectedEmail;
+          const phoneMatch = expectedPhone && (
+            candidateName === expectedPhone || 
+            candidateNameLower === expectedPhone.toLowerCase() ||
+            normalizedCandidatePhone === normalizedExpectedPhone ||
+            candidateName.replace(/[\s+\-()]/g, '') === expectedPhone.replace(/[\s+\-()]/g, '')
+          );
+          const isOwnAccount = emailMatch || phoneMatch;
+          
+          // If this is a 95%+ match to a DIFFERENT account, it's a duplicate
+          if (!isOwnAccount && candidateName.length > 0) {
+            duplicateFound = true;
+            duplicateIdentifier = candidateName;
+            duplicateScore = normalizedScore;
+            console.error(`🚨🚨🚨 [DUPLICATE DETECTED] Face is 95%+ similar (${normalizedScore.toFixed(3)}) to another account: "${candidateName}"`);
+            console.error(`🚨 This face is already registered with a different account!`);
+            break; // Found duplicate, no need to continue
+          }
+        }
+      }
+      
+      if (duplicateFound) {
+        // Mask identifier for privacy
+        let maskedIdentifier = '***';
+        const isPhone = /^[\d+]+$/.test(duplicateIdentifier);
+        if (isPhone && duplicateIdentifier.length > 5) {
+          maskedIdentifier = `${duplicateIdentifier.substring(0, 3)}***${duplicateIdentifier.substring(duplicateIdentifier.length - 2)}`;
+        } else if (!isPhone && duplicateIdentifier.includes('@')) {
+          const emailParts = duplicateIdentifier.toLowerCase().split('@');
+          maskedIdentifier = emailParts.length === 2 
+            ? `${emailParts[0].substring(0, 3)}***@${emailParts[1]}`
+            : '***@***';
+        }
+        
+        return res.json({
+          ok: false,
+          similarity: duplicateScore,
+          threshold: MIN_MATCH_THRESHOLD,
+          message: 'not_verified',
+          error: 'This face is already registered with a different account. You cannot use the same face for multiple accounts.',
+          reason: 'duplicate_face',
+          duplicateIdentifier: maskedIdentifier,
+          security: 'Duplicate face detected - one face per account policy'
+        });
+      }
+
       // SECURITY: Must find a match with the expected email OR phone
       if (!matchingCandidate) {
         console.error(`🚨 SECURITY: No candidate found matching expected email: "${expectedEmail}" or phone: "${expectedPhone}"`);
