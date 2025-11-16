@@ -528,10 +528,9 @@
         function downloadAPK(event) {
             event.preventDefault();
             
-            // Direct download URL from Firebase Storage
-            // Updated to use the latest APK path (app/marketsafe.apk)
-            // Note: If you get a 403 error, you may need to upload the APK first using upload_apk.js
-            const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fmarketsafe.apk?alt=media';
+            // Direct download URL - serving from web hosting (marketsafe.apk in web folder)
+            // This file is served directly from Firebase Hosting, no Storage needed
+            const downloadUrl = 'https://marketsafe-e57cf.web.app/marketsafe.apk';
             
             // Use fetch to download the file as blob for direct download
             fetch(downloadUrl)
