@@ -367,7 +367,6 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         final firebaseAuthUid = firebaseUser?.uid ?? '';
         
         String userId;
-        bool isExistingUser = false;
         
         if (firebaseAuthUid.isNotEmpty) {
           // Check if user document exists with Firebase Auth UID
@@ -386,7 +385,6 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           if (existingDoc.exists) {
             // Use existing Firebase Auth UID to update the document (prevents "Unknown User" duplicate)
             userId = firebaseAuthUid;
-            isExistingUser = true;
             print('✅ Found existing user document with Firebase Auth UID: $userId');
             print('✅ Will update existing document instead of creating new one (prevents "Unknown User" duplicate)');
           } else {
