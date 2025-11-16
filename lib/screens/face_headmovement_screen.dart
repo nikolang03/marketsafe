@@ -10,6 +10,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'fill_information_screen.dart';
 import '../services/production_face_recognition_service.dart';
+import '../services/face_data_service.dart';
 
 class FaceHeadMovementScreen extends StatefulWidget {
   const FaceHeadMovementScreen({super.key});
@@ -49,8 +50,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
   List<double> _headXHistory = [];
   List<double> _headYHistory = [];
   static const int _historySize = 10;
-  static const double _movementThreshold = 12.0; // Degrees - lowered to make it easier
-  static const double _minMovementForProgress = 8.0; // Minimum movement to show progress
+  static const double _movementThreshold = 8.0; // Degrees - lowered for Android devices
+  static const double _minMovementForProgress = 5.0; // Minimum movement to show progress
   
   // Progress smoothing
   List<double> _progressHistory = [];
@@ -336,12 +337,12 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
       _headXHistory.add(headX);
       _headYHistory.add(headY);
       
-      if (_headXHistory.length >= 5) {
-        // Check if position is stable (low variance)
+      if (_headXHistory.length >= 3) {
+        // Check if position is stable (low variance) - more lenient for Android
         final avgX = _headXHistory.reduce((a, b) => a + b) / _headXHistory.length;
         final varianceX = _headXHistory.map((x) => (x - avgX) * (x - avgX)).reduce((a, b) => a + b) / _headXHistory.length;
         
-        if (varianceX < 25.0) { // Stable position
+        if (varianceX < 50.0) { // More lenient threshold for Android devices
           _initialX = avgX;
         }
       }
@@ -443,8 +444,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         final avgRecent = recentMovements.reduce((a, b) => a + b) / recentMovements.length;
         final recentMovement = avgRecent - _initialX!;
         
-        // Only trigger if recent average also shows left movement
-        if (recentMovement > _movementThreshold * 0.8) {
+        // Only trigger if recent average also shows left movement - more lenient (60% instead of 80%)
+        if (recentMovement > _movementThreshold * 0.6) {
           if (mounted) {
             setState(() => _movedLeft = true);
             _movementController.forward(from: 0.0);
@@ -467,8 +468,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         final avgRecent = recentMovements.reduce((a, b) => a + b) / recentMovements.length;
         final recentMovement = _initialX! - avgRecent;
         
-        // Only trigger if recent average also shows right movement
-        if (recentMovement > _movementThreshold * 0.8) {
+        // Only trigger if recent average also shows right movement - more lenient (60% instead of 80%)
+        if (recentMovement > _movementThreshold * 0.6) {
           if (mounted) {
             setState(() {
               _movedRight = true;
@@ -550,8 +551,27 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
       await prefs.setString('face_verification_headMovementMetrics', 
         '{"leftMovement": $_movedLeft, "rightMovement": $_movedRight, "completionTime": "${DateTime.now().toIso8601String()}"}');
       
+      // Update Firebase directly if userId is available
+      final currentUserId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
+      if (currentUserId != null && currentUserId.isNotEmpty) {
+        try {
+          await FaceDataService.updateFaceVerificationStep(
+            'headMovementCompleted',
+            metrics: {
+              'leftMovement': _movedLeft,
+              'rightMovement': _movedRight,
+              'completionTime': DateTime.now().toIso8601String(),
+            },
+            imagePath: imagePath,
+            userId: currentUserId,
+          );
+          print('✅ Head movement completion updated in Firebase');
+        } catch (firebaseError) {
+          print('⚠️ Failed to update Firebase (non-blocking): $firebaseError');
+        }
+      }
+      
       if (_lastDetectedFace != null) {
-        final currentUserId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
         final email = prefs.getString('signup_email') ?? '';
         final phone = prefs.getString('signup_phone') ?? '';
         

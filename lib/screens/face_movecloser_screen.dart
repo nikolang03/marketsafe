@@ -11,6 +11,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'face_headmovement_screen.dart';
 import '../services/production_face_recognition_service.dart';
 import '../services/face_landmark_service.dart';
+import '../services/face_data_service.dart';
 
 class FaceMoveCloserScreen extends StatefulWidget {
   const FaceMoveCloserScreen({super.key});
@@ -592,7 +593,7 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                           final luxandUuid = enrollResult['luxandUuid']?.toString() ?? '';
                           print('✅ Face enrolled successfully from move closer step. UUID: $luxandUuid');
                           
-                          // Save enrollment info
+                          // Save enrollment info to SharedPreferences
                           prefs.setBool('face_verification_moveCloserCompleted', true);
                           prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
                           if (imageFile.path.isNotEmpty) {
@@ -601,29 +602,80 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                           if (luxandUuid.isNotEmpty) {
                             prefs.setString('face_verification_moveCloserLuxandUuid', luxandUuid);
                           }
+                          
+                          // Update Firebase directly (userId is guaranteed to be non-null in this else block)
+                          try {
+                            await FaceDataService.updateFaceVerificationStep(
+                              'moveCloserCompleted',
+                              imagePath: imageFile.path,
+                              userId: userId,
+                            );
+                            print('✅ Move closer completion updated in Firebase');
+                          } catch (firebaseError) {
+                            print('⚠️ Failed to update Firebase (non-blocking): $firebaseError');
+                          }
                         } else {
                           final error = enrollResult['error']?.toString() ?? 'Unknown error';
                           print('⚠️ Face enrollment failed: $error');
                           // Still save that we completed the step
                           prefs.setBool('face_verification_moveCloserCompleted', true);
+                          prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
                           if (imageFile.path.isNotEmpty) {
                             prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+                          }
+                          
+                          // Update Firebase directly even if enrollment failed (userId is guaranteed to be non-null in this else block)
+                          try {
+                            await FaceDataService.updateFaceVerificationStep(
+                              'moveCloserCompleted',
+                              imagePath: imageFile.path,
+                              userId: userId,
+                            );
+                            print('✅ Move closer completion updated in Firebase');
+                          } catch (firebaseError) {
+                            print('⚠️ Failed to update Firebase (non-blocking): $firebaseError');
                           }
                         }
                       } catch (enrollError) {
                         print('⚠️ Enrollment error: $enrollError');
                         // Still save that we completed the step
                         prefs.setBool('face_verification_moveCloserCompleted', true);
+                        prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
                         if (imageFile.path.isNotEmpty) {
                           prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+                        }
+                        
+                        // Update Firebase directly even on enrollment error (userId is guaranteed to be non-null in this else block)
+                        try {
+                          await FaceDataService.updateFaceVerificationStep(
+                            'moveCloserCompleted',
+                            imagePath: imageFile.path,
+                            userId: userId,
+                          );
+                          print('✅ Move closer completion updated in Firebase');
+                        } catch (firebaseError) {
+                          print('⚠️ Failed to update Firebase (non-blocking): $firebaseError');
                         }
                       }
                     } else {
                       print('ℹ️ No email available - enrollment will happen later in fill_information_screen');
                       // Still save that we completed the step and captured the image
                       prefs.setBool('face_verification_moveCloserCompleted', true);
+                      prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
                       if (imageFile.path.isNotEmpty) {
                         prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+                      }
+                      
+                      // Update Firebase directly even without email (userId is guaranteed to be non-null in this else block)
+                      try {
+                        await FaceDataService.updateFaceVerificationStep(
+                          'moveCloserCompleted',
+                          imagePath: imageFile.path,
+                          userId: userId,
+                        );
+                        print('✅ Move closer completion updated in Firebase');
+                      } catch (firebaseError) {
+                        print('⚠️ Failed to update Firebase (non-blocking): $firebaseError');
                       }
                     }
                   }

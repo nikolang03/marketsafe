@@ -17,6 +17,7 @@ class FaceDataService {
     String step, {
     Map<String, dynamic>? metrics,
     String? imagePath,
+    String? userId, // Optional: if provided, use this instead of Firebase Auth user
   }) async {
     try {
       // Check if Firebase is initialized
@@ -25,13 +26,22 @@ class FaceDataService {
         return;
       }
       
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        print('No current user found, skipping face verification step update');
+      String? targetUserId = userId;
+      
+      // If userId not provided, try to get from Firebase Auth
+      if (targetUserId == null || targetUserId.isEmpty) {
+        final user = FirebaseAuth.instance.currentUser;
+        if (user != null) {
+          targetUserId = user.uid;
+        }
+      }
+      
+      if (targetUserId == null || targetUserId.isEmpty) {
+        print('No user ID found, skipping face verification step update');
         return;
       }
 
-      print('Updating face verification step: $step for user: ${user.uid}');
+      print('Updating face verification step: $step for user: $targetUserId');
 
       final Map<String, dynamic> updateData = {
         'faceData.$step': true,
@@ -46,7 +56,7 @@ class FaceDataService {
         print('📤 Uploading face image from path: $imagePath');
         try {
           // Upload face image to Firebase Storage
-          final imageUrl = await _uploadFaceImage(imagePath, user.uid, step);
+          final imageUrl = await _uploadFaceImage(imagePath, targetUserId, step);
           updateData['faceData.faceImageUrl'] = imageUrl;
           print('✅ Face image uploaded successfully: $imageUrl');
         } catch (e) {
@@ -56,8 +66,8 @@ class FaceDataService {
         print('⚠️ No image path provided for step: $step');
       }
 
-      await _firestore.collection('users').doc(user.uid).update(updateData);
-      print('Face verification step updated successfully: $step');
+      await _firestore.collection('users').doc(targetUserId).update(updateData);
+      print('✅ Face verification step updated successfully: $step for user: $targetUserId');
     } catch (e) {
       print('Error updating face verification step: $e');
       // Don't throw error - allow the app to continue
