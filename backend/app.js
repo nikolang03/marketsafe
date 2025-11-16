@@ -454,6 +454,13 @@ app.post('/api/enroll', async (req, res) => {
       } else {
         console.warn('⚠️⚠️⚠️ WARNING: Person not found in Luxand after enrollment!');
         console.warn('⚠️ This might indicate enrollment failed silently!');
+        console.warn(`⚠️ Expected UUID: ${luxandUuid}`);
+        console.warn(`⚠️ Expected email: ${email}`);
+        console.warn(`⚠️ Total persons in Luxand: ${persons.length}`);
+        console.warn(`⚠️ Listing all persons in Luxand:`);
+        persons.forEach((p, i) => {
+          console.warn(`   ${i + 1}. UUID: ${p.uuid || p.id}, Name: ${p.name || p.email || 'N/A'}`);
+        });
       }
     } catch (verifyError) {
       console.warn('⚠️ Could not verify enrollment (non-critical):', verifyError.message);
@@ -594,6 +601,26 @@ app.post('/api/verify', async (req, res) => {
         console.error(`❌ Email: ${email}`);
         console.error(`❌ Total persons in Luxand: ${persons.length}`);
         console.error('❌ This means enrollment never completed or face was deleted!');
+        
+        // Check if email exists with a different UUID (might have been enrolled with different identifier)
+        const emailMatch = persons.find(p => 
+          (p.name || p.email || '').toLowerCase().trim() === email.toLowerCase().trim()
+        );
+        
+        if (emailMatch) {
+          console.error(`⚠️ FOUND: Email exists in Luxand with DIFFERENT UUID!`);
+          console.error(`⚠️ Luxand UUID: ${emailMatch.uuid || emailMatch.id}`);
+          console.error(`⚠️ Firebase UUID: ${luxandUuid.trim()}`);
+          console.error(`⚠️ This indicates UUID mismatch - Firebase has wrong UUID!`);
+          console.error(`⚠️ Person name in Luxand: ${emailMatch.name || emailMatch.email}`);
+        } else {
+          console.error(`❌ Email "${email}" also NOT found in Luxand`);
+          console.error(`❌ Listing all persons in Luxand for debugging:`);
+          persons.forEach((p, i) => {
+            console.error(`   ${i + 1}. UUID: ${p.uuid || p.id}, Name: ${p.name || p.email || 'N/A'}`);
+          });
+        }
+        
         console.error('❌ User must re-enroll their face by completing the 3 facial verification steps!');
         
         return res.status(400).json({
