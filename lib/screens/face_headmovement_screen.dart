@@ -50,8 +50,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
   List<double> _headXHistory = [];
   List<double> _headYHistory = [];
   static const int _historySize = 10;
-  static const double _movementThreshold = 8.0; // Degrees - lowered for Android devices
-  static const double _minMovementForProgress = 5.0; // Minimum movement to show progress
+  static const double _movementThreshold = 6.0; // Degrees - further lowered for easier detection
+  static const double _minMovementForProgress = 3.0; // Minimum movement to show progress - more lenient
   
   // Progress smoothing
   List<double> _progressHistory = [];
@@ -342,7 +342,7 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         final avgX = _headXHistory.reduce((a, b) => a + b) / _headXHistory.length;
         final varianceX = _headXHistory.map((x) => (x - avgX) * (x - avgX)).reduce((a, b) => a + b) / _headXHistory.length;
         
-        if (varianceX < 50.0) { // More lenient threshold for Android devices
+        if (varianceX < 75.0) { // Even more lenient threshold for Android devices
           _initialX = avgX;
         }
       }
@@ -435,8 +435,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
     if (!_movedLeft && _initialX != null) {
       final leftMovement = smoothedX - _initialX!;
       // Require movement to be clearly left (positive) and above threshold
-      // Also check that we're not just slightly tilted (must be clearly moving left)
-      if (leftMovement > _movementThreshold && leftMovement > 0) {
+      // More lenient: allow movement that's at least 50% of threshold
+      if (leftMovement > _movementThreshold * 0.5 && leftMovement > 0) {
         // Verify movement is sustained (check last few values)
         final recentMovements = _headXHistory.length >= 3 
             ? _headXHistory.sublist(_headXHistory.length - 3)
@@ -444,8 +444,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         final avgRecent = recentMovements.reduce((a, b) => a + b) / recentMovements.length;
         final recentMovement = avgRecent - _initialX!;
         
-        // Only trigger if recent average also shows left movement - more lenient (60% instead of 80%)
-        if (recentMovement > _movementThreshold * 0.6) {
+        // Only trigger if recent average also shows left movement - very lenient (50% of threshold)
+        if (recentMovement > _movementThreshold * 0.5) {
           if (mounted) {
             setState(() => _movedLeft = true);
             _movementController.forward(from: 0.0);
@@ -460,7 +460,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
     if (_movedLeft && !_movedRight && _initialX != null) {
       final rightMovement = _initialX! - smoothedX; // Positive = right movement
       // Require movement to be clearly right (negative angle from initial) and above threshold
-      if (rightMovement > _movementThreshold && smoothedX < _initialX!) {
+      // More lenient: allow movement that's at least 50% of threshold
+      if (rightMovement > _movementThreshold * 0.5) {
         // Verify movement is sustained
         final recentMovements = _headXHistory.length >= 3 
             ? _headXHistory.sublist(_headXHistory.length - 3)
@@ -468,8 +469,8 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         final avgRecent = recentMovements.reduce((a, b) => a + b) / recentMovements.length;
         final recentMovement = _initialX! - avgRecent;
         
-        // Only trigger if recent average also shows right movement - more lenient (60% instead of 80%)
-        if (recentMovement > _movementThreshold * 0.6) {
+        // Only trigger if recent average also shows right movement - very lenient (50% of threshold)
+        if (recentMovement > _movementThreshold * 0.5) {
           if (mounted) {
             setState(() {
               _movedRight = true;
@@ -494,30 +495,16 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
           ));
           _progressController.forward(from: 0.0);
           
-          // Wait for progress to reach 100% before completing
+          // Complete immediately when both movements detected
           if (!_navigated) {
             _navigated = true;
-            // Wait for progress animation to complete (500ms) plus a small buffer
-            await Future.delayed(const Duration(milliseconds: 600));
-            
-            // Double-check progress is at 100% before completing
-            if (_progressAnimation.value >= 95.0) {
-              if (mounted) {
-                setState(() {
-                  _success = true;
-                });
-              }
-              await _completeHeadMovementVerification(face);
-            } else {
-              // If not at 100%, wait a bit more
-              await Future.delayed(const Duration(milliseconds: 300));
-              if (mounted && _progressAnimation.value >= 95.0) {
-                setState(() {
-                  _success = true;
-                });
-                await _completeHeadMovementVerification(face);
-              }
+            if (mounted) {
+              setState(() {
+                _success = true;
+              });
             }
+            // Complete immediately - no need to wait for animation
+            await _completeHeadMovementVerification(face);
           }
         }
       }
