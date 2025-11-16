@@ -395,9 +395,21 @@ app.post('/api/enroll', async (req, res) => {
     }
 
     // 3) Enroll to Luxand
-    console.log('🔍 Enrolling to Luxand...');
-    console.log(`📤 Sending base64 (length: ${cleanBase64.length}) to Luxand...`);
-    const luxandResp = await enrollPhoto(cleanBase64, email);
+    console.log('🔍🔍🔍 ENROLLING TO LUXAND 🔍🔍🔍');
+    console.log(`📤 Email: ${email}`);
+    console.log(`📤 Base64 length: ${cleanBase64.length} characters`);
+    console.log(`📤 Sending to Luxand API: POST /v2/person`);
+    
+    let luxandResp;
+    try {
+      luxandResp = await enrollPhoto(cleanBase64, email);
+      console.log('✅✅✅ LUXAND ENROLLMENT SUCCESS ✅✅✅');
+    } catch (luxandError) {
+      console.error('❌❌❌ LUXAND ENROLLMENT FAILED ❌❌❌');
+      console.error(`❌ Error: ${luxandError.message}`);
+      console.error(`❌ Stack: ${luxandError.stack}`);
+      throw new Error(`Luxand enrollment failed: ${luxandError.message}`);
+    }
     
     // Log the full response to see what Luxand returns
     console.log('📦 Full Luxand response:', JSON.stringify(luxandResp, null, 2));
@@ -422,16 +434,38 @@ app.post('/api/enroll', async (req, res) => {
       });
     }
     
-    console.log(`✅ Found UUID: ${luxandUuid}`);
+    console.log(`✅✅✅ Found UUID: ${luxandUuid}`);
+    console.log(`✅✅✅ Face enrolled successfully in Luxand. UUID: ${luxandUuid}`);
 
-    console.log(`✅ Face enrolled successfully. UUID: ${luxandUuid}`);
+    // 4) Verify enrollment by checking if person exists in Luxand
+    try {
+      console.log('🔍 Verifying enrollment by checking if person exists in Luxand...');
+      const allPersons = await listPersons();
+      const persons = allPersons.persons || allPersons.data || allPersons || [];
+      const enrolledPerson = persons.find(p => 
+        (p.uuid || p.id) === luxandUuid || 
+        (p.name || p.email || '').toLowerCase().trim() === email.toLowerCase().trim()
+      );
+      
+      if (enrolledPerson) {
+        console.log('✅✅✅ VERIFICATION: Person found in Luxand after enrollment!');
+        console.log(`✅ Person UUID: ${enrolledPerson.uuid || enrolledPerson.id}`);
+        console.log(`✅ Person name: ${enrolledPerson.name || enrolledPerson.email}`);
+      } else {
+        console.warn('⚠️⚠️⚠️ WARNING: Person not found in Luxand after enrollment!');
+        console.warn('⚠️ This might indicate enrollment failed silently!');
+      }
+    } catch (verifyError) {
+      console.warn('⚠️ Could not verify enrollment (non-critical):', verifyError.message);
+      // Don't fail enrollment if verification fails - enrollment might have succeeded
+    }
 
-    // 3) Return success
+    // 5) Return success
     res.json({
       ok: true,
       success: true,
       uuid: luxandUuid,
-      message: 'Face enrolled successfully'
+      message: 'Face enrolled successfully in Luxand'
     });
 
   } catch (error) {

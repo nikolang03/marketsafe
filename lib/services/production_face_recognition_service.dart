@@ -3,8 +3,10 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:camera/camera.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:http/http.dart' as http;
 import 'dart:typed_data';
 import 'dart:io';
+import 'dart:async';
 import 'dart:math';
 
 // import 'face_net_service.dart';  // Removed - TensorFlow Lite no longer used
@@ -227,13 +229,37 @@ class ProductionFaceRecognitionService {
       print('🔍 Backend URL: $_backendUrl');
       
       // Check if backend URL is configured
+      print('🔍 Backend URL: $_backendUrl');
       if (_backendUrl == 'https://your-backend-domain.com' || _backendUrl.isEmpty) {
+        print('❌❌❌ CRITICAL: Backend URL not configured!');
+        print('❌ Backend URL is: "$_backendUrl"');
+        print('❌ Enrollment will fail! Please set FACE_AUTH_BACKEND_URL environment variable.');
         return {
           'success': false,
           'error': 'Backend URL not configured. Please set FACE_AUTH_BACKEND_URL or update the default URL.',
           'enrolledCount': 0,
           'errors': ['Backend URL not configured'],
         };
+      }
+      
+      // Verify backend is reachable
+      try {
+        print('🔍 Testing backend connectivity...');
+        final testUri = Uri.parse('$_backendUrl/api/health');
+        final testResponse = await http.get(testUri).timeout(
+          const Duration(seconds: 5),
+          onTimeout: () {
+            throw TimeoutException('Backend health check timeout');
+          },
+        );
+        if (testResponse.statusCode == 200) {
+          print('✅ Backend is reachable and responding');
+        } else {
+          print('⚠️ Backend responded with status: ${testResponse.statusCode}');
+        }
+      } catch (e) {
+        print('⚠️⚠️⚠️ WARNING: Could not reach backend: $e');
+        print('⚠️ Enrollment may fail if backend is not accessible!');
       }
       
       String? luxandUuid;

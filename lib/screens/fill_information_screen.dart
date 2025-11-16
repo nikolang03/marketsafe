@@ -571,9 +571,12 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           } else {
             print('⚠️ Cannot enroll faces: No email or phone number');
           }
-        } catch (e) {
-          print('❌ Error enrolling faces from 3 verification steps: $e');
+        } catch (e, stackTrace) {
+          print('❌❌❌ CRITICAL ERROR enrolling faces from 3 verification steps: $e');
+          print('❌ Stack trace: $stackTrace');
+          print('⚠️ WARNING: Enrollment failed with exception! Face verification will NOT work!');
           // Don't block form submission - enrollment can be retried later
+          // But log it clearly so we can see what went wrong
         }
 
         // Overwrite the temporary ID with the final ID
