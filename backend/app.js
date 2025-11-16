@@ -570,6 +570,9 @@ app.post('/api/verify', async (req, res) => {
       // This ensures the face belongs to the user with this email/phone
       // We cannot trust the UUID alone - we must verify email/phone match
       // NOTE: Faces may have been enrolled with either email or phone, so we check both
+      // IMPORTANT: Only consider candidates with 95%+ similarity as potential matches
+      // Candidates with 70-94% similarity are likely different people and should be ignored
+      const MIN_MATCH_THRESHOLD = 0.95; // 95% - only consider very high similarity matches
       const expectedEmail = email ? email.toLowerCase().trim() : '';
       const expectedPhone = phone ? phone.trim() : '';
       let matchingCandidate = null;
@@ -578,6 +581,7 @@ app.post('/api/verify', async (req, res) => {
       console.log(`📊 Found ${candidates.length} candidate(s) in search results`);
       console.log(`🔍 Looking for email/phone match: email="${expectedEmail}", phone="${expectedPhone}"`);
       console.log(`🔍 Stored UUID (for reference): ${luxandUuid.trim()}`);
+      console.log(`🔍 Minimum match threshold: ${MIN_MATCH_THRESHOLD} (95%+) - ignoring candidates below this threshold`);
 
       for (const candidate of candidates) {
         // Get candidate's email/name from search result
@@ -604,6 +608,14 @@ app.post('/api/verify', async (req, res) => {
           normalizedScore = score / 1000.0;
         }
         
+        // CRITICAL: Only consider candidates with 95%+ similarity
+        // Candidates with 70-94% similarity are likely different people and should be ignored
+        if (normalizedScore < MIN_MATCH_THRESHOLD) {
+          console.log(`⚠️ Candidate: name="${candidateNameOriginal}", Score: ${normalizedScore.toFixed(3)} - IGNORED (below ${MIN_MATCH_THRESHOLD} threshold)`);
+          console.log(`⚠️ This is NORMAL - different people can have 70-94% similarity. Only 95%+ indicates same person.`);
+          continue; // Skip this candidate - it's likely a different person
+        }
+        
         // Check if candidate name matches email OR phone
         // Normalize phone numbers for comparison (remove +, spaces, etc.)
         const normalizePhone = (phone) => {
@@ -625,11 +637,11 @@ app.post('/api/verify', async (req, res) => {
         );
         const identifierMatch = emailMatch || phoneMatch;
         
-        console.log(`📊 Candidate: name="${candidateNameOriginal}", id="${candidate.id}", Score: ${normalizedScore.toFixed(3)}`);
+        console.log(`📊 Candidate: name="${candidateNameOriginal}", id="${candidate.id}", Score: ${normalizedScore.toFixed(3)} (>= ${MIN_MATCH_THRESHOLD})`);
         console.log(`📊 Email match: ${emailMatch ? '✅ MATCH' : '❌ NO MATCH'}`);
         console.log(`📊 Phone match: ${phoneMatch ? '✅ MATCH' : '❌ NO MATCH'}`);
         
-        // CRITICAL SECURITY: Only accept if email/phone/name matches AND score is high enough
+        // CRITICAL SECURITY: Only accept if email/phone/name matches AND score is high enough (95%+)
         // This ensures the face belongs to the user with this email/phone
         // NOTE: We check both email and phone because faces may have been enrolled with either identifier
         if (identifierMatch && normalizedScore > bestScore) {
@@ -643,13 +655,35 @@ app.post('/api/verify', async (req, res) => {
       if (!matchingCandidate) {
         console.error(`🚨 SECURITY: No candidate found matching expected email: "${expectedEmail}" or phone: "${expectedPhone}"`);
         console.error(`🚨 SECURITY: This face does not belong to this user - REJECTING`);
+        
+        // Log all candidates found for debugging
+        if (candidates.length > 0) {
+          console.error(`🔍 DEBUG: Found ${candidates.length} candidate(s) but none matched:`);
+          candidates.forEach((candidate, idx) => {
+            const candidateName = (candidate.name || candidate.email || candidate.subject || '').toString();
+            const candidateId = candidate.id || candidate.personId || 'N/A';
+            let score = 0;
+            if (candidate.probability !== undefined) score = parseFloat(candidate.probability);
+            else if (candidate.similarity !== undefined) score = parseFloat(candidate.similarity);
+            else if (candidate.confidence !== undefined) score = parseFloat(candidate.confidence);
+            else if (candidate.score !== undefined) score = parseFloat(candidate.score);
+            if (score > 1.0 && score <= 100) score = score / 100.0;
+            console.error(`  ${idx + 1}. Name: "${candidateName}", ID: ${candidateId}, Score: ${score.toFixed(3)}`);
+          });
+          console.error(`🔍 DEBUG: Your face may not be enrolled, or was enrolled with a different identifier.`);
+          console.error(`🔍 DEBUG: Please check if your face was enrolled with email "${expectedEmail}" or phone "${expectedPhone}"`);
+        } else {
+          console.error(`🔍 DEBUG: No candidates found at all. Your face may not be enrolled in the system.`);
+        }
+        
         return res.json({
           ok: false,
           similarity: 0,
           threshold: SIMILARITY_THRESHOLD,
           message: 'not_verified',
-          error: 'Face does not match this account. Please use the face registered with this email/phone.',
-          security: 'Email/phone mismatch - face belongs to different user'
+          error: 'Face does not match this account. Your face may not be enrolled, or was enrolled with a different identifier. Please complete the 3 facial verification steps again.',
+          security: 'Email/phone mismatch - face belongs to different user or not enrolled',
+          debug: candidates.length > 0 ? `Found ${candidates.length} candidate(s) but none matched your email/phone` : 'No candidates found - face may not be enrolled'
         });
       }
 
@@ -1131,6 +1165,88 @@ app.post('/api/delete-person', async (req, res) => {
     res.status(500).json({
       ok: false,
       error: error.message || 'Failed to delete person'
+    });
+  }
+});
+
+// ==========================================
+// CHECK PERSON BY IDENTIFIER ENDPOINT
+// ==========================================
+// GET /api/check-person?email=xxx&phone=xxx
+// Returns: { ok: bool, found: bool, persons: [...], message: string }
+// Checks if a person with the given email/phone exists in Luxand
+app.get('/api/check-person', async (req, res) => {
+  try {
+    const { email, phone } = req.query;
+    
+    if (!email && !phone) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Email or phone is required'
+      });
+    }
+    
+    console.log(`🔍 Checking for person with email: ${email || 'N/A'}, phone: ${phone || 'N/A'}`);
+    
+    const allPersons = await listPersons();
+    const persons = allPersons.persons || allPersons.data || allPersons || [];
+    
+    const emailToFind = email ? email.toLowerCase().trim() : '';
+    const phoneToFind = phone ? phone.trim() : '';
+    
+    const matchingPersons = persons.filter(person => {
+      const personName = (person.name || person.email || '').toString().trim();
+      const personNameLower = personName.toLowerCase().trim();
+      
+      // Match by email
+      if (emailToFind && personNameLower === emailToFind) {
+        return true;
+      }
+      
+      // Match by phone (normalize for comparison)
+      if (phoneToFind) {
+        const normalizePhone = (p) => p.replace(/[\s+\-()]/g, '').trim();
+        const normalizedPersonPhone = normalizePhone(personName);
+        const normalizedExpectedPhone = normalizePhone(phoneToFind);
+        if (normalizedPersonPhone === normalizedExpectedPhone || personName === phoneToFind) {
+          return true;
+        }
+      }
+      
+      return false;
+    });
+    
+    if (matchingPersons.length > 0) {
+      console.log(`✅ Found ${matchingPersons.length} person(s) matching the identifier`);
+      return res.json({
+        ok: true,
+        found: true,
+        persons: matchingPersons.map(p => ({
+          uuid: p.uuid || p.id,
+          name: p.name || p.email,
+          faces: p.faces || p.face_count || 0
+        })),
+        count: matchingPersons.length,
+        message: `Found ${matchingPersons.length} person(s) with this identifier`
+      });
+    } else {
+      console.log(`❌ No person found with email: ${emailToFind || 'N/A'} or phone: ${phoneToFind || 'N/A'}`);
+      return res.json({
+        ok: true,
+        found: false,
+        persons: [],
+        count: 0,
+        message: 'No person found with this identifier. Face may not be enrolled.'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Error checking person:', error);
+    return res.status(500).json({
+      ok: false,
+      error: error.message || 'Failed to check person',
+      found: false,
+      persons: [],
+      count: 0
     });
   }
 });
