@@ -175,18 +175,53 @@ class ProductionFaceRecognitionService {
       final moveCloserImagePath = prefs.getString('face_verification_moveCloserImagePath');
       final headMovementImagePath = prefs.getString('face_verification_headMovementImagePath');
 
-      final List<String> imagePaths = [
-        if (blinkImagePath != null && blinkImagePath.isNotEmpty) blinkImagePath,
-        if (moveCloserImagePath != null && moveCloserImagePath.isNotEmpty) moveCloserImagePath,
-        if (headMovementImagePath != null && headMovementImagePath.isNotEmpty) headMovementImagePath,
-      ];
+      print('🔍 Checking for saved face images:');
+      print('  - Blink image: ${blinkImagePath != null && blinkImagePath.isNotEmpty ? "✅ Found: $blinkImagePath" : "❌ Not found"}');
+      print('  - Move closer image: ${moveCloserImagePath != null && moveCloserImagePath.isNotEmpty ? "✅ Found: $moveCloserImagePath" : "❌ Not found"}');
+      print('  - Head movement image: ${headMovementImagePath != null && headMovementImagePath.isNotEmpty ? "✅ Found: $headMovementImagePath" : "❌ Not found"}');
+
+      final List<String> imagePaths = [];
+      
+      // Check each image path and verify file exists
+      if (blinkImagePath != null && blinkImagePath.isNotEmpty) {
+        final file = File(blinkImagePath);
+        if (await file.exists()) {
+          imagePaths.add(blinkImagePath);
+          print('✅ Blink image file exists: ${blinkImagePath}');
+        } else {
+          print('⚠️ Blink image file not found: ${blinkImagePath}');
+        }
+      }
+      
+      if (moveCloserImagePath != null && moveCloserImagePath.isNotEmpty) {
+        final file = File(moveCloserImagePath);
+        if (await file.exists()) {
+          imagePaths.add(moveCloserImagePath);
+          print('✅ Move closer image file exists: ${moveCloserImagePath}');
+        } else {
+          print('⚠️ Move closer image file not found: ${moveCloserImagePath}');
+        }
+      }
+      
+      if (headMovementImagePath != null && headMovementImagePath.isNotEmpty) {
+        final file = File(headMovementImagePath);
+        if (await file.exists()) {
+          imagePaths.add(headMovementImagePath);
+          print('✅ Head movement image file exists: ${headMovementImagePath}');
+        } else {
+          print('⚠️ Head movement image file not found: ${headMovementImagePath}');
+        }
+      }
 
       if (imagePaths.isEmpty) {
+        print('❌ No valid face images found. Please complete face verification steps.');
         return {
           'success': false,
           'error': 'No face images found. Please complete face verification steps.',
         };
       }
+      
+      print('✅ Found ${imagePaths.length} valid face image(s) to enroll');
 
       print('🔍 Enrolling ${imagePaths.length} face images to Luxand via backend...');
       print('🔍 Backend URL: $_backendUrl');
@@ -644,8 +679,21 @@ class ProductionFaceRecognitionService {
           print('🔍 Calling backend API for face verification...');
           print('🔍 Backend URL: $_backendUrl');
           print('🔍 Using UUID for 1:1 verification: $luxandUuid');
+          
+          // Get both email and phone to check both identifiers (faces may have been enrolled with either)
+          final userEmail = userData['email']?.toString() ?? '';
+          final userPhone = userData['phoneNumber']?.toString() ?? '';
+          
+          // CRITICAL: Always pass BOTH email and phone if available
+          // This allows verification to match faces enrolled with either identifier
+          // Example: Face enrolled with phone "09154615423" can be verified with email "user@gmail.com"
+          // as long as both identifiers belong to the same user
+          final verifyEmail = userEmail.isNotEmpty ? userEmail : emailOrPhone;
+          final verifyPhone = userPhone.isNotEmpty ? userPhone : null;
+          
           final verifyResult = await _backendServiceInstance.verify(
-            email: emailOrPhone,
+            email: verifyEmail, // Always pass email (or emailOrPhone if no email)
+            phone: verifyPhone, // Pass phone if available for cross-checking
             photoBytes: currentJpeg,
             luxandUuid: luxandUuid, // Pass UUID for 1:1 verification
           );
@@ -1294,21 +1342,22 @@ class ProductionFaceRecognitionService {
       // For profile photos, use slightly lower threshold (98.5%+) to account for different conditions
       double threshold;
       if (isProfilePhotoVerification) {
-        // PROFILE PHOTO: Slightly lower threshold (98.5%+) to account for different lighting/angles
+        // PROFILE PHOTO: More lenient threshold (75-80%) to account for different lighting/angles/conditions
+        // Profile photos can have very different conditions than verification steps
         if (embeddingCount <= 1) {
-          threshold = 0.98; // 98% for single embedding (profile photo)
-          absoluteMinimum = 0.94; // Reject if < 94%
+          threshold = 0.75; // 75% for single embedding (profile photo)
+          absoluteMinimum = 0.70; // Reject if < 70%
           print('📸 PROFILE PHOTO: Using threshold (${threshold.toStringAsFixed(3)}) for user with 1 embedding');
         } else if (embeddingCount == 2) {
-          threshold = 0.985; // 98.5% for 2 embeddings (profile photo)
-          absoluteMinimum = 0.945; // Reject if < 94.5%
+          threshold = 0.80; // 80% for 2 embeddings (profile photo)
+          absoluteMinimum = 0.75; // Reject if < 75%
           print('📸 PROFILE PHOTO: Using threshold (${threshold.toStringAsFixed(3)}) for user with 2 embeddings');
         } else {
-          threshold = 0.985; // 98.5% for 3+ embeddings (profile photo)
-          absoluteMinimum = 0.945; // Reject if < 94.5%
+          threshold = 0.80; // 80% for 3+ embeddings (profile photo)
+          absoluteMinimum = 0.75; // Reject if < 75%
           print('📸 PROFILE PHOTO: Using threshold (${threshold.toStringAsFixed(3)}) for user with ${embeddingCount} embeddings');
         }
-        print('📸 PROFILE PHOTO MODE: Requiring ${threshold.toStringAsFixed(3)} similarity (allows variation in lighting/angles)');
+        print('📸 PROFILE PHOTO MODE: Requiring ${threshold.toStringAsFixed(3)} similarity (allows variation in lighting/angles/conditions)');
       } else {
         // LOGIN: BALANCED STRICTNESS - 99%+ required for reliable recognition
         // CRITICAL SECURITY: Unregistered users must NEVER be able to log in
@@ -1679,7 +1728,7 @@ class ProductionFaceRecognitionService {
           // Profile photos can have very different lighting/angles, so similarity can be lower
           // If landmark features passed (even if not perfectly), use lower threshold
           // The landmark check already validated that this is the same person's face structure
-          final profilePhotoThreshold = 0.75; // Use 75% threshold for profile photos (more lenient)
+          final profilePhotoThreshold = 0.75; // Use 75% threshold during loop (will use 80% at final check)
           
           if (similarity >= profilePhotoThreshold) {
             print('✅ PROFILE PHOTO MATCH: Similarity ${similarity.toStringAsFixed(4)} >= ${profilePhotoThreshold.toStringAsFixed(3)}');
@@ -1688,7 +1737,7 @@ class ProductionFaceRecognitionService {
             print('🚨 PROFILE PHOTO: Similarity ${similarity.toStringAsFixed(4)} < ${profilePhotoThreshold.toStringAsFixed(3)} (will check at end if acceptable)');
             print('   - Normal threshold: ${threshold.toStringAsFixed(3)}, Profile photo threshold: ${profilePhotoThreshold.toStringAsFixed(3)}');
             print('   - Euclidean distance: ${euclideanDistance.toStringAsFixed(4)} (max: ${maxDistanceForSamePerson.toStringAsFixed(2)})');
-            print('   - Note: Final check will use more lenient threshold for profile photos');
+            print('   - Note: Final check will use more lenient threshold (80%) for profile photos');
           }
         } else {
           // LOGIN: Require BOTH similarity >= threshold (0.99) AND distance <= maxDistance (0.12)
@@ -2523,12 +2572,13 @@ class ProductionFaceRecognitionService {
       }
       
       // Final validation - require threshold based on verification type
-      // For profile photos, use slightly lower threshold (98.5%+) to account for different conditions
+      // For profile photos, use more lenient threshold (80-85%) to account for different lighting/angles/conditions
+      // Profile photos can have very different conditions than verification steps, so similarity can be lower
       // For login, use balanced 99%+ threshold (RELIABLE RECOGNITION) - balanced for legitimate users
       // BALANCED SECURITY: Unregistered users must NEVER pass this check
       // BALANCED: Use the SAME threshold as set earlier (0.99 for login) - balanced for legitimate users
       final finalThreshold = isProfilePhotoVerification
-          ? (embeddingCount >= 3 ? 0.985 : (embeddingCount == 2 ? 0.985 : 0.98))
+          ? (embeddingCount >= 3 ? 0.80 : (embeddingCount == 2 ? 0.80 : 0.75)) // More lenient: 75-80% for profile photos
           : threshold; // LOGIN: Use the same threshold (0.99 = 99%) as set earlier - balanced for legitimate users
       
       // CRITICAL SECURITY: Additional validation - verify Euclidean distance for login

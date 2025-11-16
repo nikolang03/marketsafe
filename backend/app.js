@@ -605,8 +605,24 @@ app.post('/api/verify', async (req, res) => {
         }
         
         // Check if candidate name matches email OR phone
+        // Normalize phone numbers for comparison (remove +, spaces, etc.)
+        const normalizePhone = (phone) => {
+          if (!phone) return '';
+          return phone.replace(/[\s+\-()]/g, '').trim();
+        };
+        
+        const normalizedCandidatePhone = normalizePhone(candidateNameOriginal);
+        const normalizedExpectedPhone = normalizePhone(expectedPhone);
+        
         const emailMatch = expectedEmail && candidateName === expectedEmail;
-        const phoneMatch = expectedPhone && (candidateNameOriginal === expectedPhone || candidateName === expectedPhone.toLowerCase());
+        // Phone match: check both original and normalized formats
+        const phoneMatch = expectedPhone && (
+          candidateNameOriginal === expectedPhone || 
+          candidateName === expectedPhone.toLowerCase() ||
+          normalizedCandidatePhone === normalizedExpectedPhone ||
+          normalizedCandidatePhone === normalizePhone(candidateName) ||
+          candidateNameOriginal.replace(/[\s+\-()]/g, '') === expectedPhone.replace(/[\s+\-()]/g, '')
+        );
         const identifierMatch = emailMatch || phoneMatch;
         
         console.log(`📊 Candidate: name="${candidateNameOriginal}", id="${candidate.id}", Score: ${normalizedScore.toFixed(3)}`);
