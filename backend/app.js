@@ -452,27 +452,50 @@ app.post('/api/enroll', async (req, res) => {
         console.log(`✅ Person UUID: ${enrolledPerson.uuid || enrolledPerson.id}`);
         console.log(`✅ Person name: ${enrolledPerson.name || enrolledPerson.email}`);
       } else {
-        console.warn('⚠️⚠️⚠️ WARNING: Person not found in Luxand after enrollment!');
-        console.warn('⚠️ This might indicate enrollment failed silently!');
-        console.warn(`⚠️ Expected UUID: ${luxandUuid}`);
-        console.warn(`⚠️ Expected email: ${email}`);
-        console.warn(`⚠️ Total persons in Luxand: ${persons.length}`);
-        console.warn(`⚠️ Listing all persons in Luxand:`);
+        console.error('❌❌❌ CRITICAL: Person not found in Luxand after enrollment!');
+        console.error('❌ This means enrollment FAILED - UUID was returned but person does not exist!');
+        console.error(`❌ Expected UUID: ${luxandUuid}`);
+        console.error(`❌ Expected email: ${email}`);
+        console.error(`❌ Total persons in Luxand: ${persons.length}`);
+        console.error(`❌ Listing all persons in Luxand:`);
         persons.forEach((p, i) => {
-          console.warn(`   ${i + 1}. UUID: ${p.uuid || p.id}, Name: ${p.name || p.email || 'N/A'}`);
+          console.error(`   ${i + 1}. UUID: ${p.uuid || p.id}, Name: ${p.name || p.email || 'N/A'}`);
+        });
+        console.error('❌ Enrollment verification FAILED - returning error to prevent saving invalid UUID!');
+        
+        // CRITICAL: Fail enrollment if verification shows person doesn't exist
+        // This prevents saving invalid UUIDs to Firebase
+        return res.status(500).json({
+          ok: false,
+          error: 'Enrollment verification failed: Person not found in Luxand after enrollment. Please try again.',
+          reason: 'enrollment_verification_failed',
+          message: 'Face enrollment did not complete successfully. Please complete the facial verification steps again.',
+          luxandUuid: luxandUuid, // Include UUID for debugging
+          totalPersonsInLuxand: persons.length
         });
       }
     } catch (verifyError) {
-      console.warn('⚠️ Could not verify enrollment (non-critical):', verifyError.message);
-      // Don't fail enrollment if verification fails - enrollment might have succeeded
+      console.error('❌❌❌ CRITICAL: Could not verify enrollment!');
+      console.error(`❌ Error: ${verifyError.message}`);
+      console.error(`❌ Stack: ${verifyError.stack}`);
+      // CRITICAL: Fail enrollment if verification check itself fails
+      // This ensures we don't save UUIDs when we can't verify enrollment succeeded
+      return res.status(500).json({
+        ok: false,
+        error: 'Enrollment verification failed: Could not verify if person exists in Luxand. Please try again.',
+        reason: 'enrollment_verification_error',
+        message: 'Face enrollment verification failed. Please complete the facial verification steps again.',
+        verificationError: verifyError.message
+      });
     }
 
-    // 5) Return success
+    // 5) Return success ONLY if verification passed
+    console.log('✅✅✅ Enrollment and verification COMPLETE - returning success');
     res.json({
       ok: true,
       success: true,
       uuid: luxandUuid,
-      message: 'Face enrolled successfully in Luxand'
+      message: 'Face enrolled successfully in Luxand and verified'
     });
 
   } catch (error) {
