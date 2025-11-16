@@ -402,7 +402,7 @@ app.post('/api/enroll', async (req, res) => {
     console.log('📦 Full Luxand response:', JSON.stringify(luxandResp, null, 2));
     
     // Try multiple possible UUID fields
-    const luxandUuid = luxandResp.uuid 
+    let luxandUuid = luxandResp.uuid 
                     || luxandResp.id 
                     || luxandResp.subject_id
                     || luxandResp.subjectId
@@ -445,33 +445,94 @@ app.post('/api/enroll', async (req, res) => {
     }
     
     console.log(`✅✅✅ Found UUID: ${luxandUuid}`);
+    console.log(`✅✅✅ UUID extracted from response structure:`);
+    console.log(`   - luxandResp.uuid: ${luxandResp.uuid || 'null'}`);
+    console.log(`   - luxandResp.id: ${luxandResp.id || 'null'}`);
+    console.log(`   - luxandResp.subject_id: ${luxandResp.subject_id || 'null'}`);
+    console.log(`   - luxandResp.faces?.[0]?.uuid: ${luxandResp.faces?.[0]?.uuid || 'null'}`);
+    console.log(`   - luxandResp.data?.uuid: ${luxandResp.data?.uuid || 'null'}`);
+    console.log(`   - Final extracted UUID: ${luxandUuid}`);
     console.log(`✅✅✅ Face enrolled successfully in Luxand. UUID: ${luxandUuid}`);
 
     // 4) Verify enrollment by checking if person exists in Luxand
+    // CRITICAL: Add a small delay to allow Luxand to process the enrollment
+    // Sometimes Luxand needs a moment to index the new person
+    console.log('⏳ Waiting 2 seconds for Luxand to process enrollment...');
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
     try {
       console.log('🔍 Verifying enrollment by checking if person exists in Luxand...');
+      console.log(`🔍 Looking for UUID: ${luxandUuid}`);
+      console.log(`🔍 Looking for email: ${email}`);
+      
       const allPersons = await listPersons();
+      console.log(`📦 Raw listPersons response:`, JSON.stringify(allPersons, null, 2));
+      
       const persons = allPersons.persons || allPersons.data || allPersons || [];
-      const enrolledPerson = persons.find(p => 
-        (p.uuid || p.id) === luxandUuid || 
-        (p.name || p.email || '').toLowerCase().trim() === email.toLowerCase().trim()
-      );
+      console.log(`📊 Found ${persons.length} total person(s) in Luxand`);
+      
+      // Log all persons for debugging
+      console.log(`📋 Listing all persons in Luxand:`);
+      persons.forEach((p, i) => {
+        const personUuid = p.uuid || p.id || 'N/A';
+        const personName = p.name || p.email || 'N/A';
+        const personFaces = p.faces?.length || p.face?.length || 0;
+        console.log(`   ${i + 1}. UUID: ${personUuid}, Name: ${personName}, Faces: ${personFaces}`);
+      });
+      
+      // Try to find the person by UUID first
+      let enrolledPerson = persons.find(p => {
+        const personUuid = (p.uuid || p.id || '').toString().trim();
+        return personUuid === luxandUuid.toString().trim();
+      });
+      
+      if (enrolledPerson) {
+        console.log('✅✅✅ VERIFICATION: Person found by UUID!');
+        console.log(`✅ Person UUID: ${enrolledPerson.uuid || enrolledPerson.id}`);
+        console.log(`✅ Person name: ${enrolledPerson.name || enrolledPerson.email}`);
+        console.log(`✅ Person faces: ${enrolledPerson.faces?.length || enrolledPerson.face?.length || 0}`);
+      } else {
+        // Try to find by email/name as backup
+        console.log('⚠️ Person not found by UUID, trying to find by email/name...');
+        enrolledPerson = persons.find(p => {
+          const personName = (p.name || p.email || '').toString().toLowerCase().trim();
+          return personName === email.toLowerCase().trim();
+        });
+        
+        if (enrolledPerson) {
+          const foundUuid = enrolledPerson.uuid || enrolledPerson.id;
+          console.log(`⚠️⚠️⚠️ WARNING: Person found by email but UUID mismatch!`);
+          console.log(`⚠️ Expected UUID: ${luxandUuid}`);
+          console.log(`⚠️ Found UUID: ${foundUuid}`);
+          console.log(`⚠️ This might indicate the UUID extraction was wrong!`);
+          
+          // Use the actual UUID from Luxand instead of the extracted one
+          if (foundUuid && foundUuid !== luxandUuid) {
+            console.log(`🔧 Using actual UUID from Luxand: ${foundUuid}`);
+            luxandUuid = foundUuid;
+            enrolledPerson = persons.find(p => (p.uuid || p.id) === foundUuid);
+          }
+        }
+      }
       
       if (enrolledPerson) {
         console.log('✅✅✅ VERIFICATION: Person found in Luxand after enrollment!');
         console.log(`✅ Person UUID: ${enrolledPerson.uuid || enrolledPerson.id}`);
         console.log(`✅ Person name: ${enrolledPerson.name || enrolledPerson.email}`);
+        const faceCount = enrolledPerson.faces?.length || enrolledPerson.face?.length || 0;
+        console.log(`✅ Person has ${faceCount} face(s) enrolled`);
+        
+        if (faceCount === 0) {
+          console.error('⚠️⚠️⚠️ WARNING: Person exists but has 0 faces!');
+          console.error('⚠️ This might indicate the photo was not properly added to the person!');
+        }
       } else {
         console.error('❌❌❌ CRITICAL: Person not found in Luxand after enrollment!');
         console.error('❌ This means enrollment FAILED - UUID was returned but person does not exist!');
         console.error(`❌ Expected UUID: ${luxandUuid}`);
         console.error(`❌ Expected email: ${email}`);
         console.error(`❌ Total persons in Luxand: ${persons.length}`);
-        console.error(`❌ Listing all persons in Luxand:`);
-        persons.forEach((p, i) => {
-          console.error(`   ${i + 1}. UUID: ${p.uuid || p.id}, Name: ${p.name || p.email || 'N/A'}`);
-        });
-        console.error('❌ Enrollment verification FAILED - returning error to prevent saving invalid UUID!');
+        console.error(`❌ Enrollment verification FAILED - returning error to prevent saving invalid UUID!`);
         
         // CRITICAL: Fail enrollment if verification shows person doesn't exist
         // This prevents saving invalid UUIDs to Firebase
@@ -481,7 +542,8 @@ app.post('/api/enroll', async (req, res) => {
           reason: 'enrollment_verification_failed',
           message: 'Face enrollment did not complete successfully. Please complete the facial verification steps again.',
           luxandUuid: luxandUuid, // Include UUID for debugging
-          totalPersonsInLuxand: persons.length
+          totalPersonsInLuxand: persons.length,
+          luxandResponse: luxandResp // Include original response for debugging
         });
       }
     } catch (verifyError) {
