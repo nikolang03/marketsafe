@@ -361,30 +361,48 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           throw Exception('Username must contain at least one alphanumeric character');
         }
         
-        // Generate user ID in format: user_{timestamp}_{sanitizedUsername}
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final userId = 'user_${timestamp}_$sanitizedUsername';
+        // CRITICAL: Use Firebase Auth UID as the primary user ID to avoid duplicate "Unknown User" entries
+        // Check if user document already exists with Firebase Auth UID (from AdminSyncService.initializeUser)
+        final firebaseUser = FirebaseAuth.instance.currentUser;
+        final firebaseAuthUid = firebaseUser?.uid ?? '';
         
-        print('🆔 Generated user ID: $userId (format: user_{timestamp}_{username})');
-        print('   - Timestamp: $timestamp');
-        print('   - Original username: $username');
-        print('   - Sanitized username: $sanitizedUsername');
+        String userId;
+        bool isExistingUser = false;
         
-        // Check if user document already exists (from AdminSyncService.initializeUser) with network retry
-        final existingDoc = await NetworkService.executeWithRetry(
-          () => FirebaseFirestore.instanceFor(
-            app: Firebase.app(),
-            databaseId: 'marketsafe',
-          ).collection('users').doc(userId).get(),
-          maxRetries: 3,
-          retryDelay: const Duration(seconds: 2),
-          loadingMessage: 'Checking user data...',
-          context: context,
-          showNetworkErrors: true,
-        );
-        
-        if (existingDoc.exists) {
-          print('⚠️ User document already exists - will update instead of creating new');
+        if (firebaseAuthUid.isNotEmpty) {
+          // Check if user document exists with Firebase Auth UID
+          final existingDoc = await NetworkService.executeWithRetry(
+            () => FirebaseFirestore.instanceFor(
+              app: Firebase.app(),
+              databaseId: 'marketsafe',
+            ).collection('users').doc(firebaseAuthUid).get(),
+            maxRetries: 3,
+            retryDelay: const Duration(seconds: 2),
+            loadingMessage: 'Checking user data...',
+            context: context,
+            showNetworkErrors: true,
+          );
+          
+          if (existingDoc.exists) {
+            // Use existing Firebase Auth UID to update the document (prevents "Unknown User" duplicate)
+            userId = firebaseAuthUid;
+            isExistingUser = true;
+            print('✅ Found existing user document with Firebase Auth UID: $userId');
+            print('✅ Will update existing document instead of creating new one (prevents "Unknown User" duplicate)');
+          } else {
+            // No existing document, use Firebase Auth UID as the user ID
+            userId = firebaseAuthUid;
+            print('🆔 Using Firebase Auth UID as user ID: $userId');
+          }
+        } else {
+          // Fallback: Generate user ID in format: user_{timestamp}_{sanitizedUsername}
+          // This should rarely happen, but provides a fallback if Firebase Auth is not available
+          final timestamp = DateTime.now().millisecondsSinceEpoch;
+          userId = 'user_${timestamp}_$sanitizedUsername';
+          print('⚠️ No Firebase Auth UID available, generating user ID: $userId (format: user_{timestamp}_{username})');
+          print('   - Timestamp: $timestamp');
+          print('   - Original username: $username');
+          print('   - Sanitized username: $sanitizedUsername');
         }
         
         // Store the user ID and username in SharedPreferences for later verification checks
