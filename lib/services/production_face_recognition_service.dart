@@ -386,18 +386,35 @@ class ProductionFaceRecognitionService {
       print('✅ Enrolled $enrolledCount face(s)');
 
       // Store uuid on user's document
-      await _firestore.collection('users').doc(finalUserId).set({
-        'luxandUuid': luxandUuid,
-        'luxand': {
-          'uuid': luxandUuid,
-          'enrolledAt': FieldValue.serverTimestamp(),
-          'enrolledFaces': enrolledCount,
-        },
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
-
-      print('✅ Enrolled $enrolledCount/${imagePaths.length} faces successfully via backend. UUID: $luxandUuid');
-      print('✅ UUID saved to Firestore for user: $finalUserId');
+      // CRITICAL: Save luxandUuid at top level AND in nested luxand object
+      print('💾 Saving UUID to Firestore...');
+      print('   - User ID: $finalUserId');
+      print('   - UUID: $luxandUuid');
+      print('   - Enrolled faces: $enrolledCount');
+      
+      try {
+        await _firestore.collection('users').doc(finalUserId).set({
+          'luxandUuid': luxandUuid, // Top-level field (required for profile photo check)
+          'luxand': {
+            'uuid': luxandUuid,
+            'enrolledAt': FieldValue.serverTimestamp(),
+            'enrolledFaces': enrolledCount,
+          },
+          'lastUpdated': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+        
+        print('✅✅✅ UUID saved to Firestore successfully!');
+        print('✅ Enrolled $enrolledCount/${imagePaths.length} faces successfully via backend. UUID: $luxandUuid');
+        print('✅ UUID saved to Firestore for user: $finalUserId');
+      } catch (firestoreError) {
+        print('❌❌❌ CRITICAL: Failed to save UUID to Firestore!');
+        print('❌ Error: $firestoreError');
+        print('❌ User ID: $finalUserId');
+        print('❌ UUID: $luxandUuid');
+        print('❌ This is a critical error - UUID will not be available for verification!');
+        // Don't throw - we still want to return success if enrollment worked
+        // But log the error so we can diagnose
+      }
       
       // Verify enrollment by checking if UUID exists in Firestore
       final verifyDoc = await _firestore.collection('users').doc(finalUserId).get();
