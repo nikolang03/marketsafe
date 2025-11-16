@@ -258,12 +258,17 @@ class ProductionFaceRecognitionService {
           }
 
           print('📸 Enrolling face ${i + 1}/${imagePaths.length} via backend...');
+          print('📸 Image file: ${imagePaths[i]}');
+          print('📸 Image size: ${imageBytes.length} bytes');
+          print('📸 Enrollment identifier: $email');
           
           // Call backend API for enrollment (backend handles liveness + Luxand enrollment)
           final enrollResult = await _backendServiceInstance.enroll(
             email: email,
             photoBytes: imageBytes,
           );
+          
+          print('📸 Enrollment result for face ${i + 1}: success=${enrollResult['success']}, uuid=${enrollResult['uuid']}, error=${enrollResult['error']}');
 
           if (enrollResult['success'] == true) {
             final uuid = enrollResult['uuid']?.toString();
@@ -314,6 +319,20 @@ class ProductionFaceRecognitionService {
       }, SetOptions(merge: true));
 
       print('✅ Enrolled $enrolledCount/${imagePaths.length} faces successfully via backend. UUID: $luxandUuid');
+      print('✅ UUID saved to Firestore for user: $finalUserId');
+      
+      // Verify enrollment by checking if UUID exists in Firestore
+      final verifyDoc = await _firestore.collection('users').doc(finalUserId).get();
+      if (verifyDoc.exists) {
+        final savedUuid = verifyDoc.data()?['luxandUuid']?.toString() ?? '';
+        if (savedUuid == luxandUuid) {
+          print('✅✅✅ ENROLLMENT VERIFICATION: UUID confirmed in Firestore!');
+        } else {
+          print('⚠️⚠️⚠️ WARNING: UUID mismatch! Expected: $luxandUuid, Found: $savedUuid');
+        }
+      } else {
+        print('⚠️⚠️⚠️ WARNING: User document not found after enrollment!');
+      }
       return {
         'success': true,
         'luxandUuid': luxandUuid,

@@ -522,14 +522,24 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
                 final savedUuid = verifyDoc.data()?['luxandUuid']?.toString() ?? '';
                 if (savedUuid.isNotEmpty) {
                   print('✅ Verified UUID saved to Firestore: $savedUuid');
+                  print('✅✅✅ ENROLLMENT VERIFIED: Face is enrolled and ready for verification!');
                 } else {
-                  print('⚠️ WARNING: UUID not found in Firestore after enrollment');
+                  print('⚠️⚠️⚠️ WARNING: UUID not found in Firestore after enrollment!');
+                  print('⚠️ This means enrollment may have failed silently!');
                 }
               }
             } else {
               final errorMessage = enrollResult['error']?.toString() ?? 'Unknown error';
               final reason = enrollResult['reason']?.toString() ?? '';
-              print('⚠️ Failed to enroll faces from 3 verification steps: $errorMessage');
+              final errors = enrollResult['errors'] as List<String>?;
+              print('❌❌❌ CRITICAL: Enrollment FAILED!');
+              print('❌ Enrollment identifier: $identifier');
+              print('❌ Error: $errorMessage');
+              print('❌ Reason: $reason');
+              if (errors != null && errors.isNotEmpty) {
+                print('❌ Detailed errors: ${errors.join("; ")}');
+              }
+              print('⚠️ WARNING: Face verification will NOT work until enrollment succeeds!');
               
               // Even if enrollment fails, clean up test enrollment
               if (_pendingTestUuidCleanup.isNotEmpty) {
