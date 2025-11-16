@@ -578,6 +578,39 @@ app.post('/api/verify', async (req, res) => {
     console.log(`🔍 Verifying face against UUID: ${luxandUuid.trim()}`);
     console.log(`🔍 Security: Email matching is REQUIRED - face must match the entered email`);
     
+    // CRITICAL: Verify UUID actually exists in Luxand before attempting verification
+    try {
+      console.log('🔍 Verifying UUID exists in Luxand...');
+      const allPersons = await listPersons();
+      const persons = allPersons.persons || allPersons.data || allPersons || [];
+      const uuidExists = persons.some(p => 
+        (p.uuid || p.id) === luxandUuid.trim() ||
+        (p.name || p.email || '').toLowerCase().trim() === email.toLowerCase().trim()
+      );
+      
+      if (!uuidExists) {
+        console.error('❌❌❌ CRITICAL: UUID does NOT exist in Luxand!');
+        console.error(`❌ UUID from Firebase: ${luxandUuid.trim()}`);
+        console.error(`❌ Email: ${email}`);
+        console.error(`❌ Total persons in Luxand: ${persons.length}`);
+        console.error('❌ This means enrollment never completed or face was deleted!');
+        console.error('❌ User must re-enroll their face by completing the 3 facial verification steps!');
+        
+        return res.status(400).json({
+          ok: false,
+          error: 'Face not enrolled in Luxand. Please complete the 3 facial verification steps to enroll your face.',
+          reason: 'face_not_enrolled',
+          message: 'Your face is not enrolled in our system. Please complete the facial verification steps during signup.',
+          action: 're_enroll_required'
+        });
+      } else {
+        console.log('✅ UUID verified - exists in Luxand');
+      }
+    } catch (uuidCheckError) {
+      console.warn('⚠️ Could not verify UUID existence (non-critical):', uuidCheckError.message);
+      // Continue with verification attempt - might still work
+    }
+    
     try {
       // First, try search to get the person ID (Luxand search returns ID, not UUID)
       // Then use that ID for 1:1 verification, or use search results directly
@@ -590,13 +623,19 @@ app.post('/api/verify', async (req, res) => {
                     || (Array.isArray(searchRes) ? searchRes : []);
 
       if (candidates.length === 0) {
-        console.log(`❌ No faces found in search results`);
+        console.log(`❌❌❌ CRITICAL: No faces found in search results!`);
+        console.log(`❌ This means the face is NOT enrolled in Luxand!`);
+        console.log(`❌ UUID from Firebase: ${luxandUuid.trim()}`);
+        console.log(`❌ Email: ${email}`);
+        console.log(`❌ ACTION REQUIRED: User must re-enroll their face!`);
         return res.json({
           ok: false,
           similarity: 0,
           threshold: SIMILARITY_THRESHOLD,
           message: 'not_verified',
-          error: 'Face not recognized'
+          error: 'Face not enrolled in Luxand. Please complete the 3 facial verification steps to enroll your face.',
+          reason: 'face_not_enrolled',
+          action: 're_enroll_required'
         });
       }
 
