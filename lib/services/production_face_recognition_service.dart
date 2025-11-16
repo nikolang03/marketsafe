@@ -2961,8 +2961,6 @@ class ProductionFaceRecognitionService {
             tempFile.absolute.path,
             minWidth: 200,
             minHeight: 200,
-            maxWidth: 1920,
-            maxHeight: 1920,
             quality: 85,
             format: CompressFormat.jpeg,
           );
@@ -3020,8 +3018,6 @@ class ProductionFaceRecognitionService {
             tempFile.absolute.path,
             minWidth: 200,
             minHeight: 200,
-            maxWidth: 1920,
-            maxHeight: 1920,
             quality: 85,
             format: CompressFormat.jpeg,
           );
