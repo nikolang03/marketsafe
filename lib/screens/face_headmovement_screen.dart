@@ -46,12 +46,17 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
   bool _movedRight = false;
   bool _success = false;
   
+  // Track best movement to prevent missing quick movements
+  double _bestLeftMovement = 0.0;
+  double _bestRightMovement = 0.0;
+  
   // Movement history for smooth detection
   List<double> _headXHistory = [];
   List<double> _headYHistory = [];
   static const int _historySize = 10;
-  static const double _movementThreshold = 6.0; // Degrees - further lowered for easier detection
-  static const double _minMovementForProgress = 3.0; // Minimum movement to show progress - more lenient
+  static const double _movementThreshold = 5.0; // Degrees - lowered for more reliable detection
+  static const double _minMovementForProgress = 2.5; // Minimum movement to show progress - more lenient
+  static const double _detectionThreshold = 4.0; // Lower threshold for actual detection (more reliable)
   
   // Progress smoothing
   List<double> _progressHistory = [];
@@ -431,25 +436,25 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
     }
 
     // Detect LEFT movement (positive angle change > threshold)
-    // Only detect if movement is significant and sustained
+    // Track best movement to catch quick movements even if they don't sustain
     if (!_movedLeft && _initialX != null) {
       final leftMovement = smoothedX - _initialX!;
-      // Require movement to be clearly left (positive) and above threshold
-      // More lenient: allow movement that's at least 50% of threshold
-      if (leftMovement > _movementThreshold * 0.5 && leftMovement > 0) {
-        // Verify movement is sustained (check last few values)
-        final recentMovements = _headXHistory.length >= 3 
-            ? _headXHistory.sublist(_headXHistory.length - 3)
-            : _headXHistory;
-        final avgRecent = recentMovements.reduce((a, b) => a + b) / recentMovements.length;
-        final recentMovement = avgRecent - _initialX!;
-        
-        // Only trigger if recent average also shows left movement - very lenient (50% of threshold)
-        if (recentMovement > _movementThreshold * 0.5) {
+      
+      // Track the best (maximum) left movement seen so far
+      if (leftMovement > _bestLeftMovement && leftMovement > 0) {
+        _bestLeftMovement = leftMovement;
+      }
+      
+      // Detect immediately when threshold is met (more reliable than requiring sustained movement)
+      // Use lower detection threshold for more reliable detection
+      if (_bestLeftMovement >= _detectionThreshold) {
+        // Also check if current movement is still significant (at least 60% of detection threshold)
+        // This prevents false positives from noise while still catching quick movements
+        if (leftMovement >= _detectionThreshold * 0.6 || _bestLeftMovement >= _movementThreshold) {
           if (mounted) {
             setState(() => _movedLeft = true);
             _movementController.forward(from: 0.0);
-            print('✅ Left movement detected: ${leftMovement.toStringAsFixed(1)}°');
+            print('✅ Left movement detected: ${_bestLeftMovement.toStringAsFixed(1)}° (current: ${leftMovement.toStringAsFixed(1)}°)');
           }
         }
       }
@@ -459,24 +464,24 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
     // Must return to center or go past center to the right
     if (_movedLeft && !_movedRight && _initialX != null) {
       final rightMovement = _initialX! - smoothedX; // Positive = right movement
-      // Require movement to be clearly right (negative angle from initial) and above threshold
-      // More lenient: allow movement that's at least 50% of threshold
-      if (rightMovement > _movementThreshold * 0.5) {
-        // Verify movement is sustained
-        final recentMovements = _headXHistory.length >= 3 
-            ? _headXHistory.sublist(_headXHistory.length - 3)
-            : _headXHistory;
-        final avgRecent = recentMovements.reduce((a, b) => a + b) / recentMovements.length;
-        final recentMovement = _initialX! - avgRecent;
-        
-        // Only trigger if recent average also shows right movement - very lenient (50% of threshold)
-        if (recentMovement > _movementThreshold * 0.5) {
+      
+      // Track the best (maximum) right movement seen so far
+      if (rightMovement > _bestRightMovement && rightMovement > 0) {
+        _bestRightMovement = rightMovement;
+      }
+      
+      // Detect immediately when threshold is met (more reliable than requiring sustained movement)
+      // Use lower detection threshold for more reliable detection
+      if (_bestRightMovement >= _detectionThreshold) {
+        // Also check if current movement is still significant (at least 60% of detection threshold)
+        // This prevents false positives from noise while still catching quick movements
+        if (rightMovement >= _detectionThreshold * 0.6 || _bestRightMovement >= _movementThreshold) {
           if (mounted) {
             setState(() {
               _movedRight = true;
             });
             _movementController.forward(from: 0.0);
-            print('✅ Right movement detected: ${rightMovement.toStringAsFixed(1)}°');
+            print('✅ Right movement detected: ${_bestRightMovement.toStringAsFixed(1)}° (current: ${rightMovement.toStringAsFixed(1)}°)');
           }
 
           // Force progress to 100% immediately when both movements detected
