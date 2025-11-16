@@ -478,7 +478,7 @@
                         <span>Download APK (v1.0.4)</span>
                     </button>
                     <p style="margin-top: 20px; color: rgba(255, 255, 255, 0.5); font-size: 0.85rem;">
-                        <i class="fas fa-info-circle"></i> Size: ~450 MB | Build: Latest
+                        <i class="fas fa-info-circle"></i> Size: ~95 MB | Build: Latest
                     </p>
                 </div>
             </div>
@@ -529,7 +529,9 @@
             event.preventDefault();
             
             // Direct download URL from Firebase Storage
-            const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fapp-release.apk?alt=media&token=17f4944e-9df9-4503-aa27-41bf5b028980';
+            // Updated to use the latest APK path (app/marketsafe.apk)
+            // Note: If you get a 403 error, you may need to upload the APK first using upload_apk.js
+            const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fmarketsafe.apk?alt=media';
             
             // Use fetch to download the file as blob for direct download
             fetch(downloadUrl)
