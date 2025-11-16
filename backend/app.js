@@ -1150,47 +1150,74 @@ app.post('/api/compare-faces', async (req, res) => {
 // DELETE PERSON ENDPOINT (for removing enrolled users)
 // ==========================================
 // POST /api/delete-person
-// Body: { email: string } or { uuid: string }
+// Body: { email: string } or { phone: string } or { uuid: string }
 // Returns: { ok: bool, message: string }
 app.post('/api/delete-person', async (req, res) => {
   try {
-    const { email, uuid } = req.body;
+    const { email, phone, uuid } = req.body;
 
     // Validation
-    if (!email && !uuid) {
+    if (!email && !phone && !uuid) {
       return res.status(400).json({
         ok: false,
-        error: 'Missing email or uuid'
+        error: 'Missing email, phone, or uuid'
       });
     }
 
     let personUuid = uuid;
 
-    // If email is provided, find all persons with that email and delete them
-    if (email && !uuid) {
-      console.log(`🔍 Searching for all persons with email: ${email}`);
+    // If email or phone is provided, find all persons with that identifier and delete them
+    if ((email || phone) && !uuid) {
+      const identifier = email || phone;
+      const isEmail = !!email;
+      console.log(`🔍 Searching for all persons with ${isEmail ? 'email' : 'phone'}: ${identifier}`);
       
       try {
-        // Use the list persons endpoint to find all persons with this email
+        // Use the list persons endpoint to find all persons with this identifier
         const allPersons = await listPersons();
         const persons = allPersons.persons || allPersons.data || allPersons || [];
         
-        // Filter persons by email (name field)
-        const emailToFind = email.toLowerCase().trim();
-        const matchingPersons = persons.filter(person => 
-          (person.name || '').toLowerCase().trim() === emailToFind
-        );
+        // Normalize phone numbers for comparison
+        const normalizePhone = (p) => {
+          if (!p) return '';
+          return p.replace(/[\s+\-()]/g, '').trim();
+        };
+        
+        // Filter persons by email or phone (name field)
+        const emailToFind = email ? email.toLowerCase().trim() : '';
+        const phoneToFind = phone ? phone.trim() : '';
+        
+        const matchingPersons = persons.filter(person => {
+          const personName = (person.name || person.email || '').toString().trim();
+          const personNameLower = personName.toLowerCase().trim();
+          
+          // Match by email
+          if (emailToFind && personNameLower === emailToFind) {
+            return true;
+          }
+          
+          // Match by phone (normalize for comparison)
+          if (phoneToFind) {
+            const normalizedPersonPhone = normalizePhone(personName);
+            const normalizedExpectedPhone = normalizePhone(phoneToFind);
+            if (normalizedPersonPhone === normalizedExpectedPhone || personName === phoneToFind) {
+              return true;
+            }
+          }
+          
+          return false;
+        });
         
         if (matchingPersons.length === 0) {
           return res.json({
             ok: true,
-            message: `No persons found with email: ${email}`,
+            message: `No persons found with ${email ? 'email' : 'phone'}: ${identifier}`,
             deletedCount: 0,
             uuids: []
           });
         }
         
-        console.log(`📋 Found ${matchingPersons.length} person(s) with email ${email}`);
+        console.log(`📋 Found ${matchingPersons.length} person(s) with ${email ? 'email' : 'phone'} ${identifier}`);
         
         // Delete all matching persons
         const deletedUuids = [];
@@ -1198,21 +1225,22 @@ app.post('/api/delete-person', async (req, res) => {
         
         for (const person of matchingPersons) {
           const personUuid = person.uuid || person.id;
+          const personName = person.name || person.email || 'N/A';
           if (personUuid) {
             try {
               await deletePerson(personUuid);
               deletedUuids.push(personUuid);
-              console.log(`✅ Deleted person: ${personUuid}`);
+              console.log(`✅ Deleted person: ${personName} (UUID: ${personUuid})`);
             } catch (deleteError) {
-              errors.push({ uuid: personUuid, error: deleteError.message });
-              console.error(`❌ Failed to delete person ${personUuid}: ${deleteError.message}`);
+              errors.push({ uuid: personUuid, name: personName, error: deleteError.message });
+              console.error(`❌ Failed to delete person ${personName} (${personUuid}): ${deleteError.message}`);
             }
           }
         }
         
         return res.json({
           ok: true,
-          message: `Deleted ${deletedUuids.length} of ${matchingPersons.length} person(s) with email: ${email}`,
+          message: `Deleted ${deletedUuids.length} of ${matchingPersons.length} person(s) with ${email ? 'email' : 'phone'}: ${identifier}`,
           deletedCount: deletedUuids.length,
           totalFound: matchingPersons.length,
           uuids: deletedUuids,
