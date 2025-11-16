@@ -744,7 +744,7 @@
                                 </p>
                                 <small class="text-muted">
                                     <i class="fas fa-info-circle me-1"></i>
-                                    Version: 1.0.4 | Build: Latest | Size: ~450 MB
+                                    Version: 1.0.4 | Build: Latest | Size: ~95 MB
                                 </small>
                             </div>
                             <div class="col-md-4 text-end">
@@ -5005,7 +5005,10 @@
         event.preventDefault();
         
         // Direct download URL from Firebase Storage
-        const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fapp-release.apk?alt=media&token=17f4944e-9df9-4503-aa27-41bf5b028980';
+        // Updated to use the latest APK path (app/marketsafe.apk)
+        // Note: If you get a 403 error, you may need to upload the APK first using upload_apk.js
+        // and get a new token, or make the file public in Firebase Storage
+        const downloadUrl = 'https://firebasestorage.googleapis.com/v0/b/marketsafe-e57cf.firebasestorage.app/o/app%2Fmarketsafe.apk?alt=media';
         
         // Use fetch to download the file
         fetch(downloadUrl)
@@ -5035,6 +5038,7 @@
             })
             .catch(error => {
                 console.error('❌ Error downloading APK:', error);
+                console.log('💡 Tip: If you see a 403 error, upload the APK first using: node upload_apk.js');
                 // Fallback to direct link
                 window.open(downloadUrl, '_blank');
             });
