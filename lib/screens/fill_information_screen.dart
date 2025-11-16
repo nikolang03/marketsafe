@@ -421,10 +421,6 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         // Get profile picture URL from SharedPreferences if available
         final profilePhotoUrl = prefs.getString('profile_photo_url') ?? '';
         
-        // Get Firebase Auth UID for security rules
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        final firebaseAuthUid = firebaseUser?.uid ?? '';
-        
         final userData = {
           'uid': userId,
           'firebaseAuthUid': firebaseAuthUid, // ADDED: For Firestore security rules
