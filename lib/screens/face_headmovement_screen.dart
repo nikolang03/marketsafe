@@ -513,10 +513,22 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
               });
             }
             // Complete immediately - no need to wait for animation
-            print('✅✅✅ HEAD MOVEMENT COMPLETE - Calling _completeHeadMovementVerification');
+            print('✅✅✅ HEAD MOVEMENT COMPLETE - Starting image capture IMMEDIATELY');
             print('✅✅✅ Current time: ${DateTime.now().toIso8601String()}');
-            // CRITICAL: Don't use catchError - let errors propagate so we can see them
-            _completeHeadMovementVerification(face);
+            
+            // CRITICAL: Capture and save image path IMMEDIATELY, before calling completion method
+            _captureAndSaveHeadMovementImageImmediately().then((imageSaved) {
+              print('✅✅✅ Head movement immediate capture result: $imageSaved');
+            }).catchError((e) {
+              print('❌❌❌ Head movement immediate capture error: $e');
+            });
+            
+            // Now call the completion method
+            print('✅✅✅ HEAD MOVEMENT COMPLETE - Calling _completeHeadMovementVerification');
+            _completeHeadMovementVerification(face).catchError((error, stackTrace) {
+              print('❌❌❌ ERROR in _completeHeadMovementVerification: $error');
+              print('❌ Stack trace: $stackTrace');
+            });
           }
         }
       }

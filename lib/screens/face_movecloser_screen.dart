@@ -475,6 +475,15 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
     // Auto-complete immediately when progress hits 100%
     if (isPerfectScan && !_navigated) {
       _navigated = true;
+      print('✅✅✅ MOVE CLOSER COMPLETE - Starting image capture IMMEDIATELY');
+      
+      // CRITICAL: Capture and save image path IMMEDIATELY, before calling completion method
+      _captureAndSaveMoveCloserImageImmediately().then((imageSaved) {
+        print('✅✅✅ Move closer immediate capture result: $imageSaved');
+      }).catchError((e) {
+        print('❌❌❌ Move closer immediate capture error: $e');
+      });
+      
       // Start completion process immediately
       _completeMoveCloserVerification(face).catchError((e) {
         print('❌ Error in completion: $e');
@@ -528,6 +537,64 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
         curve: Curves.easeOut,
       ));
       _qualityController.forward(from: 0.0);
+    }
+  }
+
+  /// Capture and save move closer image immediately when scan completes
+  /// This happens BEFORE the completion method to ensure path is saved
+  Future<bool> _captureAndSaveMoveCloserImageImmediately() async {
+    try {
+      print('🚨🚨🚨 IMMEDIATE CAPTURE: Starting move closer image capture...');
+      final prefs = await SharedPreferences.getInstance();
+      
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          print('🚨🚨🚨 IMMEDIATE CAPTURE: Taking picture...');
+          final imageFile = await _cameraController!.takePicture();
+          if (imageFile.path.isNotEmpty) {
+            print('🚨🚨🚨 IMMEDIATE CAPTURE: Picture taken: ${imageFile.path}');
+            
+            // Try to copy to permanent location
+            String pathToSave = imageFile.path;
+            try {
+              final permanentPath = await _copyImageToPermanentLocation(
+                imageFile.path,
+                'movecloser_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              pathToSave = permanentPath;
+              print('🚨🚨🚨 IMMEDIATE CAPTURE: Copied to permanent: $permanentPath');
+            } catch (copyError) {
+              print('⚠️ IMMEDIATE CAPTURE: Copy failed, using original: $copyError');
+            }
+            
+            // Save path
+            await prefs.setString('face_verification_moveCloserImagePath', pathToSave);
+            print('🚨🚨🚨 IMMEDIATE CAPTURE: Path saved: $pathToSave');
+            
+            // Verify
+            final verify = prefs.getString('face_verification_moveCloserImagePath');
+            if (verify != null && verify.isNotEmpty) {
+              print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
+              return true;
+            } else {
+              print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not found after save!');
+              return false;
+            }
+          } else {
+            print('❌ IMMEDIATE CAPTURE: Image path is empty');
+            return false;
+          }
+        } catch (captureError) {
+          print('❌ IMMEDIATE CAPTURE ERROR: $captureError');
+          return false;
+        }
+      } else {
+        print('❌ IMMEDIATE CAPTURE: Camera not ready');
+        return false;
+      }
+    } catch (e) {
+      print('❌ IMMEDIATE CAPTURE EXCEPTION: $e');
+      return false;
     }
   }
 
