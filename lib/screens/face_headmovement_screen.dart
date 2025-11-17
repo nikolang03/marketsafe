@@ -516,18 +516,28 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
             print('✅✅✅ HEAD MOVEMENT COMPLETE - Starting image capture IMMEDIATELY');
             print('✅✅✅ Current time: ${DateTime.now().toIso8601String()}');
             
-            // CRITICAL: Capture and save image path IMMEDIATELY, before calling completion method
+            // CRITICAL: Capture and save image path IMMEDIATELY, WAIT for it to complete before calling completion method
             _captureAndSaveHeadMovementImageImmediately().then((imageSaved) {
               print('✅✅✅ Head movement immediate capture result: $imageSaved');
+              // Wait a bit to ensure camera is ready for next capture
+              Future.delayed(const Duration(milliseconds: 500), () {
+                // Now call the completion method AFTER immediate capture completes
+                print('✅✅✅ HEAD MOVEMENT COMPLETE - Calling _completeHeadMovementVerification (after immediate capture)');
+                _completeHeadMovementVerification(face).catchError((error, stackTrace) {
+                  print('❌❌❌ ERROR in _completeHeadMovementVerification: $error');
+                  print('❌ Stack trace: $stackTrace');
+                });
+              });
             }).catchError((e) {
               print('❌❌❌ Head movement immediate capture error: $e');
-            });
-            
-            // Now call the completion method
-            print('✅✅✅ HEAD MOVEMENT COMPLETE - Calling _completeHeadMovementVerification');
-            _completeHeadMovementVerification(face).catchError((error, stackTrace) {
-              print('❌❌❌ ERROR in _completeHeadMovementVerification: $error');
-              print('❌ Stack trace: $stackTrace');
+              // If immediate capture fails, still try completion method after delay
+              Future.delayed(const Duration(milliseconds: 500), () {
+                print('✅✅✅ HEAD MOVEMENT COMPLETE - Calling _completeHeadMovementVerification (after immediate capture error)');
+                _completeHeadMovementVerification(face).catchError((error, stackTrace) {
+                  print('❌❌❌ ERROR in _completeHeadMovementVerification: $error');
+                  print('❌ Stack trace: $stackTrace');
+                });
+              });
             });
           }
         }

@@ -389,23 +389,36 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
             print('✅✅✅ BLINK COMPLETE - Starting image capture IMMEDIATELY');
             print('✅✅✅ Current time: ${DateTime.now().toIso8601String()}');
             
-            // CRITICAL: Capture and save image path IMMEDIATELY, before calling completion method
+            // CRITICAL: Capture and save image path IMMEDIATELY, WAIT for it to complete before calling completion method
             _captureAndSaveBlinkImageImmediately().then((imageSaved) {
               print('✅✅✅ Immediate capture result: $imageSaved');
               if (!imageSaved) {
                 print('❌❌❌ WARNING: Immediate capture failed, will try in completion method');
               }
+              
+              // Wait a bit to ensure camera is ready for next capture
+              Future.delayed(const Duration(milliseconds: 500), () {
+                // Now call the completion method AFTER immediate capture completes
+                print('✅✅✅ BLINK COMPLETE - Calling _completeBlinkVerification (after immediate capture)');
+                _completeBlinkVerification(face).catchError((error, stackTrace) {
+                  print('❌❌❌ ERROR in _completeBlinkVerification: $error');
+                  print('❌ Stack trace: $stackTrace');
+                  // Even on error, try to save image path
+                  _saveImagePathOnError();
+                });
+              });
             }).catchError((e) {
               print('❌❌❌ Immediate capture error: $e');
-            });
-            
-            // Now call the completion method
-            print('✅✅✅ BLINK COMPLETE - Calling _completeBlinkVerification');
-            _completeBlinkVerification(face).catchError((error, stackTrace) {
-              print('❌❌❌ ERROR in _completeBlinkVerification: $error');
-              print('❌ Stack trace: $stackTrace');
-              // Even on error, try to save image path
-              _saveImagePathOnError();
+              // If immediate capture fails, still try completion method after delay
+              Future.delayed(const Duration(milliseconds: 500), () {
+                print('✅✅✅ BLINK COMPLETE - Calling _completeBlinkVerification (after immediate capture error)');
+                _completeBlinkVerification(face).catchError((error, stackTrace) {
+                  print('❌❌❌ ERROR in _completeBlinkVerification: $error');
+                  print('❌ Stack trace: $stackTrace');
+                  // Even on error, try to save image path
+                  _saveImagePathOnError();
+                });
+              });
             });
           }
         }
@@ -431,46 +444,19 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
       print('✅ Blink completion flags saved');
       
-      // CRITICAL: Capture image IMMEDIATELY and save path BEFORE anything else
-      print('🚨🚨🚨 CRITICAL: Starting IMMEDIATE image capture...');
-      String? capturedImagePath;
-      
-      if (_cameraController != null && _cameraController!.value.isInitialized) {
-        try {
-          print('📸 Taking picture IMMEDIATELY...');
-          final imageFile = await _cameraController!.takePicture();
-          if (imageFile.path.isNotEmpty) {
-            capturedImagePath = imageFile.path;
-            print('✅✅✅ Image captured IMMEDIATELY: $capturedImagePath');
-            
-            // Save path IMMEDIATELY
-            try {
-              final permanentPath = await _copyImageToPermanentLocation(
-                capturedImagePath,
-                'blink_${DateTime.now().millisecondsSinceEpoch}.jpg',
-              );
-              await prefs.setString('face_verification_blinkImagePath', permanentPath);
-              print('✅✅✅ Image path saved IMMEDIATELY: $permanentPath');
-              
-              // Verify
-              final verify = prefs.getString('face_verification_blinkImagePath');
-              if (verify != null && verify.isNotEmpty) {
-                print('✅✅✅ VERIFIED: Image path saved successfully: $verify');
-              } else {
-                print('❌❌❌ VERIFICATION FAILED: Image path not found after save!');
-              }
-            } catch (saveError) {
-              print('❌ Error saving image path: $saveError');
-              // Fallback: save original path
-              await prefs.setString('face_verification_blinkImagePath', capturedImagePath);
-              print('✅ Saved original path as fallback: $capturedImagePath');
-            }
-          }
-        } catch (captureError) {
-          print('❌ Immediate capture failed: $captureError');
+      // Check if image path was already saved by immediate capture
+      final existingImagePath = prefs.getString('face_verification_blinkImagePath');
+      if (existingImagePath != null && existingImagePath.isNotEmpty) {
+        print('✅✅✅ Image path already saved by immediate capture: $existingImagePath');
+        // Verify file exists
+        final file = File(existingImagePath);
+        if (await file.exists()) {
+          print('✅✅✅ Image file exists at saved path');
+        } else {
+          print('⚠️ Image file does not exist at saved path, will try to capture again');
         }
       } else {
-        print('❌ Camera not ready for immediate capture');
+        print('⚠️ No image path found from immediate capture, will try to capture in completion method');
       }
       
       // CRITICAL: Capture image BEFORE stopping the stream

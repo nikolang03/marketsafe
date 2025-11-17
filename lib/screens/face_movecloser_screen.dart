@@ -477,27 +477,46 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
       _navigated = true;
       print('✅✅✅ MOVE CLOSER COMPLETE - Starting image capture IMMEDIATELY');
       
-      // CRITICAL: Capture and save image path IMMEDIATELY, before calling completion method
+      // CRITICAL: Capture and save image path IMMEDIATELY, WAIT for it to complete before calling completion method
       _captureAndSaveMoveCloserImageImmediately().then((imageSaved) {
         print('✅✅✅ Move closer immediate capture result: $imageSaved');
-      }).catchError((e) {
-        print('❌❌❌ Move closer immediate capture error: $e');
-      });
-      
-      // Start completion process immediately
-      _completeMoveCloserVerification(face).catchError((e) {
-        print('❌ Error in completion: $e');
-        // Still navigate even on error
-        if (mounted) {
-          Future.delayed(const Duration(milliseconds: 1500), () {
+        // Wait a bit to ensure camera is ready for next capture
+        Future.delayed(const Duration(milliseconds: 500), () {
+          // Start completion process AFTER immediate capture completes
+          _completeMoveCloserVerification(face).catchError((e) {
+            print('❌ Error in completion: $e');
+            // Still navigate even on error
             if (mounted) {
-              Navigator.pushReplacement(
-                context,
-                MaterialPageRoute(builder: (_) => const FaceHeadMovementScreen()),
-              );
+              Future.delayed(const Duration(milliseconds: 1500), () {
+                if (mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const FaceHeadMovementScreen()),
+                  );
+                }
+              });
             }
           });
-        }
+        });
+      }).catchError((e) {
+        print('❌❌❌ Move closer immediate capture error: $e');
+        // If immediate capture fails, still try completion method after delay
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _completeMoveCloserVerification(face).catchError((e) {
+            print('❌ Error in completion: $e');
+            // Still navigate even on error
+            if (mounted) {
+              Future.delayed(const Duration(milliseconds: 1500), () {
+                if (mounted) {
+                  Navigator.pushReplacement(
+                    context,
+                    MaterialPageRoute(builder: (_) => const FaceHeadMovementScreen()),
+                  );
+                }
+              });
+            }
+          });
+        });
       });
     }
   }
