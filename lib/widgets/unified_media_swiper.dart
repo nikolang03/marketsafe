@@ -103,6 +103,10 @@ class _UnifiedMediaSwiperState extends State<UnifiedMediaSwiper> {
     }
     
     try {
+      // SECURITY: Only allow HTTPS for network videos (reject HTTP)
+      if (!url.startsWith('https://') && url.startsWith('http://')) {
+        throw Exception('SECURITY ERROR: HTTP video URLs are not allowed. Use HTTPS only.');
+      }
       final controller = VideoPlayerController.networkUrl(Uri.parse(url));
       await controller.initialize();
       
@@ -122,7 +126,8 @@ class _UnifiedMediaSwiperState extends State<UnifiedMediaSwiper> {
 
   Widget _buildImage(String imageUrl) {
     // Check if it's a local file path or network URL
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    // SECURITY: Reject HTTP URLs for production (only allow HTTPS)
+    if (imageUrl.startsWith('https://')) {
       return Image.network(
         imageUrl,
         fit: BoxFit.cover,

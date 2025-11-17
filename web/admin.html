@@ -2788,8 +2788,19 @@
                         const luxandResult = await luxandResponse.json();
                         deletedCount.luxand = luxandResult.luxandDeleted || 0;
                         console.log(`✅ Deleted ${deletedCount.luxand} face(s) from Luxand`);
+                        if (luxandResult.errors && luxandResult.errors.length > 0) {
+                            console.warn('⚠️ Some errors during Luxand deletion:', luxandResult.errors);
+                        }
+                        if (deletedCount.luxand === 0 && (userEmail || userPhone || userLuxandUuid)) {
+                            console.warn('⚠️ No faces were deleted from Luxand. This might mean:');
+                            console.warn('   - The face was not enrolled in Luxand');
+                            console.warn('   - The phone/email format does not match what is stored in Luxand');
+                            console.warn('   - Check backend logs for detailed matching information');
+                        }
                     } else {
-                        console.warn('⚠️ Failed to delete from Luxand, continuing with Firestore deletion...');
+                        const errorText = await luxandResponse.text();
+                        console.error('❌ Failed to delete from Luxand:', errorText);
+                        console.warn('⚠️ Continuing with Firestore deletion...');
                     }
                 } catch (luxandError) {
                     console.warn('⚠️ Error deleting from Luxand:', luxandError);

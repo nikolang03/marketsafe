@@ -11,9 +11,17 @@ class FaceAuthBackendService {
     required this.backendUrl,
   }) {
     print('🔧 FaceAuthBackendService initialized with URL: $backendUrl');
+    
+    // SECURITY: Enforce HTTPS for all production connections
+    if (backendUrl.startsWith('http://') && !backendUrl.contains('localhost') && !backendUrl.contains('127.0.0.1') && !backendUrl.contains('192.168.')) {
+      throw Exception('SECURITY ERROR: HTTP connections are not allowed for production. Use HTTPS only. URL: $backendUrl');
+    }
+    
     if (backendUrl.contains('192.168.') || backendUrl.contains('localhost') || backendUrl.contains('127.0.0.1')) {
       print('⚠️ WARNING: Using local backend URL. This will only work on the same network.');
       print('⚠️ For production, use: https://marketsafe-production.up.railway.app');
+    } else if (!backendUrl.startsWith('https://')) {
+      throw Exception('SECURITY ERROR: Backend URL must use HTTPS. URL: $backendUrl');
     }
   }
 

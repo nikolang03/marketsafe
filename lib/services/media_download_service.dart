@@ -114,6 +114,11 @@ class MediaDownloadService {
         );
       }
 
+      // SECURITY: Only allow HTTPS for network downloads (reject HTTP)
+      if (!imageUrl.startsWith('https://') && imageUrl.startsWith('http://')) {
+        throw Exception('SECURITY ERROR: HTTP image URLs are not allowed. Use HTTPS only.');
+      }
+      
       // Download image with timeout
       print('📥 Starting download from: $imageUrl');
       http.Response response;
@@ -448,6 +453,11 @@ class MediaDownloadService {
         );
       }
 
+      // SECURITY: Only allow HTTPS for network downloads (reject HTTP)
+      if (!videoUrl.startsWith('https://') && videoUrl.startsWith('http://')) {
+        throw Exception('SECURITY ERROR: HTTP video URLs are not allowed. Use HTTPS only.');
+      }
+      
       // Download video with timeout
       print('📥 Starting video download from: $videoUrl');
       final response = await http.get(

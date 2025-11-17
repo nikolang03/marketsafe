@@ -36,8 +36,9 @@ class _VideoPlayerWidgetState extends State<VideoPlayerWidget> {
 
   Future<void> _initializeVideo() async {
     try {
-      if (widget.videoUrl.startsWith('http')) {
-        // Network video
+      // SECURITY: Only allow HTTPS for network videos (reject HTTP)
+      if (widget.videoUrl.startsWith('https://')) {
+        // Network video - HTTPS only
         _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
       } else {
         // Local file video

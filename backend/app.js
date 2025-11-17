@@ -1733,11 +1733,14 @@ app.post('/api/delete-user', async (req, res) => {
     }
 
     const emailToFind = email ? email.toLowerCase().trim() : null;
-    const phoneToFind = phoneNumber ? phoneNumber.trim().replace(/\s+/g, '') : null;
+    const phoneToFind = phoneNumber ? phoneNumber.trim() : null; // Don't remove spaces yet - normalize in matching function
     const uuidToDelete = luxandUuid ? luxandUuid.trim() : null;
     
     console.log(`🗑️ Deleting user: ${emailToFind || phoneToFind || 'by UUID'}${userId ? ` (userId: ${userId})` : ''}`);
     console.log(`🔍 Searching for all faces in Luxand...`);
+    console.log(`📱 Phone number to find: "${phoneToFind}"`);
+    console.log(`📧 Email to find: "${emailToFind}"`);
+    console.log(`🆔 UUID to delete: "${uuidToDelete}"`);
     
     let deletedCount = 0;
     const deletedUuids = [];
@@ -1769,19 +1772,45 @@ app.post('/api/delete-user', async (req, res) => {
         
         // Filter persons by email or phone number
         const matchingPersons = persons.filter(person => {
-          const personName = (person.name || '').toLowerCase().trim();
-          const personNameClean = personName.replace(/\s+/g, '');
+          const personName = (person.name || '').trim();
+          const personNameLower = personName.toLowerCase().trim();
           
-          // Match by email
-          if (emailToFind && personName === emailToFind) {
+          // Match by email (case-insensitive)
+          if (emailToFind && personNameLower === emailToFind) {
             return true;
           }
           
           // Match by phone number (handle various formats)
           if (phoneToFind) {
-            const phoneClean = phoneToFind.replace(/[^\d+]/g, '');
-            const personNamePhoneOnly = personNameClean.replace(/[^\d+]/g, '');
-            if (personNamePhoneOnly === phoneClean || personNameClean === phoneToFind) {
+            // Normalize phone numbers: remove all non-digits except leading +
+            const normalizePhone = (phone) => {
+              if (!phone) return '';
+              // Remove spaces, dashes, parentheses
+              let normalized = phone.replace(/[\s\-()]/g, '');
+              // If starts with +63, keep it; if starts with 0, convert to +63
+              if (normalized.startsWith('+63')) {
+                normalized = normalized.substring(3); // Remove +63
+              } else if (normalized.startsWith('63')) {
+                normalized = normalized.substring(2); // Remove 63
+              } else if (normalized.startsWith('0')) {
+                normalized = normalized.substring(1); // Remove leading 0
+              }
+              // Return only digits
+              return normalized.replace(/\D/g, '');
+            };
+            
+            const phoneClean = normalizePhone(phoneToFind);
+            const personNamePhoneOnly = normalizePhone(personName);
+            
+            // Match if normalized phone numbers are equal
+            if (personNamePhoneOnly && phoneClean && personNamePhoneOnly === phoneClean) {
+              console.log(`✅ Phone match found: "${personName}" matches "${phoneToFind}" (normalized: ${phoneClean})`);
+              return true;
+            }
+            
+            // Also try exact match (in case phone is stored exactly as provided)
+            if (personName === phoneToFind || personName === phoneToFind.replace(/\s+/g, '')) {
+              console.log(`✅ Phone exact match found: "${personName}" matches "${phoneToFind}"`);
               return true;
             }
           }
@@ -1791,6 +1820,7 @@ app.post('/api/delete-user', async (req, res) => {
         
         if (matchingPersons.length > 0) {
           console.log(`📋 Found ${matchingPersons.length} face(s) in Luxand for ${emailToFind || phoneToFind}`);
+          console.log(`📋 Matching persons:`, matchingPersons.map(p => ({ name: p.name, uuid: p.uuid || p.id })));
           
           // Delete all matching persons from Luxand
           for (const person of matchingPersons) {
@@ -1809,6 +1839,13 @@ app.post('/api/delete-user', async (req, res) => {
           }
         } else {
           console.log(`ℹ️ No faces found in Luxand for ${emailToFind || phoneToFind}`);
+          // Debug: List all persons to help diagnose matching issues
+          if (persons.length > 0) {
+            console.log(`🔍 DEBUG: Listing all ${persons.length} person(s) in Luxand for comparison:`);
+            persons.forEach((person, index) => {
+              console.log(`  ${index + 1}. Name: "${person.name || 'N/A'}", UUID: ${person.uuid || person.id || 'N/A'}`);
+            });
+          }
         }
       } catch (searchError) {
         errors.push({ method: 'search_by_identifier', error: searchError.message });
@@ -1965,8 +2002,9 @@ const server = app.listen(PORT, '0.0.0.0', () => {
   console.log('🚀 Face Auth Backend Server');
   console.log('🚀 ==========================================');
   console.log(`🚀 Server running on port ${PORT} (0.0.0.0)`);
-  console.log(`🚀 Health check: http://0.0.0.0:${PORT}/`);
-  console.log(`🚀 Health check: http://0.0.0.0:${PORT}/api/health`);
+  console.log(`🚀 Health check: https://0.0.0.0:${PORT}/ (HTTPS required in production)`);
+  console.log(`🚀 Health check: https://0.0.0.0:${PORT}/api/health (HTTPS required in production)`);
+  console.log(`🔒 SECURITY: All client connections must use HTTPS`);
   console.log(`🚀 Luxand API Key: ${process.env.LUXAND_API_KEY ? '✅ Configured' : '❌ Missing'}`);
   console.log(`🚀 Similarity Threshold: ${SIMILARITY_THRESHOLD}`);
   console.log(`🚀 Liveness Threshold: ${LIVENESS_THRESHOLD}`);

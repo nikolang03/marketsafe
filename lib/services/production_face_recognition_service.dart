@@ -34,14 +34,34 @@ class ProductionFaceRecognitionService {
   
   // Backend API URL - configure via environment variable or update default
   // Flutter → Your Backend → Luxand Cloud (API key stays on server)
+  // SECURITY: All production URLs must use HTTPS
   static const String _backendUrl = String.fromEnvironment(
     'FACE_AUTH_BACKEND_URL',
-    defaultValue: 'https://marketsafe-production.up.railway.app', // Production backend URL
+    defaultValue: 'https://marketsafe-production.up.railway.app', // Production backend URL (HTTPS required)
   );
+  
+  // Validate backend URL uses HTTPS (except for local development)
+  static String _validateBackendUrl(String url) {
+    if (url.isEmpty || url == 'https://your-backend-domain.com') {
+      return url; // Will be caught by other validation
+    }
+    
+    // Allow localhost/127.0.0.1/192.168.x for local development only
+    final isLocal = url.contains('localhost') || 
+                    url.contains('127.0.0.1') || 
+                    url.contains('192.168.');
+    
+    if (!isLocal && !url.startsWith('https://')) {
+      throw Exception('SECURITY ERROR: Backend URL must use HTTPS for production. Current URL: $url');
+    }
+    
+    return url;
+  }
   
   static FaceAuthBackendService? _backendService;
   static FaceAuthBackendService get _backendServiceInstance {
-    return _backendService ??= FaceAuthBackendService(backendUrl: _backendUrl);
+    final validatedUrl = _validateBackendUrl(_backendUrl);
+    return _backendService ??= FaceAuthBackendService(backendUrl: validatedUrl);
   }
 
   /// Enroll a user's face using backend API (which calls Luxand) and store the returned uuid.

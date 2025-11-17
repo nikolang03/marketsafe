@@ -550,6 +550,10 @@ class _VideoPlayerDialogState extends State<_VideoPlayerDialog> {
 
   Future<void> _initializeVideo() async {
     try {
+      // SECURITY: Only allow HTTPS for network videos (reject HTTP)
+      if (!widget.videoUrl.startsWith('https://') && widget.videoUrl.startsWith('http://')) {
+        throw Exception('SECURITY ERROR: HTTP video URLs are not allowed. Use HTTPS only.');
+      }
       _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl));
       await _controller.initialize();
       

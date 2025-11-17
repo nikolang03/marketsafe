@@ -53,7 +53,8 @@ class _ImageSwiperState extends State<ImageSwiper> {
     print('🖼️ ImageSwiper: Building image - $imageUrl');
     
     // Check if it's a local file path or network URL
-    if (imageUrl.startsWith('http://') || imageUrl.startsWith('https://')) {
+    // SECURITY: Reject HTTP URLs for production (only allow HTTPS)
+    if (imageUrl.startsWith('https://')) {
       print('🌐 Loading network image: $imageUrl');
       // Network image - show full size for cropping
       return Image.network(
