@@ -618,11 +618,25 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       
       if (_cameraController != null && _cameraController!.value.isInitialized) {
         print('🔍🔍🔍🔍🔍 Camera is ready - proceeding with capture...');
-        print('📸 Taking picture for blink verification...');
-        print('📸 Camera state: isStreaming=${_cameraController!.value.isStreamingImages}, isInitialized=${_cameraController!.value.isInitialized}');
-        
-        XFile? imageFile;
+      // Check if capture is in progress
+      if (_isCapturing) {
+        print('⚠️ Capture already in progress, waiting...');
+        int waitCount = 0;
+        while (_isCapturing && waitCount < 30) {
+          await Future.delayed(const Duration(milliseconds: 100));
+          waitCount++;
+        }
+      }
+      
+      print('📸 Taking picture for blink verification...');
+      print('📸 Camera state: isStreaming=${_cameraController!.value.isStreamingImages}, isInitialized=${_cameraController!.value.isInitialized}');
+      
+      XFile? imageFile;
       try {
+        // Set capture flag
+        _isCapturing = true;
+        // Wait a bit to ensure camera is ready
+        await Future.delayed(const Duration(milliseconds: 300));
         // Try to take picture while stream is running
         imageFile = await _cameraController!.takePicture();
         print('📸 Picture taken (stream running): ${imageFile.path}');
