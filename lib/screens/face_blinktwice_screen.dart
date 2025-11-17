@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:camera/camera.dart';
@@ -7,6 +8,8 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import 'face_movecloser_screen.dart';
 import '../services/production_face_recognition_service.dart';
 
@@ -479,6 +482,35 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
     }
   }
 
+  /// Copy image from temporary location to permanent app documents directory
+  Future<String> _copyImageToPermanentLocation(String tempImagePath, String fileName) async {
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final faceImagesDir = Directory(path.join(appDocDir.path, 'face_verification_images'));
+      
+      // Create directory if it doesn't exist
+      if (!await faceImagesDir.exists()) {
+        await faceImagesDir.create(recursive: true);
+        print('📁 Created face verification images directory: ${faceImagesDir.path}');
+      }
+      
+      // Copy file to permanent location
+      final permanentPath = path.join(faceImagesDir.path, fileName);
+      final sourceFile = File(tempImagePath);
+      final targetFile = await sourceFile.copy(permanentPath);
+      
+      print('✅ Image copied from temporary location to permanent:');
+      print('   - Source: $tempImagePath');
+      print('   - Target: $permanentPath');
+      
+      return targetFile.path;
+    } catch (e) {
+      print('❌ Error copying image to permanent location: $e');
+      // Return original path if copy fails
+      return tempImagePath;
+    }
+  }
+
   Future<void> _registerBlinkEmbedding(Face face) async {
     print('🔍🔍🔍🔍🔍 _registerBlinkEmbedding CALLED at ${DateTime.now().toIso8601String()}');
     print('🔍🔍🔍🔍🔍 Face parameter: ${face.boundingBox}');
@@ -536,20 +568,41 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       final Uint8List imageBytes = await imageFile.readAsBytes();
       print('📸 Image bytes read: ${imageBytes.length} bytes');
       
-      // CRITICAL: Save image path FIRST, regardless of userId (needed for enrollment later)
+      // CRITICAL: Save image path IMMEDIATELY - wrap in try-catch to ensure it always happens
+      String imagePathToSave = imageFile.path;
       if (imageFile.path.isNotEmpty) {
-        await prefs.setString('face_verification_blinkImagePath', imageFile.path);
-        await prefs.setBool('face_verification_blinkCompleted', true);
-        await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
-        print('✅ Blink image path saved: ${imageFile.path}');
-        print('✅ Blink verification completed flag saved');
+        try {
+          // Try to copy to permanent location
+          final permanentPath = await _copyImageToPermanentLocation(
+            imageFile.path,
+            'blink_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          );
+          imagePathToSave = permanentPath;
+          print('✅ Image copied to permanent location: $permanentPath');
+        } catch (copyError) {
+          print('⚠️ Failed to copy image to permanent location: $copyError');
+          print('⚠️ Using original temporary path: ${imageFile.path}');
+          imagePathToSave = imageFile.path; // Fallback to original path
+        }
         
-        // Verify the save was successful
-        final savedPath = prefs.getString('face_verification_blinkImagePath');
-        if (savedPath == imageFile.path) {
-          print('✅ Verified: Blink image path correctly saved to SharedPreferences');
-        } else {
-          print('❌ WARNING: Blink image path save verification failed! Expected: ${imageFile.path}, Got: $savedPath');
+        // ALWAYS save the path, even if copy failed
+        try {
+          await prefs.setString('face_verification_blinkImagePath', imagePathToSave);
+          await prefs.setBool('face_verification_blinkCompleted', true);
+          await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
+          print('✅✅✅ Blink image path SAVED: $imagePathToSave');
+          print('✅ Blink verification completed flag saved');
+          
+          // Verify the save was successful
+          final savedPath = prefs.getString('face_verification_blinkImagePath');
+          if (savedPath != null && savedPath.isNotEmpty) {
+            print('✅✅✅ VERIFIED: Blink image path correctly saved to SharedPreferences: $savedPath');
+          } else {
+            print('❌❌❌ CRITICAL: Blink image path save verification FAILED! Path is null or empty!');
+          }
+        } catch (saveError) {
+          print('❌❌❌ CRITICAL ERROR saving blink image path: $saveError');
+          print('❌ Stack trace: ${StackTrace.current}');
         }
       } else {
         print('❌ ERROR: Blink image path is empty! Cannot save to SharedPreferences.');
@@ -557,7 +610,9 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       
       // Only register embedding if userId is available (optional - image path already saved above)
       if (userId != null && userId.isNotEmpty) {
-        final inputImage = InputImage.fromFilePath(imageFile.path);
+        // Use permanent path for face detection if available, otherwise use original
+        final imagePathForDetection = prefs.getString('face_verification_blinkImagePath') ?? imageFile.path;
+        final inputImage = InputImage.fromFilePath(imagePathForDetection);
         final faces = await _faceDetector.processImage(inputImage);
         
         if (faces.isNotEmpty) {
@@ -595,8 +650,12 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
           final XFile imageFile = await _cameraController!.takePicture();
           if (imageFile.path.isNotEmpty) {
             final prefs = await SharedPreferences.getInstance();
-            await prefs.setString('face_verification_blinkImagePath', imageFile.path);
-            print('✅ Blink image path saved after error: ${imageFile.path}');
+            final permanentPath = await _copyImageToPermanentLocation(
+              imageFile.path,
+              'blink_${DateTime.now().millisecondsSinceEpoch}.jpg',
+            );
+            await prefs.setString('face_verification_blinkImagePath', permanentPath);
+            print('✅ Blink image path saved after error: $permanentPath');
           }
         }
       } catch (saveError) {
@@ -627,15 +686,19 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
         }
         
         if (imageFile.path.isNotEmpty) {
-          await prefs.setString('face_verification_blinkImagePath', imageFile.path);
-          print('✅✅✅ FALLBACK: Blink image path saved: ${imageFile.path}');
+          final permanentPath = await _copyImageToPermanentLocation(
+            imageFile.path,
+            'blink_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          );
+          await prefs.setString('face_verification_blinkImagePath', permanentPath);
+          print('✅✅✅ FALLBACK: Blink image path saved to permanent location: $permanentPath');
           
           // Verify
           final saved = prefs.getString('face_verification_blinkImagePath');
-          if (saved == imageFile.path) {
+          if (saved == permanentPath) {
             print('✅✅✅ FALLBACK: Verified image path saved correctly');
           } else {
-            print('❌ FALLBACK: Verification failed - Expected: ${imageFile.path}, Got: $saved');
+            print('❌ FALLBACK: Verification failed - Expected: $permanentPath, Got: $saved');
           }
         } else {
           print('❌ FALLBACK: Image path is empty');

@@ -8,6 +8,8 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import 'fill_information_screen.dart';
 import '../services/production_face_recognition_service.dart';
 import '../services/face_data_service.dart';
@@ -521,6 +523,35 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
     }
   }
 
+  /// Copy image from temporary location to permanent app documents directory
+  Future<String> _copyImageToPermanentLocation(String tempImagePath, String fileName) async {
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final faceImagesDir = Directory(path.join(appDocDir.path, 'face_verification_images'));
+      
+      // Create directory if it doesn't exist
+      if (!await faceImagesDir.exists()) {
+        await faceImagesDir.create(recursive: true);
+        print('📁 Created face verification images directory: ${faceImagesDir.path}');
+      }
+      
+      // Copy file to permanent location
+      final permanentPath = path.join(faceImagesDir.path, fileName);
+      final sourceFile = File(tempImagePath);
+      final targetFile = await sourceFile.copy(permanentPath);
+      
+      print('✅ Image copied from temporary location to permanent:');
+      print('   - Source: $tempImagePath');
+      print('   - Target: $permanentPath');
+      
+      return targetFile.path;
+    } catch (e) {
+      print('❌ Error copying image to permanent location: $e');
+      // Return original path if copy fails
+      return tempImagePath;
+    }
+  }
+
   Future<void> _completeHeadMovementVerification(Face face) async {
     print('🔍 _completeHeadMovementVerification called');
     String? imagePath;
@@ -593,15 +624,37 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
       }
       
       if (imagePath != null && imagePath.isNotEmpty) {
-        await prefs.setString('face_verification_headMovementImagePath', imagePath);
-        print('✅ Head movement image path saved: $imagePath');
+        // CRITICAL: Save image path IMMEDIATELY - wrap in try-catch to ensure it always happens
+        String imagePathToSave = imagePath;
+        try {
+          // Try to copy to permanent location
+          final permanentPath = await _copyImageToPermanentLocation(
+            imagePath,
+            'headmovement_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          );
+          imagePathToSave = permanentPath;
+          print('✅ Image copied to permanent location: $permanentPath');
+        } catch (copyError) {
+          print('⚠️ Failed to copy image to permanent location: $copyError');
+          print('⚠️ Using original temporary path: $imagePath');
+          imagePathToSave = imagePath; // Fallback to original path
+        }
         
-        // Verify the save was successful
-        final savedPath = prefs.getString('face_verification_headMovementImagePath');
-        if (savedPath == imagePath) {
-          print('✅ Verified: Head movement image path correctly saved to SharedPreferences');
-        } else {
-          print('❌ WARNING: Head movement image path save verification failed! Expected: $imagePath, Got: $savedPath');
+        // ALWAYS save the path, even if copy failed
+        try {
+          await prefs.setString('face_verification_headMovementImagePath', imagePathToSave);
+          print('✅✅✅ Head movement image path SAVED: $imagePathToSave');
+          
+          // Verify the save was successful
+          final savedPath = prefs.getString('face_verification_headMovementImagePath');
+          if (savedPath != null && savedPath.isNotEmpty) {
+            print('✅✅✅ VERIFIED: Head movement image path correctly saved to SharedPreferences: $savedPath');
+          } else {
+            print('❌❌❌ CRITICAL: Head movement image path save verification FAILED! Path is null or empty!');
+          }
+        } catch (saveError) {
+          print('❌❌❌ CRITICAL ERROR saving head movement image path: $saveError');
+          print('❌ Stack trace: ${StackTrace.current}');
         }
       } else {
         print('❌ ERROR: Head movement image path is null or empty! Cannot save to SharedPreferences.');
@@ -693,17 +746,23 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         if (image.path.isNotEmpty) {
           final file = File(image.path);
           if (await file.exists()) {
-            await prefs.setString('face_verification_headMovementImagePath', image.path);
-            print('✅✅✅ FALLBACK: Head movement image path saved: ${image.path}');
+            // Copy to permanent location
+            final permanentPath = await _copyImageToPermanentLocation(
+              image.path,
+              'headmovement_${DateTime.now().millisecondsSinceEpoch}.jpg',
+            );
+            
+            await prefs.setString('face_verification_headMovementImagePath', permanentPath);
+            print('✅✅✅ FALLBACK: Head movement image path saved to permanent location: $permanentPath');
             
             // Verify
             final saved = prefs.getString('face_verification_headMovementImagePath');
-            if (saved == image.path) {
+            if (saved == permanentPath) {
               print('✅✅✅ FALLBACK: Verified image path saved correctly');
             } else {
-              print('❌ FALLBACK: Verification failed - Expected: ${image.path}, Got: $saved');
+              print('❌ FALLBACK: Verification failed - Expected: $permanentPath, Got: $saved');
             }
-            return image.path;
+            return permanentPath;
           } else {
             print('❌ FALLBACK: Image file does not exist: ${image.path}');
           }

@@ -33,9 +33,14 @@ app.use((req, res, next) => {
   next();
 });
 
-// Request logging
+// Request logging with immediate flush
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.path}`);
+  const logMsg = `[${new Date().toISOString()}] ${req.method} ${req.path}`;
+  console.log(logMsg);
+  // Force flush stdout for Railway logs
+  if (process.stdout.isTTY === false) {
+    process.stdout.write(logMsg + '\n');
+  }
   next();
 });
 
@@ -110,11 +115,19 @@ app.get('/api/test-luxand', async (req, res) => {
 // Body: { email: string, photoBase64: string }
 // Returns: { ok: true, uuid: string } or { error: string }
 app.post('/api/enroll', async (req, res) => {
+  const startTime = Date.now();
+  const requestId = Math.random().toString(36).substring(7);
+  
   try {
+    console.log(`\n🚀 [${requestId}] ========== ENROLLMENT REQUEST STARTED ==========`);
+    console.log(`🚀 [${requestId}] Timestamp: ${new Date().toISOString()}`);
+    console.log(`🚀 [${requestId}] Request body keys: ${Object.keys(req.body).join(', ')}`);
+    
     const { email, photoBase64 } = req.body;
 
     // Validation
     if (!email || !photoBase64) {
+      console.error(`❌ [${requestId}] Validation failed: Missing email or photoBase64`);
       return res.status(400).json({
         ok: false,
         error: 'Missing email or photoBase64'
@@ -122,15 +135,16 @@ app.post('/api/enroll', async (req, res) => {
     }
 
     if (typeof email !== 'string' || typeof photoBase64 !== 'string') {
+      console.error(`❌ [${requestId}] Validation failed: Invalid types`);
       return res.status(400).json({
         ok: false,
         error: 'Invalid email or photoBase64 format'
       });
     }
 
-    console.log(`📸 Enrolling face for: ${email}`);
-    console.log(`📏 Photo base64 length: ${photoBase64.length} characters`);
-    console.log(`📏 Photo base64 preview: ${photoBase64.substring(0, 50)}...`);
+    console.log(`📸 [${requestId}] Enrolling face for: ${email}`);
+    console.log(`📏 [${requestId}] Photo base64 length: ${photoBase64.length} characters`);
+    console.log(`📏 [${requestId}] Photo base64 preview: ${photoBase64.substring(0, 50)}...`);
     
     // Validate base64 string
     if (!photoBase64 || photoBase64.length < 100) {
@@ -572,7 +586,13 @@ app.post('/api/enroll', async (req, res) => {
     }
 
     // 5) Return success ONLY if verification passed
-    console.log('✅✅✅ Enrollment and verification COMPLETE - returning success');
+    const duration = Date.now() - startTime;
+    console.log(`\n✅✅✅ [${requestId}] ========== ENROLLMENT SUCCESS ==========`);
+    console.log(`✅✅✅ [${requestId}] Duration: ${duration}ms`);
+    console.log(`✅✅✅ [${requestId}] UUID: ${luxandUuid}`);
+    console.log(`✅✅✅ [${requestId}] Email: ${email}`);
+    console.log(`✅✅✅ [${requestId}] ==========================================\n`);
+    
     res.json({
       ok: true,
       success: true,
@@ -581,7 +601,13 @@ app.post('/api/enroll', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Enrollment error:', error);
+    const duration = Date.now() - startTime;
+    console.error(`\n❌❌❌ [${requestId}] ========== ENROLLMENT ERROR ==========`);
+    console.error(`❌❌❌ [${requestId}] Duration: ${duration}ms`);
+    console.error(`❌❌❌ [${requestId}] Error: ${error.message}`);
+    console.error(`❌❌❌ [${requestId}] Stack: ${error.stack}`);
+    console.error(`❌❌❌ [${requestId}] ==========================================\n`);
+    
     res.status(500).json({
       ok: false,
       error: error.message || 'Enrollment failed'

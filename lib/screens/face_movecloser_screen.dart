@@ -8,6 +8,8 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import 'face_headmovement_screen.dart';
 import '../services/production_face_recognition_service.dart';
 import '../services/face_landmark_service.dart';
@@ -529,6 +531,35 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
     }
   }
 
+  /// Copy image from temporary location to permanent app documents directory
+  Future<String> _copyImageToPermanentLocation(String tempImagePath, String fileName) async {
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      final faceImagesDir = Directory(path.join(appDocDir.path, 'face_verification_images'));
+      
+      // Create directory if it doesn't exist
+      if (!await faceImagesDir.exists()) {
+        await faceImagesDir.create(recursive: true);
+        print('📁 Created face verification images directory: ${faceImagesDir.path}');
+      }
+      
+      // Copy file to permanent location
+      final permanentPath = path.join(faceImagesDir.path, fileName);
+      final sourceFile = File(tempImagePath);
+      final targetFile = await sourceFile.copy(permanentPath);
+      
+      print('✅ Image copied from temporary location to permanent:');
+      print('   - Source: $tempImagePath');
+      print('   - Target: $permanentPath');
+      
+      return targetFile.path;
+    } catch (e) {
+      print('❌ Error copying image to permanent location: $e');
+      // Return original path if copy fails
+      return tempImagePath;
+    }
+  }
+
   Future<void> _completeMoveCloserVerification(Face face) async {
     bool shouldNavigate = true;
     
@@ -595,19 +626,40 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
           imageBytes = await imageFile.readAsBytes();
           print('📸 Image bytes read: ${imageBytes.length} bytes');
           
-          // CRITICAL: Save image path IMMEDIATELY after capture
+          // CRITICAL: Save image path IMMEDIATELY - wrap in try-catch to ensure it always happens
+          String imagePathToSave = imageFile.path;
           if (imageFile.path.isNotEmpty) {
-            await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
-            await prefs.setBool('face_verification_moveCloserCompleted', true);
-            await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
-            print('✅ Move closer image path saved IMMEDIATELY: ${imageFile.path}');
+            try {
+              // Try to copy to permanent location
+              final permanentPath = await _copyImageToPermanentLocation(
+                imageFile.path,
+                'movecloser_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              imagePathToSave = permanentPath;
+              print('✅ Image copied to permanent location: $permanentPath');
+            } catch (copyError) {
+              print('⚠️ Failed to copy image to permanent location: $copyError');
+              print('⚠️ Using original temporary path: ${imageFile.path}');
+              imagePathToSave = imageFile.path; // Fallback to original path
+            }
             
-            // Verify the save was successful
-            final savedPath = prefs.getString('face_verification_moveCloserImagePath');
-            if (savedPath == imageFile.path) {
-              print('✅ Verified: Move closer image path correctly saved to SharedPreferences');
-            } else {
-              print('❌ WARNING: Move closer image path save verification failed! Expected: ${imageFile.path}, Got: $savedPath');
+            // ALWAYS save the path, even if copy failed
+            try {
+              await prefs.setString('face_verification_moveCloserImagePath', imagePathToSave);
+              await prefs.setBool('face_verification_moveCloserCompleted', true);
+              await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
+              print('✅✅✅ Move closer image path SAVED: $imagePathToSave');
+              
+              // Verify the save was successful
+              final savedPath = prefs.getString('face_verification_moveCloserImagePath');
+              if (savedPath != null && savedPath.isNotEmpty) {
+                print('✅✅✅ VERIFIED: Move closer image path correctly saved to SharedPreferences: $savedPath');
+              } else {
+                print('❌❌❌ CRITICAL: Move closer image path save verification FAILED! Path is null or empty!');
+              }
+            } catch (saveError) {
+              print('❌❌❌ CRITICAL ERROR saving move closer image path: $saveError');
+              print('❌ Stack trace: ${StackTrace.current}');
             }
           } else {
             print('❌ ERROR: Move closer image path is empty! Cannot save to SharedPreferences.');
