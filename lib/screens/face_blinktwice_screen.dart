@@ -902,14 +902,6 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
         print('❌ Stack trace: $stackTrace');
         return false;
       }
-      } else {
-        print('❌❌❌ IMMEDIATE CAPTURE: Camera not initialized!');
-        print('❌❌❌ Camera controller: ${_cameraController != null}');
-        if (_cameraController != null) {
-          print('❌❌❌ Camera initialized: ${_cameraController!.value.isInitialized}');
-        }
-        return false;
-      }
     } catch (e, stackTrace) {
       print('❌❌❌ IMMEDIATE CAPTURE CRITICAL ERROR: $e');
       print('❌ Stack trace: $stackTrace');
