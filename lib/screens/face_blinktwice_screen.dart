@@ -423,16 +423,54 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
         print('📸 Camera preview size: ${_cameraController!.value.previewSize}');
       }
       
+      // CRITICAL: Try multiple methods to ensure image is captured and saved
+      bool imagePathSaved = false;
+      
+      // Method 1: Try _registerBlinkEmbedding
       try {
-        print('📸 Calling _registerBlinkEmbedding...');
+        print('📸 Method 1: Calling _registerBlinkEmbedding...');
         await _registerBlinkEmbedding(face);
-        print('✅ Image capture completed');
+        print('✅ Method 1: Image capture completed');
+        
+        // Verify image path was saved
+        final savedPath = prefs.getString('face_verification_blinkImagePath');
+        if (savedPath != null && savedPath.isNotEmpty) {
+          print('✅✅✅ Method 1 SUCCESS: Blink image path is saved: $savedPath');
+          imagePathSaved = true;
+        } else {
+          print('❌❌❌ Method 1 FAILED: Blink image path NOT found after _registerBlinkEmbedding!');
+        }
       } catch (captureError, stackTrace) {
-        print('❌❌❌ CRITICAL: _registerBlinkEmbedding failed: $captureError');
-        print('❌ Full stack trace: $stackTrace');
-        // Try to capture image directly as fallback
-        print('🔄 Attempting fallback capture...');
-        await _captureImageDirectly(prefs);
+        print('❌❌❌ Method 1 FAILED: _registerBlinkEmbedding error: $captureError');
+        print('❌ Stack trace: $stackTrace');
+      }
+      
+      // Method 2: If Method 1 failed, try direct capture
+      if (!imagePathSaved) {
+        try {
+          print('🔄 Method 2: Attempting direct capture fallback...');
+          await _captureImageDirectly(prefs);
+          
+          // Verify fallback worked
+          final savedPath = prefs.getString('face_verification_blinkImagePath');
+          if (savedPath != null && savedPath.isNotEmpty) {
+            print('✅✅✅ Method 2 SUCCESS: Blink image path saved: $savedPath');
+            imagePathSaved = true;
+          } else {
+            print('❌❌❌ Method 2 FAILED: Blink image path still not saved!');
+          }
+        } catch (fallbackError) {
+          print('❌❌❌ Method 2 FAILED: Direct capture error: $fallbackError');
+        }
+      }
+      
+      // Final verification
+      final finalCheck = prefs.getString('face_verification_blinkImagePath');
+      if (finalCheck != null && finalCheck.isNotEmpty) {
+        print('✅✅✅ FINAL CHECK: Blink image path confirmed saved: $finalCheck');
+      } else {
+        print('❌❌❌ FINAL CHECK FAILED: Blink image path is STILL NOT SAVED!');
+        print('❌❌❌ This is a critical error - enrollment will fail!');
       }
       
       // Stop stream AFTER image is captured
@@ -533,11 +571,11 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       }
       
       if (_cameraController != null && _cameraController!.value.isInitialized) {
-      print('🔍🔍🔍🔍🔍 Camera is ready - proceeding with capture...');
-      print('📸 Taking picture for blink verification...');
-      print('📸 Camera state: isStreaming=${_cameraController!.value.isStreamingImages}, isInitialized=${_cameraController!.value.isInitialized}');
-      
-      XFile? imageFile;
+        print('🔍🔍🔍🔍🔍 Camera is ready - proceeding with capture...');
+        print('📸 Taking picture for blink verification...');
+        print('📸 Camera state: isStreaming=${_cameraController!.value.isStreamingImages}, isInitialized=${_cameraController!.value.isInitialized}');
+        
+        XFile? imageFile;
       try {
         // Try to take picture while stream is running
         imageFile = await _cameraController!.takePicture();
@@ -634,12 +672,18 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       } else {
         print('⚠️ No userId available - skipping embedding registration, but image path is saved for enrollment');
       }
-    } else {
-      print('❌ ERROR: Camera controller is null or not initialized! Cannot capture image.');
-      print('   - Controller null: ${_cameraController == null}');
-      print('   - Controller initialized: ${_cameraController?.value.isInitialized ?? false}');
-      // Don't save a fake path - this will cause issues later
-      throw Exception('Camera not ready - cannot capture image');
+      } else {
+        print('❌❌❌ CRITICAL: Camera controller is null or not initialized!');
+        print('   - Controller null: ${_cameraController == null}');
+        print('   - Controller initialized: ${_cameraController?.value.isInitialized ?? false}');
+        print('❌❌❌ Cannot capture image, but will try fallback capture...');
+        // Try fallback capture even if camera check failed
+        try {
+          await _captureImageDirectly(prefs);
+        } catch (fallbackError) {
+          print('❌❌❌ Fallback capture also failed: $fallbackError');
+          // Don't throw - allow navigation to continue
+        }
       }
     } catch (e, stackTrace) {
       print('❌ Error registering blink embedding: $e');

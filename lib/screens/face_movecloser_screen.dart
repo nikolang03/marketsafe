@@ -678,6 +678,15 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
           }
           // Continue anyway - don't block navigation
         }
+        
+        // Verify image path was saved after capture attempt
+        final savedPath = prefs.getString('face_verification_moveCloserImagePath');
+        if (savedPath != null && savedPath.isNotEmpty) {
+          print('✅✅✅ CONFIRMED: Move closer image path is saved: $savedPath');
+        } else {
+          print('❌❌❌ WARNING: Move closer image path NOT found after capture!');
+          print('❌ This means the save failed - image path is missing!');
+        }
           } else {
             print('❌ ERROR: Camera controller is null or not initialized! Cannot capture image.');
             print('   - Controller null: ${_cameraController == null}');
