@@ -1009,15 +1009,14 @@ Future<void> _processImageFromFile() async {
               'error': 'Face verification failed. Security validation error.',
             };
           } else {
-            // BALANCED SECURITY: Require 99%+ for reliable recognition (BALANCED)
-            // This ensures reliable recognition while allowing legitimate users
-            // Unregistered users typically achieve 0.70-0.95 similarity, NOT 0.99+
-            // Similar-looking people typically achieve 0.95-0.98, NOT 0.99+
-            final balancedThreshold = 0.99; // BALANCED: 99% required for reliable recognition
+            // BALANCED SECURITY: Use backend threshold (0.85) for consistency
+            // Backend already validates with 0.85 threshold, so we should match it
+            // This ensures consistency between backend and frontend validation
+            final balancedThreshold = 0.85; // Match backend threshold (0.85 = 85%)
             if (similarity < balancedThreshold) {
               print('🚨🚨🚨 BALANCED SECURITY REJECTION: Similarity ${similarity.toStringAsFixed(4)} < threshold ${balancedThreshold.toStringAsFixed(3)}');
               print('🚨🚨🚨 This prevents unregistered users while allowing legitimate users');
-              print('🚨🚨🚨 Different people: 0.70-0.95 | Similar people: 0.95-0.98 | Same person: 0.99+ (RELIABLE)');
+              print('🚨🚨🚨 Different people: 0.70-0.85 | Similar people: 0.85-0.95 | Same person: 0.85+ (RELIABLE)');
               print('🚨🚨🚨 Similarity ${similarity.toStringAsFixed(4)} indicates this may not be the registered user');
               print('🚨🚨🚨 RELIABLE RECOGNITION requires ${balancedThreshold.toStringAsFixed(3)} similarity for authentication');
               authResult = {
@@ -1111,15 +1110,15 @@ Future<void> _processImageFromFile() async {
           };
           success = false;
         } else {
-            // BALANCED SECURITY: Require 99%+ for reliable recognition (BALANCED)
-            // This is the FINAL CHECK - balanced for legitimate users
-            // BALANCED threshold: 99% for reliable recognition while preventing unauthorized access
-            final balancedThreshold = 0.99; // BALANCED: 99% required for reliable recognition
+            // BALANCED SECURITY: Use backend threshold (0.85) for consistency
+            // Backend already validates with 0.85 threshold, so we should match it
+            // This ensures consistency between backend and frontend validation
+            final balancedThreshold = 0.85; // Match backend threshold (0.85 = 85%)
             if (similarity < balancedThreshold) {
               print('🚨🚨🚨 BALANCED SECURITY REJECTION: Similarity ${similarity.toStringAsFixed(4)} < threshold ${balancedThreshold.toStringAsFixed(3)}');
               print('🚨🚨🚨 This prevents unregistered users while allowing legitimate users');
-              print('🚨🚨🚨 For reliable recognition, similarity must be >= 99% (BALANCED)');
-              print('🚨🚨🚨 Different people: 0.70-0.95 | Similar people: 0.95-0.98 | Same person: 0.99+ (RELIABLE)');
+              print('🚨🚨🚨 For reliable recognition, similarity must be >= 85% (matches backend)');
+              print('🚨🚨🚨 Different people: 0.70-0.85 | Similar people: 0.85-0.95 | Same person: 0.85+ (RELIABLE)');
               print('🚨🚨🚨 Similarity ${similarity.toStringAsFixed(4)} indicates this may not be the registered user');
               print('🚨🚨🚨 REJECTING ACCESS - face does not meet threshold');
             authResult = {
@@ -1192,16 +1191,16 @@ Future<void> _processImageFromFile() async {
           print('🚫 SECURITY: Pending verification user blocked from main app access');
           _showPendingVerificationDialog();
         }
-      } else if (success == true && userId != null && userId.isNotEmpty && similarity != null && similarity >= 0.99) {
+      } else if (success == true && userId != null && userId.isNotEmpty && similarity != null && similarity >= 0.85) {
         // BALANCED SECURITY: FINAL VALIDATION - ensure similarity is truly high enough
         // This is a redundant check but important for security - prevents any bypass attempts
-        // BALANCED: Unregistered users typically achieve 0.70-0.95 similarity, NOT 0.99+
-        // Similar-looking people typically achieve 0.95-0.98, NOT 0.99+
-        // This is the LAST LINE OF DEFENSE - balanced for legitimate users
-        if (similarity < 0.99) {
-          print('🚨🚨🚨 BALANCED SECURITY: Similarity ${similarity.toStringAsFixed(4)} < 0.99 in FINAL check');
-          print('🚨🚨🚨 BLOCKING ACCESS - similarity must be 99%+ for login (BALANCED)');
-          print('🚨🚨🚨 Unregistered/similar faces typically cannot achieve 0.99+ similarity - REJECTING');
+        // BALANCED: Unregistered users typically achieve 0.70-0.85 similarity, NOT 0.85+
+        // Similar-looking people typically achieve 0.85-0.95, NOT 0.85+
+        // This is the LAST LINE OF DEFENSE - balanced for legitimate users, matches backend threshold
+        if (similarity < 0.85) {
+          print('🚨🚨🚨 BALANCED SECURITY: Similarity ${similarity.toStringAsFixed(4)} < 0.85 in FINAL check');
+          print('🚨🚨🚨 BLOCKING ACCESS - similarity must be 85%+ for login (matches backend threshold)');
+          print('🚨🚨🚨 Unregistered/similar faces typically cannot achieve 0.85+ similarity - REJECTING');
           if (mounted) {
             setState(() {
               _isAuthenticating = false;
