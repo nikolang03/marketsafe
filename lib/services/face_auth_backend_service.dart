@@ -147,8 +147,15 @@ class FaceAuthBackendService {
       final base64Image = base64Encode(photoBytes);
       final uri = Uri.parse('$backendUrl/api/enroll');
       
-      print('🔍 Enrolling face with backend: $backendUrl/api/enroll');
+      print('🔍🔍🔍 ========== ENROLLMENT REQUEST STARTING ==========');
+      print('🔍🔍🔍 Backend URL: $backendUrl');
+      print('🔍🔍🔍 Enrollment endpoint: $uri');
+      print('🔍🔍🔍 Email: $email');
+      print('🔍🔍🔍 Image size: ${photoBytes.length} bytes');
+      print('🔍🔍🔍 Base64 length: ${base64Image.length} characters');
+      print('🔍🔍🔍 ================================================');
       
+      final stopwatch = Stopwatch()..start();
       final response = await http.post(
         uri,
         headers: {'Content-Type': 'application/json'},
@@ -159,9 +166,18 @@ class FaceAuthBackendService {
       ).timeout(
         const Duration(seconds: 60), // Increased to 60 seconds for slower networks/backends
         onTimeout: () {
+          print('❌❌❌ ENROLLMENT TIMEOUT: Request took longer than 60 seconds');
           throw TimeoutException('Connection timeout after 60 seconds');
         },
       );
+      stopwatch.stop();
+      
+      print('🔍🔍🔍 ========== ENROLLMENT RESPONSE RECEIVED ==========');
+      print('🔍🔍🔍 Status code: ${response.statusCode}');
+      print('🔍🔍🔍 Response time: ${stopwatch.elapsedMilliseconds}ms');
+      print('🔍🔍🔍 Response body length: ${response.body.length} characters');
+      print('🔍🔍🔍 Response preview: ${response.body.substring(0, response.body.length > 500 ? 500 : response.body.length)}');
+      print('🔍🔍🔍 ================================================');
 
       if (response.statusCode ~/ 100 != 2) {
         final errorBody = jsonDecode(response.body) as Map<String, dynamic>?;

@@ -303,24 +303,39 @@ class ProductionFaceRecognitionService {
       print('✅ Found ${imagePaths.length} valid face image(s) to enroll');
 
       print('🔍 Enrolling ${imagePaths.length} face images to Luxand via backend...');
-      print('🔍 Backend URL: $_backendUrl');
+      print('🔍🔍🔍 BACKEND URL BEING USED: $_backendUrl');
+      print('🔍🔍🔍 Backend URL validation: ${_validateBackendUrl(_backendUrl)}');
       
       // CRITICAL: Test backend connection before attempting enrollment
-      print('🔍 Testing backend connection before enrollment...');
-      final connectionTest = await testBackendConnection();
-      if (connectionTest['ok'] != true) {
-        final errorMsg = connectionTest['message']?.toString() ?? 'Backend connection failed';
-        print('❌❌❌ CRITICAL: Cannot enroll - backend connection test failed!');
-        print('❌ Error: $errorMsg');
+      print('🔍🔍🔍 Testing backend connection before enrollment...');
+      print('🔍🔍🔍 Testing URL: $_backendUrl/api/health');
+      try {
+        final connectionTest = await testBackendConnection();
+        print('🔍🔍🔍 Connection test result: ${connectionTest.toString()}');
+        if (connectionTest['ok'] != true) {
+          final errorMsg = connectionTest['message']?.toString() ?? 'Backend connection failed';
+          print('❌❌❌ CRITICAL: Cannot enroll - backend connection test failed!');
+          print('❌ Error: $errorMsg');
+          print('❌ Connection test details: ${connectionTest.toString()}');
+          return {
+            'success': false,
+            'error': 'Cannot connect to backend server. $errorMsg',
+            'enrolledCount': 0,
+            'errors': ['Backend connection failed: $errorMsg'],
+          };
+        }
+        print('✅✅✅ Backend connection test PASSED - proceeding with enrollment');
+      } catch (connectionError) {
+        print('❌❌❌ CRITICAL: Backend connection test threw exception!');
+        print('❌ Error: $connectionError');
+        print('❌ Stack trace: ${StackTrace.current}');
         return {
           'success': false,
-          'error': 'Cannot connect to backend server. $errorMsg',
+          'error': 'Backend connection test failed with exception: $connectionError',
           'enrolledCount': 0,
-          'errors': ['Backend connection failed: $errorMsg'],
+          'errors': ['Backend connection test exception: $connectionError'],
         };
       }
-      
-      print('✅ Backend connection test passed - proceeding with enrollment');
       if (_backendUrl == 'https://your-backend-domain.com' || _backendUrl.isEmpty) {
         print('❌❌❌ CRITICAL: Backend URL not configured!');
         print('❌ Backend URL is: "$_backendUrl"');
