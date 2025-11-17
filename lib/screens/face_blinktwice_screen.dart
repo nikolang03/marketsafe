@@ -445,6 +445,18 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
       print('✅ Blink completion flags saved');
       
+      // Wait for immediate capture to complete if it's still running
+      int waitCount = 0;
+      while (_isCapturing && waitCount < 30) {
+        print('⏳ Waiting for immediate capture to complete... ($waitCount/30)');
+        await Future.delayed(const Duration(milliseconds: 100));
+        waitCount++;
+      }
+      
+      if (_isCapturing) {
+        print('⚠️ Immediate capture is taking too long, proceeding anyway...');
+      }
+      
       // Check if image path was already saved by immediate capture
       final existingImagePath = prefs.getString('face_verification_blinkImagePath');
       if (existingImagePath != null && existingImagePath.isNotEmpty) {
@@ -452,7 +464,9 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
         // Verify file exists
         final file = File(existingImagePath);
         if (await file.exists()) {
-          print('✅✅✅ Image file exists at saved path');
+          print('✅✅✅ Image file exists at saved path - SKIPPING additional capture');
+          // Image already captured and saved, skip additional capture
+          return;
         } else {
           print('⚠️ Image file does not exist at saved path, will try to capture again');
         }
