@@ -511,7 +511,10 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
               });
             }
             // Complete immediately - no need to wait for animation
-            await _completeHeadMovementVerification(face);
+            print('✅✅✅ HEAD MOVEMENT COMPLETE - Calling _completeHeadMovementVerification');
+            print('✅✅✅ Current time: ${DateTime.now().toIso8601String()}');
+            // CRITICAL: Don't use catchError - let errors propagate so we can see them
+            _completeHeadMovementVerification(face);
           }
         }
       }
@@ -525,14 +528,42 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
       print('🔍 Camera controller state: ${_cameraController != null ? "exists" : "null"}, initialized: ${_cameraController?.value.isInitialized ?? false}');
       if (_cameraController != null && _cameraController!.value.isInitialized) {
         print('📸 Taking picture for head movement verification...');
-        final XFile image = await _cameraController!.takePicture();
-        imagePath = image.path;
-        print('📸 Picture taken: $imagePath');
-        final file = File(imagePath);
-        if (await file.exists()) {
-          print('✅ Head movement image file exists: $imagePath');
+        print('📸 Camera state: isStreaming=${_cameraController!.value.isStreamingImages}, isInitialized=${_cameraController!.value.isInitialized}');
+        
+        XFile? image;
+        try {
+          // Try to take picture while stream is running
+          image = await _cameraController!.takePicture();
+          print('📸 Picture taken (stream running): ${image.path}');
+        } catch (e) {
+          print('⚠️ Failed to take picture with stream running: $e');
+          print('📸 Attempting to stop stream and retry...');
+          try {
+            if (_cameraController!.value.isStreamingImages) {
+              await _cameraController!.stopImageStream();
+              print('✅ Stream stopped, retrying picture capture...');
+              await Future.delayed(const Duration(milliseconds: 300)); // Wait for stream to fully stop
+            }
+            image = await _cameraController!.takePicture();
+            print('📸 Picture taken (after stopping stream): ${image.path}');
+          } catch (e2) {
+            print('❌❌❌ CRITICAL: Failed to take picture even after stopping stream: $e2');
+            image = null;
+          }
+        }
+        
+        if (image != null && image.path.isNotEmpty) {
+          imagePath = image.path;
+          print('📸 Picture taken: $imagePath');
+          final file = File(imagePath);
+          if (await file.exists()) {
+            print('✅ Head movement image file exists: $imagePath');
+          } else {
+            print('❌ ERROR: Head movement image file does not exist: $imagePath');
+            imagePath = null;
+          }
         } else {
-          print('❌ ERROR: Head movement image file does not exist: $imagePath');
+          print('❌❌❌ CRITICAL: Image is null or path is empty!');
           imagePath = null;
         }
       } else {
@@ -546,10 +577,20 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
       imagePath = null;
     }
 
+    final prefs = await SharedPreferences.getInstance();
+    
     try {
-      final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('face_verification_headMovementCompleted', true);
       await prefs.setString('face_verification_headMovementCompletedAt', DateTime.now().toIso8601String());
+      
+      // If imagePath is null, try to capture it directly
+      if (imagePath == null || imagePath.isEmpty) {
+        print('⚠️⚠️⚠️ WARNING: imagePath is null/empty, attempting direct capture...');
+        final capturedPath = await _captureImageDirectly(prefs);
+        if (capturedPath != null && capturedPath.isNotEmpty) {
+          imagePath = capturedPath;
+        }
+      }
       
       if (imagePath != null && imagePath.isNotEmpty) {
         await prefs.setString('face_verification_headMovementImagePath', imagePath);
@@ -628,6 +669,54 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
         }
       });
     }
+  }
+
+  /// Fallback method to capture image directly if initial capture failed
+  Future<String?> _captureImageDirectly(SharedPreferences prefs) async {
+    print('🔄 FALLBACK: Attempting direct image capture for head movement...');
+    try {
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        print('📸 FALLBACK: Taking picture directly...');
+        XFile? image;
+        
+        try {
+          image = await _cameraController!.takePicture();
+        } catch (e) {
+          print('⚠️ FALLBACK: Failed with stream running, stopping stream...');
+          if (_cameraController!.value.isStreamingImages) {
+            await _cameraController!.stopImageStream();
+            await Future.delayed(const Duration(milliseconds: 300));
+          }
+          image = await _cameraController!.takePicture();
+        }
+        
+        if (image.path.isNotEmpty) {
+          final file = File(image.path);
+          if (await file.exists()) {
+            await prefs.setString('face_verification_headMovementImagePath', image.path);
+            print('✅✅✅ FALLBACK: Head movement image path saved: ${image.path}');
+            
+            // Verify
+            final saved = prefs.getString('face_verification_headMovementImagePath');
+            if (saved == image.path) {
+              print('✅✅✅ FALLBACK: Verified image path saved correctly');
+            } else {
+              print('❌ FALLBACK: Verification failed - Expected: ${image.path}, Got: $saved');
+            }
+            return image.path;
+          } else {
+            print('❌ FALLBACK: Image file does not exist: ${image.path}');
+          }
+        } else {
+          print('❌ FALLBACK: Image is null or path is empty');
+        }
+      } else {
+        print('❌ FALLBACK: Camera not ready');
+      }
+    } catch (e) {
+      print('❌ FALLBACK: Direct capture failed: $e');
+    }
+    return null;
   }
 
   @override

@@ -8,7 +8,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 import 'package:google_mlkit_commons/google_mlkit_commons.dart';
 import '../services/production_face_recognition_service.dart';
@@ -57,33 +56,21 @@ class _AddProfilePhotoScreenState extends State<AddProfilePhotoScreen> {
       });
 
       try {
-        // Get current user ID - use same logic as fill_information_screen to avoid ID mismatch
+        // Get current user ID - use custom format: user_{timestamp}_{username}
+        // This matches the format used in fill_information_screen
         final prefs = await SharedPreferences.getInstance();
-        final firebaseUser = FirebaseAuth.instance.currentUser;
-        final firebaseAuthUid = firebaseUser?.uid ?? '';
-        
-        String userId;
-        
-        // CRITICAL: Use Firebase Auth UID first (same as fill_information_screen)
-        // This ensures we're looking at the same document where luxandUuid was saved
-        if (firebaseAuthUid.isNotEmpty) {
-          userId = firebaseAuthUid;
-          print('🔍 Using Firebase Auth UID as user ID: $userId');
-        } else {
-          // Fallback to SharedPreferences if Firebase Auth UID not available
-          userId = prefs.getString('signup_user_id') ?? 
-                   prefs.getString('current_user_id') ?? '';
-          print('⚠️ No Firebase Auth UID, using SharedPreferences user ID: $userId');
-        }
+        final userId = prefs.getString('signup_user_id') ?? 
+                      prefs.getString('current_user_id') ?? '';
         
         if (userId.isEmpty) {
           print('❌❌❌ CRITICAL: No user ID found!');
-          print('❌ Firebase Auth UID: $firebaseAuthUid');
           print('❌ signup_user_id: ${prefs.getString('signup_user_id')}');
           print('❌ current_user_id: ${prefs.getString('current_user_id')}');
           _showErrorDialog('Error', 'No user logged in. Please sign in again.');
           return;
         }
+        
+        print('🔍 Using custom user ID format: $userId');
         
         print('🔍 Checking user document for userId: $userId');
 

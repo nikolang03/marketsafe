@@ -534,6 +534,21 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
     
     try {
       final prefs = await SharedPreferences.getInstance();
+      
+      // CRITICAL: Save completion flag FIRST, before any other operations
+      // This ensures the flag is saved even if image capture fails
+      await prefs.setBool('face_verification_moveCloserCompleted', true);
+      await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
+      print('✅ Move closer completion flags saved IMMEDIATELY at start');
+      
+      // Verify the flag was saved
+      final savedFlag = prefs.getBool('face_verification_moveCloserCompleted');
+      if (savedFlag == true) {
+        print('✅ Verified: Move closer completion flag correctly saved to SharedPreferences');
+      } else {
+        print('❌ WARNING: Move closer completion flag save verification failed!');
+      }
+      
       final userId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
       final email = prefs.getString('signup_email') ?? '';
 
@@ -548,7 +563,34 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
       if (_cameraController != null && _cameraController!.value.isInitialized) {
         try {
           print('📸 Taking picture for move closer verification (before stopping stream)...');
-          imageFile = await _cameraController!.takePicture();
+          print('📸 Camera state: isStreaming=${_cameraController!.value.isStreamingImages}, isInitialized=${_cameraController!.value.isInitialized}');
+          
+          try {
+            // Try to take picture while stream is running
+            imageFile = await _cameraController!.takePicture();
+            print('📸 Picture taken (stream running): ${imageFile.path}');
+          } catch (e) {
+            print('⚠️ Failed to take picture with stream running: $e');
+            print('📸 Attempting to stop stream and retry...');
+            try {
+              if (_cameraController!.value.isStreamingImages) {
+                await _cameraController!.stopImageStream();
+                print('✅ Stream stopped, retrying picture capture...');
+                await Future.delayed(const Duration(milliseconds: 300)); // Wait for stream to fully stop
+              }
+              imageFile = await _cameraController!.takePicture();
+              print('📸 Picture taken (after stopping stream): ${imageFile.path}');
+            } catch (e2) {
+              print('❌❌❌ CRITICAL: Failed to take picture even after stopping stream: $e2');
+              throw e2;
+            }
+          }
+          
+          if (imageFile.path.isEmpty) {
+            print('❌❌❌ CRITICAL: Image file path is empty!');
+            throw Exception('Failed to capture image - imageFile path is empty');
+          }
+          
           print('📸 Picture taken: ${imageFile.path}');
           imageBytes = await imageFile.readAsBytes();
           print('📸 Image bytes read: ${imageBytes.length} bytes');
@@ -570,10 +612,20 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
           } else {
             print('❌ ERROR: Move closer image path is empty! Cannot save to SharedPreferences.');
           }
-        } catch (captureError) {
-              print('⚠️ Image capture error: $captureError');
-              // Continue anyway - don't block navigation
-            }
+        } catch (captureError, stackTrace) {
+          print('❌❌❌ CRITICAL: Image capture error: $captureError');
+          print('❌ Stack trace: $stackTrace');
+          // CRITICAL: Even if image capture fails, ensure completion flag is saved
+          // The flag was already saved at the start, but verify it's still there
+          final savedFlag = prefs.getBool('face_verification_moveCloserCompleted');
+          if (savedFlag != true) {
+            print('⚠️ Completion flag missing after error - re-saving...');
+            await prefs.setBool('face_verification_moveCloserCompleted', true);
+            await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
+            print('✅ Completion flag re-saved after error');
+          }
+          // Continue anyway - don't block navigation
+        }
           } else {
             print('❌ ERROR: Camera controller is null or not initialized! Cannot capture image.');
             print('   - Controller null: ${_cameraController == null}');

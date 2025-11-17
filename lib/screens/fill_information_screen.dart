@@ -361,46 +361,36 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           throw Exception('Username must contain at least one alphanumeric character');
         }
         
-        // CRITICAL: Use Firebase Auth UID as the primary user ID to avoid duplicate "Unknown User" entries
-        // Check if user document already exists with Firebase Auth UID (from AdminSyncService.initializeUser)
+        // Generate user ID in format: user_{timestamp}_{sanitizedUsername}
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final userId = 'user_${timestamp}_$sanitizedUsername';
+        print('🆔 Generated user ID: $userId (format: user_{timestamp}_{username})');
+        print('   - Timestamp: $timestamp');
+        print('   - Original username: $username');
+        print('   - Sanitized username: $sanitizedUsername');
+        
+        // Get Firebase Auth UID for storing in document (but don't use it as the document ID)
         final firebaseUser = FirebaseAuth.instance.currentUser;
         final firebaseAuthUid = firebaseUser?.uid ?? '';
         
-        String userId;
+        // Check if user document already exists with this custom user ID
+        final existingDoc = await NetworkService.executeWithRetry(
+          () => FirebaseFirestore.instanceFor(
+            app: Firebase.app(),
+            databaseId: 'marketsafe',
+          ).collection('users').doc(userId).get(),
+          maxRetries: 3,
+          retryDelay: const Duration(seconds: 2),
+          loadingMessage: 'Checking user data...',
+          context: context,
+          showNetworkErrors: true,
+        );
         
-        if (firebaseAuthUid.isNotEmpty) {
-          // Check if user document exists with Firebase Auth UID
-          final existingDoc = await NetworkService.executeWithRetry(
-            () => FirebaseFirestore.instanceFor(
-              app: Firebase.app(),
-              databaseId: 'marketsafe',
-            ).collection('users').doc(firebaseAuthUid).get(),
-            maxRetries: 3,
-            retryDelay: const Duration(seconds: 2),
-            loadingMessage: 'Checking user data...',
-            context: context,
-            showNetworkErrors: true,
-          );
-          
-          if (existingDoc.exists) {
-            // Use existing Firebase Auth UID to update the document (prevents "Unknown User" duplicate)
-            userId = firebaseAuthUid;
-            print('✅ Found existing user document with Firebase Auth UID: $userId');
-            print('✅ Will update existing document instead of creating new one (prevents "Unknown User" duplicate)');
-          } else {
-            // No existing document, use Firebase Auth UID as the user ID
-            userId = firebaseAuthUid;
-            print('🆔 Using Firebase Auth UID as user ID: $userId');
-          }
+        if (existingDoc.exists) {
+          print('✅ Found existing user document with custom user ID: $userId');
+          print('✅ Will update existing document instead of creating new one');
         } else {
-          // Fallback: Generate user ID in format: user_{timestamp}_{sanitizedUsername}
-          // This should rarely happen, but provides a fallback if Firebase Auth is not available
-          final timestamp = DateTime.now().millisecondsSinceEpoch;
-          userId = 'user_${timestamp}_$sanitizedUsername';
-          print('⚠️ No Firebase Auth UID available, generating user ID: $userId (format: user_{timestamp}_{username})');
-          print('   - Timestamp: $timestamp');
-          print('   - Original username: $username');
-          print('   - Sanitized username: $sanitizedUsername');
+          print('✅ Creating new user document with custom user ID: $userId');
         }
         
         // Store the user ID and username in SharedPreferences for later verification checks
@@ -528,6 +518,34 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
               if (luxandUuid == null || luxandUuid.isEmpty) {
                 print('❌❌❌ CRITICAL: Enrollment returned success=true but UUID is null/empty!');
                 print('❌ This is a backend issue - enrollment appeared to succeed but no UUID was returned!');
+              } else {
+                // CRITICAL: Ensure UUID is saved to Firestore even if enrollAllThreeFaces didn't save it
+                print('💾 Ensuring UUID is saved to Firestore...');
+                try {
+                  await NetworkService.executeWithRetry(
+                    () => FirebaseFirestore.instanceFor(
+                      app: Firebase.app(),
+                      databaseId: 'marketsafe',
+                    ).collection('users').doc(userId).set({
+                      'luxandUuid': luxandUuid, // Top-level field (required for profile photo check)
+                      'luxand': {
+                        'uuid': luxandUuid,
+                        'enrolledAt': FieldValue.serverTimestamp(),
+                        'enrolledFaces': enrolledCount,
+                      },
+                      'lastUpdated': FieldValue.serverTimestamp(),
+                    }, SetOptions(merge: true)),
+                    maxRetries: 3,
+                    retryDelay: const Duration(seconds: 2),
+                    loadingMessage: 'Saving enrollment data...',
+                    context: context,
+                    showNetworkErrors: true,
+                  );
+                  print('✅✅✅ UUID saved to Firestore: $luxandUuid');
+                } catch (saveError) {
+                  print('❌❌❌ CRITICAL: Failed to save UUID to Firestore: $saveError');
+                  print('❌ This means face verification will NOT work!');
+                }
               }
               
               // Clean up test enrollment if it exists
