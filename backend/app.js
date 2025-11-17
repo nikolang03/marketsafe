@@ -1125,9 +1125,13 @@ app.post('/api/verify', async (req, res) => {
             normalizedSimilarity = similarity / 1000.0;
           }
           
-          console.log(`📊 1:1 Verification result: similarity=${normalizedSimilarity.toFixed(3)}, match=${match}`);
+          // Use probability if similarity is 0 (Luxand returns probability, not similarity)
+          const finalSimilarity = normalizedSimilarity > 0 ? normalizedSimilarity : (verifyRes?.probability ?? 0);
           
-          if (normalizedSimilarity >= SIMILARITY_THRESHOLD || match === true) {
+          console.log(`📊 1:1 Verification result: similarity=${normalizedSimilarity.toFixed(3)}, probability=${verifyRes?.probability ?? 'N/A'}, finalSimilarity=${finalSimilarity.toFixed(3)}, match=${match}`);
+          console.log(`📊 Full verify response:`, JSON.stringify(verifyRes));
+          
+          if (finalSimilarity >= SIMILARITY_THRESHOLD || match === true) {
             console.log(`✅ Verification PASSED (1:1): similarity=${finalSimilarity.toFixed(3)}, match=${match}`);
             console.log(`✅ Email match confirmed: ${expectedEmail}`);
             return res.json({
