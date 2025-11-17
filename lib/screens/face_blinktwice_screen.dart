@@ -31,6 +31,7 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
   int _blinkCount = 0;
   bool _isBlinkComplete = false;
   bool _navigated = false;
+  bool _isCapturing = false; // Prevent concurrent captures
   
   // 60fps smooth animation controllers
   late AnimationController _progressController;
@@ -638,8 +639,14 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
           print('📸 Picture taken (after stopping stream): ${imageFile.path}');
         } catch (e2) {
           print('❌❌❌ CRITICAL: Failed to take picture even after stopping stream: $e2');
+          _isCapturing = false;
           throw e2;
         }
+      } finally {
+        // Release capture lock after a delay
+        Future.delayed(const Duration(milliseconds: 500), () {
+          _isCapturing = false;
+        });
       }
       
       if (imageFile.path.isEmpty) {
@@ -758,6 +765,13 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
   /// Capture and save blink image immediately when blink is detected
   /// This happens BEFORE the completion method to ensure path is saved
   Future<bool> _captureAndSaveBlinkImageImmediately() async {
+    // Prevent concurrent captures
+    if (_isCapturing) {
+      print('⚠️ IMMEDIATE CAPTURE: Already capturing, skipping...');
+      return false;
+    }
+    
+    _isCapturing = true;
     try {
       print('🚨🚨🚨 IMMEDIATE CAPTURE: Starting blink image capture...');
       final prefs = await SharedPreferences.getInstance();
@@ -765,6 +779,8 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       if (_cameraController != null && _cameraController!.value.isInitialized) {
         try {
           print('🚨🚨🚨 IMMEDIATE CAPTURE: Taking picture...');
+          // Wait a bit to ensure camera is ready
+          await Future.delayed(const Duration(milliseconds: 200));
           final imageFile = await _cameraController!.takePicture();
           if (imageFile.path.isNotEmpty) {
             print('🚨🚨🚨 IMMEDIATE CAPTURE: Picture taken: ${imageFile.path}');
@@ -805,11 +821,19 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
         }
       } else {
         print('❌ IMMEDIATE CAPTURE: Camera not ready');
+        _isCapturing = false;
         return false;
       }
     } catch (e) {
       print('❌ IMMEDIATE CAPTURE EXCEPTION: $e');
+      _isCapturing = false;
       return false;
+    } finally {
+      // Always release the lock after a delay to ensure camera is ready
+      Future.delayed(const Duration(milliseconds: 1000), () {
+        _isCapturing = false;
+        print('✅ IMMEDIATE CAPTURE: Lock released');
+      });
     }
   }
 
