@@ -138,16 +138,25 @@ app.post('/api/enroll', async (req, res) => {
   const startTime = Date.now();
   const requestId = Math.random().toString(36).substring(7);
   
+  // CRITICAL: Force log flush for Railway
+  const logAndFlush = (msg) => {
+    console.log(msg);
+    if (process.stdout.isTTY === false) {
+      process.stdout.write(msg + '\n');
+    }
+  };
+  
   try {
-    console.log(`\n🚀 [${requestId}] ========== ENROLLMENT REQUEST STARTED ==========`);
-    console.log(`🚀 [${requestId}] Timestamp: ${new Date().toISOString()}`);
-    console.log(`🚀 [${requestId}] Request body keys: ${Object.keys(req.body).join(', ')}`);
+    logAndFlush(`\n🚀 [${requestId}] ========== ENROLLMENT REQUEST STARTED ==========`);
+    logAndFlush(`🚀 [${requestId}] Timestamp: ${new Date().toISOString()}`);
+    logAndFlush(`🚀 [${requestId}] Request body keys: ${Object.keys(req.body).join(', ')}`);
+    logAndFlush(`🚀 [${requestId}] Request received at: ${new Date().toISOString()}`);
     
     const { email, photoBase64 } = req.body;
 
     // Validation
     if (!email || !photoBase64) {
-      console.error(`❌ [${requestId}] Validation failed: Missing email or photoBase64`);
+      logAndFlush(`❌ [${requestId}] Validation failed: Missing email or photoBase64`);
       return res.status(400).json({
         ok: false,
         error: 'Missing email or photoBase64'
@@ -155,16 +164,16 @@ app.post('/api/enroll', async (req, res) => {
     }
 
     if (typeof email !== 'string' || typeof photoBase64 !== 'string') {
-      console.error(`❌ [${requestId}] Validation failed: Invalid types`);
+      logAndFlush(`❌ [${requestId}] Validation failed: Invalid types`);
       return res.status(400).json({
         ok: false,
         error: 'Invalid email or photoBase64 format'
       });
     }
 
-    console.log(`📸 [${requestId}] Enrolling face for: ${email}`);
-    console.log(`📏 [${requestId}] Photo base64 length: ${photoBase64.length} characters`);
-    console.log(`📏 [${requestId}] Photo base64 preview: ${photoBase64.substring(0, 50)}...`);
+    logAndFlush(`📸 [${requestId}] Enrolling face for: ${email}`);
+    logAndFlush(`📏 [${requestId}] Photo base64 length: ${photoBase64.length} characters`);
+    logAndFlush(`📏 [${requestId}] Photo base64 preview: ${photoBase64.substring(0, 50)}...`);
     
     // Validate base64 string
     if (!photoBase64 || photoBase64.length < 100) {
@@ -607,11 +616,11 @@ app.post('/api/enroll', async (req, res) => {
 
     // 5) Return success ONLY if verification passed
     const duration = Date.now() - startTime;
-    console.log(`\n✅✅✅ [${requestId}] ========== ENROLLMENT SUCCESS ==========`);
-    console.log(`✅✅✅ [${requestId}] Duration: ${duration}ms`);
-    console.log(`✅✅✅ [${requestId}] UUID: ${luxandUuid}`);
-    console.log(`✅✅✅ [${requestId}] Email: ${email}`);
-    console.log(`✅✅✅ [${requestId}] ==========================================\n`);
+    logAndFlush(`\n✅✅✅ [${requestId}] ========== ENROLLMENT SUCCESS ==========`);
+    logAndFlush(`✅✅✅ [${requestId}] Duration: ${duration}ms`);
+    logAndFlush(`✅✅✅ [${requestId}] UUID: ${luxandUuid}`);
+    logAndFlush(`✅✅✅ [${requestId}] Email: ${email}`);
+    logAndFlush(`✅✅✅ [${requestId}] ==========================================\n`);
     
     res.json({
       ok: true,
@@ -622,11 +631,11 @@ app.post('/api/enroll', async (req, res) => {
 
   } catch (error) {
     const duration = Date.now() - startTime;
-    console.error(`\n❌❌❌ [${requestId}] ========== ENROLLMENT ERROR ==========`);
-    console.error(`❌❌❌ [${requestId}] Duration: ${duration}ms`);
-    console.error(`❌❌❌ [${requestId}] Error: ${error.message}`);
-    console.error(`❌❌❌ [${requestId}] Stack: ${error.stack}`);
-    console.error(`❌❌❌ [${requestId}] ==========================================\n`);
+    logAndFlush(`\n❌❌❌ [${requestId}] ========== ENROLLMENT ERROR ==========`);
+    logAndFlush(`❌❌❌ [${requestId}] Duration: ${duration}ms`);
+    logAndFlush(`❌❌❌ [${requestId}] Error: ${error.message}`);
+    logAndFlush(`❌❌❌ [${requestId}] Stack: ${error.stack}`);
+    logAndFlush(`❌❌❌ [${requestId}] ==========================================\n`);
     
     res.status(500).json({
       ok: false,

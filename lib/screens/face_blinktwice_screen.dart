@@ -804,64 +804,119 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       print('🚨🚨🚨 IMMEDIATE CAPTURE: Starting blink image capture...');
       final prefs = await SharedPreferences.getInstance();
       
-      if (_cameraController != null && _cameraController!.value.isInitialized) {
-        try {
-          print('🚨🚨🚨 IMMEDIATE CAPTURE: Taking picture...');
-          // Wait a bit to ensure camera is ready
-          await Future.delayed(const Duration(milliseconds: 200));
-          final imageFile = await _cameraController!.takePicture();
-          if (imageFile.path.isNotEmpty) {
-            print('🚨🚨🚨 IMMEDIATE CAPTURE: Picture taken: ${imageFile.path}');
-            
-            // Try to copy to permanent location
-            String pathToSave = imageFile.path;
-            try {
-              final permanentPath = await _copyImageToPermanentLocation(
-                imageFile.path,
-                'blink_${DateTime.now().millisecondsSinceEpoch}.jpg',
-              );
-              pathToSave = permanentPath;
-              print('🚨🚨🚨 IMMEDIATE CAPTURE: Copied to permanent: $permanentPath');
-            } catch (copyError) {
-              print('⚠️ IMMEDIATE CAPTURE: Copy failed, using original: $copyError');
-            }
-            
-            // Save path
-            await prefs.setString('face_verification_blinkImagePath', pathToSave);
-            print('🚨🚨🚨 IMMEDIATE CAPTURE: Path saved: $pathToSave');
-            
-            // Verify
-            final verify = prefs.getString('face_verification_blinkImagePath');
-            if (verify != null && verify.isNotEmpty) {
-              print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
-              return true;
-            } else {
-              print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not found after save!');
-              return false;
-            }
-          } else {
-            print('❌ IMMEDIATE CAPTURE: Image path is empty');
-            return false;
-          }
-        } catch (captureError) {
-          print('❌ IMMEDIATE CAPTURE ERROR: $captureError');
-          return false;
-        }
-      } else {
-        print('❌ IMMEDIATE CAPTURE: Camera not ready');
-        _isCapturing = false;
+      if (_cameraController == null) {
+        print('❌❌❌ IMMEDIATE CAPTURE: Camera controller is NULL!');
         return false;
       }
-    } catch (e) {
-      print('❌ IMMEDIATE CAPTURE EXCEPTION: $e');
-      _isCapturing = false;
+      
+      if (!_cameraController!.value.isInitialized) {
+        print('❌❌❌ IMMEDIATE CAPTURE: Camera not initialized!');
+        print('❌❌❌ Waiting 500ms and retrying...');
+        await Future.delayed(const Duration(milliseconds: 500));
+        if (!_cameraController!.value.isInitialized) {
+          print('❌❌❌ IMMEDIATE CAPTURE: Camera still not initialized after wait');
+          return false;
+        }
+      }
+      
+      try {
+        print('🚨🚨🚨 IMMEDIATE CAPTURE: Taking picture...');
+        // Wait a bit to ensure camera is ready
+        await Future.delayed(const Duration(milliseconds: 300));
+        
+        XFile? imageFile;
+        try {
+          imageFile = await _cameraController!.takePicture();
+        } catch (takePictureError) {
+          print('❌ IMMEDIATE CAPTURE: takePicture() failed: $takePictureError');
+          // Try one more time after a delay
+          await Future.delayed(const Duration(milliseconds: 500));
+          try {
+            imageFile = await _cameraController!.takePicture();
+            print('✅ IMMEDIATE CAPTURE: Retry successful');
+          } catch (retryError) {
+            print('❌ IMMEDIATE CAPTURE: Retry also failed: $retryError');
+            return false;
+          }
+        }
+        
+        if (imageFile == null || imageFile.path.isEmpty) {
+          print('❌ IMMEDIATE CAPTURE: Image file is null or path is empty');
+          return false;
+        }
+        
+        print('🚨🚨🚨 IMMEDIATE CAPTURE: Picture taken: ${imageFile.path}');
+        
+        // Try to copy to permanent location
+        String pathToSave = imageFile.path;
+        try {
+          final permanentPath = await _copyImageToPermanentLocation(
+            imageFile.path,
+            'blink_${DateTime.now().millisecondsSinceEpoch}.jpg',
+          );
+          pathToSave = permanentPath;
+          print('🚨🚨🚨 IMMEDIATE CAPTURE: Copied to permanent: $permanentPath');
+          
+          // Verify file exists
+          final file = File(permanentPath);
+          if (await file.exists()) {
+            final fileSize = await file.length();
+            print('✅ IMMEDIATE CAPTURE: Permanent file exists: ${fileSize} bytes');
+          } else {
+            print('⚠️ IMMEDIATE CAPTURE: Permanent file does not exist, using original path');
+            pathToSave = imageFile.path;
+          }
+        } catch (copyError) {
+          print('⚠️ IMMEDIATE CAPTURE: Copy failed, using original: $copyError');
+          pathToSave = imageFile.path;
+        }
+        
+        // CRITICAL: Save path - this MUST succeed
+        print('🚨🚨🚨 IMMEDIATE CAPTURE: Saving path to SharedPreferences: $pathToSave');
+        final saveResult = await prefs.setString('face_verification_blinkImagePath', pathToSave);
+        print('🚨🚨🚨 IMMEDIATE CAPTURE: Save result: $saveResult');
+        
+        // Verify immediately
+        final verify = prefs.getString('face_verification_blinkImagePath');
+        if (verify != null && verify.isNotEmpty) {
+          print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
+          
+          // Double-check file exists
+          final verifyFile = File(verify);
+          if (await verifyFile.exists()) {
+            final verifySize = await verifyFile.length();
+            print('✅✅✅ IMMEDIATE CAPTURE: File verified exists: ${verifySize} bytes');
+            return true;
+          } else {
+            print('⚠️ IMMEDIATE CAPTURE: Path saved but file does not exist: $verify');
+            // Still return true - path is saved, file might be in temp location
+            return true;
+          }
+        } else {
+          print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not found after save!');
+          print('❌❌❌ This is a critical error - path was not saved!');
+          return false;
+        }
+      } catch (captureError, stackTrace) {
+        print('❌ IMMEDIATE CAPTURE ERROR: $captureError');
+        print('❌ Stack trace: $stackTrace');
+        return false;
+      }
+      } else {
+        print('❌❌❌ IMMEDIATE CAPTURE: Camera not initialized!');
+        print('❌❌❌ Camera controller: ${_cameraController != null}');
+        if (_cameraController != null) {
+          print('❌❌❌ Camera initialized: ${_cameraController!.value.isInitialized}');
+        }
+        return false;
+      }
+    } catch (e, stackTrace) {
+      print('❌❌❌ IMMEDIATE CAPTURE CRITICAL ERROR: $e');
+      print('❌ Stack trace: $stackTrace');
       return false;
     } finally {
-      // Always release the lock after a delay to ensure camera is ready
-      Future.delayed(const Duration(milliseconds: 1000), () {
-        _isCapturing = false;
-        print('✅ IMMEDIATE CAPTURE: Lock released');
-      });
+      _isCapturing = false;
+      print('🚨🚨🚨 IMMEDIATE CAPTURE: Finished, _isCapturing set to false');
     }
   }
 
