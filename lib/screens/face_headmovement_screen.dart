@@ -535,6 +535,64 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
     }
   }
 
+  /// Capture and save head movement image immediately when movement completes
+  /// This happens BEFORE the completion method to ensure path is saved
+  Future<bool> _captureAndSaveHeadMovementImageImmediately() async {
+    try {
+      print('🚨🚨🚨 IMMEDIATE CAPTURE: Starting head movement image capture...');
+      final prefs = await SharedPreferences.getInstance();
+      
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          print('🚨🚨🚨 IMMEDIATE CAPTURE: Taking picture...');
+          final imageFile = await _cameraController!.takePicture();
+          if (imageFile.path.isNotEmpty) {
+            print('🚨🚨🚨 IMMEDIATE CAPTURE: Picture taken: ${imageFile.path}');
+            
+            // Try to copy to permanent location
+            String pathToSave = imageFile.path;
+            try {
+              final permanentPath = await _copyImageToPermanentLocation(
+                imageFile.path,
+                'headmovement_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              pathToSave = permanentPath;
+              print('🚨🚨🚨 IMMEDIATE CAPTURE: Copied to permanent: $permanentPath');
+            } catch (copyError) {
+              print('⚠️ IMMEDIATE CAPTURE: Copy failed, using original: $copyError');
+            }
+            
+            // Save path
+            await prefs.setString('face_verification_headMovementImagePath', pathToSave);
+            print('🚨🚨🚨 IMMEDIATE CAPTURE: Path saved: $pathToSave');
+            
+            // Verify
+            final verify = prefs.getString('face_verification_headMovementImagePath');
+            if (verify != null && verify.isNotEmpty) {
+              print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
+              return true;
+            } else {
+              print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not found after save!');
+              return false;
+            }
+          } else {
+            print('❌ IMMEDIATE CAPTURE: Image path is empty');
+            return false;
+          }
+        } catch (captureError) {
+          print('❌ IMMEDIATE CAPTURE ERROR: $captureError');
+          return false;
+        }
+      } else {
+        print('❌ IMMEDIATE CAPTURE: Camera not ready');
+        return false;
+      }
+    } catch (e) {
+      print('❌ IMMEDIATE CAPTURE EXCEPTION: $e');
+      return false;
+    }
+  }
+
   /// Copy image from temporary location to permanent app documents directory
   Future<String> _copyImageToPermanentLocation(String tempImagePath, String fileName) async {
     try {
