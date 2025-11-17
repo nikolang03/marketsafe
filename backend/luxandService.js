@@ -94,7 +94,9 @@ export async function enrollPhoto(base64Image, name) {
     ...formData.getHeaders() // This adds Content-Type with proper boundary
   };
   
-  console.log(`📤 Content-Type: ${headers['Content-Type']}`);
+  console.log(`📤 Headers being sent:`, JSON.stringify(headers, null, 2));
+  console.log(`📤 Content-Type: ${headers['Content-Type'] || 'NOT SET!'}`);
+  console.log(`📤 Token header: ${headers['token'] ? 'SET' : 'NOT SET!'}`);
   
   // Make request to /v2/person endpoint
   const res = await fetch(`${LUXAND_BASE}/v2/person`, {
@@ -104,9 +106,11 @@ export async function enrollPhoto(base64Image, name) {
   });
   
   console.log(`📥 Luxand response status: ${res.status} ${res.statusText}`);
+  console.log(`📥 Luxand response headers:`, JSON.stringify(Object.fromEntries(res.headers.entries()), null, 2));
   
   const responseText = await res.text();
-  console.log(`📥 Raw Luxand response (first 500 chars):`, responseText.substring(0, 500));
+  console.log(`📥 Raw Luxand response (first 1000 chars):`, responseText.substring(0, 1000));
+  console.log(`📥 Full Luxand response length: ${responseText.length} characters`);
   
   // Try to parse response to check for failure status
   let responseData;
@@ -125,11 +129,22 @@ export async function enrollPhoto(base64Image, name) {
     const errorMessage = responseData.message || 'Enrollment failed';
     console.error(`❌❌❌ Luxand enrollment FAILED with status "failure"`);
     console.error(`❌ Error message: ${errorMessage}`);
+    console.error(`❌ Full response:`, JSON.stringify(responseData, null, 2));
+    throw new Error(`Luxand enrollment failed: ${errorMessage}`);
+  }
+  
+  // Check for other error indicators in the response
+  if (responseData && (responseData.error || responseData.errors)) {
+    const errorMessage = responseData.error || responseData.errors || 'Enrollment failed';
+    console.error(`❌❌❌ Luxand enrollment FAILED with error field`);
+    console.error(`❌ Error: ${errorMessage}`);
+    console.error(`❌ Full response:`, JSON.stringify(responseData, null, 2));
     throw new Error(`Luxand enrollment failed: ${errorMessage}`);
   }
   
   if (!res.ok && res.status !== 201) {
-    console.error(`❌ Luxand enroll error response:`, responseText.substring(0, 500));
+    console.error(`❌❌❌ Luxand enroll HTTP error: ${res.status} ${res.statusText}`);
+    console.error(`❌ Error response:`, responseText.substring(0, 1000));
     throw new Error(`Luxand enroll error (${res.status}): ${responseText.substring(0, 200)}`);
   }
 
