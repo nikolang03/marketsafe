@@ -812,6 +812,94 @@ app.post('/api/verify', async (req, res) => {
     }
     
     try {
+      // CRITICAL: If UUID is provided, try 1:1 verification FIRST with the UUID
+      // This is more secure and faster than search
+      // We need to convert UUID to person ID for the verify endpoint
+      if (luxandUuid && luxandUuid.trim().length > 0) {
+        try {
+          console.log('🔍 Attempting direct 1:1 verification with provided UUID...');
+          console.log(`🔍 UUID: ${luxandUuid.trim()}`);
+          
+          // First, find the person ID from the UUID by listing all persons
+          const allPersons = await listPersons();
+          const persons = allPersons.persons || allPersons.data || allPersons || [];
+          const personWithUuid = persons.find(p => 
+            (p.uuid || p.id) === luxandUuid.trim()
+          );
+          
+          if (personWithUuid) {
+            // Get the person ID (Luxand verify endpoint uses ID, not UUID)
+            const personId = personWithUuid.id?.toString() || personWithUuid.uuid?.toString() || '';
+            const personName = personWithUuid.name || personWithUuid.email || '';
+            
+            console.log(`✅ Found person in Luxand: ID=${personId}, Name=${personName}`);
+            console.log(`🔍 Verifying face against this person ID...`);
+            
+            // Try 1:1 verification with the person ID
+            const verifyPromise = verifyPersonPhoto(personId, photoBase64);
+            const timeoutPromise = new Promise((_, reject) => 
+              setTimeout(() => reject(new Error('1:1 verify timeout')), 5000)
+            );
+            
+            const verifyRes = await Promise.race([verifyPromise, timeoutPromise]);
+            
+            // Extract similarity/probability
+            const similarity = parseFloat(
+              verifyRes?.similarity ?? 
+              verifyRes?.confidence ?? 
+              verifyRes?.probability ?? 
+              0
+            );
+            
+            let match = verifyRes?.match ?? verifyRes?.verified ?? false;
+            if (!match) {
+              match = (verifyRes?.message === 'verified') ||
+                      (verifyRes?.status === 'success' && verifyRes?.message === 'verified') ||
+                      (verifyRes?.status === 'success' && verifyRes?.probability >= 0.85);
+            }
+            
+            let normalizedSimilarity = similarity;
+            if (similarity > 1.0 && similarity <= 100) {
+              normalizedSimilarity = similarity / 100.0;
+            } else if (similarity > 100) {
+              normalizedSimilarity = similarity / 1000.0;
+            }
+            
+            const finalSimilarity = normalizedSimilarity > 0 ? normalizedSimilarity : (verifyRes?.probability ?? 0);
+            
+            console.log(`📊 Direct UUID verification: similarity=${finalSimilarity.toFixed(3)}, match=${match}`);
+            
+            // Verify email matches (security check)
+            const personEmail = (personName || '').toLowerCase().trim();
+            const expectedEmail = email ? email.toLowerCase().trim() : '';
+            const emailMatches = personEmail === expectedEmail || personEmail.includes(expectedEmail) || expectedEmail.includes(personEmail);
+            
+            if (emailMatches && (finalSimilarity >= SIMILARITY_THRESHOLD || match === true)) {
+              console.log(`✅✅✅ Direct UUID verification PASSED: similarity=${finalSimilarity.toFixed(3)}, email match=${emailMatches}`);
+              return res.json({
+                ok: true,
+                similarity: finalSimilarity,
+                threshold: SIMILARITY_THRESHOLD,
+                message: 'verified',
+                method: 'direct_uuid_verification'
+              });
+            } else if (!emailMatches) {
+              console.warn(`⚠️ UUID verification: Email mismatch - Person: "${personEmail}", Expected: "${expectedEmail}"`);
+              console.warn(`⚠️ Continuing with search-based verification...`);
+            } else {
+              console.warn(`⚠️ UUID verification: Similarity ${finalSimilarity.toFixed(3)} < threshold ${SIMILARITY_THRESHOLD}, continuing with search...`);
+            }
+          } else {
+            console.warn(`⚠️ UUID ${luxandUuid.trim()} not found in Luxand persons list, using search-based verification...`);
+          }
+        } catch (uuidVerifyError) {
+          console.warn(`⚠️ Direct UUID verification failed: ${uuidVerifyError.message}`);
+          console.warn(`⚠️ Falling back to search-based verification...`);
+          // Continue with search-based verification
+        }
+      }
+      
+      // Fallback: Use search-based verification
       // First, try search to get the person ID (Luxand search returns ID, not UUID)
       // Then use that ID for 1:1 verification, or use search results directly
       const searchRes = await searchPhoto(photoBase64);
