@@ -177,22 +177,27 @@ class FaceAuthBackendService {
       }
 
       final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final bool ok = body['ok'] == true;
-      final String? uuid = body['uuid']?.toString();
+      final bool ok = body['ok'] == true || body['success'] == true;
+      // Try multiple possible UUID fields
+      final String? uuid = body['uuid']?.toString() ?? 
+                          body['luxandUuid']?.toString() ?? 
+                          body['luxand']?['uuid']?.toString();
       
       // CRITICAL: Log the response for debugging
       print('📦 Backend enrollment response:');
-      print('   - ok: $ok');
-      print('   - uuid: ${uuid ?? "NULL"}');
-      print('   - success: ${body['success'] ?? "N/A"}');
+      print('   - ok: ${body['ok']}');
+      print('   - success: ${body['success']}');
+      print('   - uuid: ${body['uuid'] ?? "NULL"}');
+      print('   - luxandUuid: ${body['luxandUuid'] ?? "NULL"}');
       print('   - error: ${body['error'] ?? "N/A"}');
       print('   - message: ${body['message'] ?? "N/A"}');
       print('   - Full response keys: ${body.keys.toList()}');
+      print('   - Extracted UUID: ${uuid ?? "NULL"}');
       
       if (ok && uuid != null && uuid.isNotEmpty) {
         print('✅✅✅ Backend returned valid UUID: $uuid');
       } else if (ok && (uuid == null || uuid.isEmpty)) {
-        print('❌❌❌ CRITICAL: Backend returned ok=true but UUID is null/empty!');
+        print('❌❌❌ CRITICAL: Backend returned ok/success=true but UUID is null/empty!');
         print('❌ This means enrollment appeared to succeed but no UUID was returned!');
         print('❌ Full response: ${jsonEncode(body)}');
       } else {

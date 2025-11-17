@@ -526,6 +526,40 @@ class ProductionFaceRecognitionService {
       } else {
         print('⚠️⚠️⚠️ WARNING: User document not found after enrollment!');
       }
+      
+      // CRITICAL: Final verification - ensure UUID is in Firestore
+      print('🔍 Final verification: Double-checking UUID in Firestore...');
+      try {
+        final finalCheck = await _firestore.collection('users').doc(finalUserId).get();
+        if (finalCheck.exists) {
+          final savedUuid = finalCheck.data()?['luxandUuid']?.toString() ?? '';
+          if (savedUuid == luxandUuid) {
+            print('✅✅✅ FINAL VERIFICATION: UUID confirmed in Firestore: $savedUuid');
+          } else if (savedUuid.isNotEmpty) {
+            print('⚠️⚠️⚠️ WARNING: UUID mismatch! Expected: $luxandUuid, Found: $savedUuid');
+            print('⚠️ Using saved UUID from Firestore: $savedUuid');
+            luxandUuid = savedUuid; // Use the saved UUID
+          } else {
+            print('❌❌❌ CRITICAL: UUID not found in Firestore after save! Retrying save...');
+            // Try saving again with retry
+            await _firestore.collection('users').doc(finalUserId).set({
+              'luxandUuid': luxandUuid,
+              'luxand': {
+                'uuid': luxandUuid,
+                'enrolledAt': FieldValue.serverTimestamp(),
+                'enrolledFaces': enrolledCount,
+              },
+              'lastUpdated': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+            print('✅ Retry save completed');
+          }
+        } else {
+          print('❌❌❌ CRITICAL: User document not found in Firestore!');
+        }
+      } catch (verifyError) {
+        print('❌ Error during final verification: $verifyError');
+      }
+      
       return {
         'success': true,
         'luxandUuid': luxandUuid,
