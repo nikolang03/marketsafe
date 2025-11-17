@@ -1111,12 +1111,12 @@ app.post('/api/verify', async (req, res) => {
             0
           );
           // Check multiple ways Luxand indicates verification success
-          const match = verifyRes?.match ?? 
-                       verifyRes?.verified ?? 
-                       (verifyRes?.message === 'verified') ||
-                       (verifyRes?.status === 'success' && verifyRes?.message === 'verified') ||
-                       (verifyRes?.status === 'success' && verifyRes?.probability >= 0.85) ||
-                       false;
+          let match = verifyRes?.match ?? verifyRes?.verified ?? false;
+          if (!match) {
+            match = (verifyRes?.message === 'verified') ||
+                    (verifyRes?.status === 'success' && verifyRes?.message === 'verified') ||
+                    (verifyRes?.status === 'success' && verifyRes?.probability >= 0.85);
+          }
           
           let normalizedSimilarity = similarity;
           if (similarity > 1.0 && similarity <= 100) {
