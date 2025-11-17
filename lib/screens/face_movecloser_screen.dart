@@ -533,38 +533,67 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
     bool shouldNavigate = true;
     
     try {
-      // Stop camera stream properly
-      if (_cameraController != null && _cameraController!.value.isStreamingImages) {
-        try {
-          await _cameraController!.stopImageStream();
-        } catch (e) {
-          print('⚠️ Error stopping stream: $e');
-        }
-      }
-      _detectionTimer?.cancel();
-      
-      // Wait for camera to settle
-      await Future.delayed(const Duration(milliseconds: 200));
-
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
       final email = prefs.getString('signup_email') ?? '';
 
-      if (userId == null || userId.isEmpty) {
-        print('⚠️ No userId found, but continuing anyway');
-        // Don't return - continue to navigation
-      } else {
-        // Try to capture and register face, but don't block navigation on failure
+      // CRITICAL: Capture image FIRST before stopping stream
+      XFile? imageFile;
+      Uint8List? imageBytes;
+      Face? finalDetectedFace;
+      
+      print('🔍 Starting move closer image capture...');
+      print('🔍 Camera controller state: ${_cameraController != null ? "exists" : "null"}, initialized: ${_cameraController?.value.isInitialized ?? false}');
+      
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
         try {
-          XFile? imageFile;
-          Uint8List? imageBytes;
-          Face? finalDetectedFace;
+          print('📸 Taking picture for move closer verification (before stopping stream)...');
+          imageFile = await _cameraController!.takePicture();
+          print('📸 Picture taken: ${imageFile.path}');
+          imageBytes = await imageFile.readAsBytes();
+          print('📸 Image bytes read: ${imageBytes.length} bytes');
           
-          if (_cameraController != null && _cameraController!.value.isInitialized) {
+          // CRITICAL: Save image path IMMEDIATELY after capture
+          if (imageFile.path.isNotEmpty) {
+            await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+            await prefs.setBool('face_verification_moveCloserCompleted', true);
+            await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
+            print('✅ Move closer image path saved IMMEDIATELY: ${imageFile.path}');
+            
+            // Verify the save was successful
+            final savedPath = prefs.getString('face_verification_moveCloserImagePath');
+            if (savedPath == imageFile.path) {
+              print('✅ Verified: Move closer image path correctly saved to SharedPreferences');
+            } else {
+              print('❌ WARNING: Move closer image path save verification failed! Expected: ${imageFile.path}, Got: $savedPath');
+            }
+          } else {
+            print('❌ ERROR: Move closer image path is empty! Cannot save to SharedPreferences.');
+          }
+        } catch (captureError) {
+              print('⚠️ Image capture error: $captureError');
+              // Continue anyway - don't block navigation
+            }
+          } else {
+            print('❌ ERROR: Camera controller is null or not initialized! Cannot capture image.');
+            print('   - Controller null: ${_cameraController == null}');
+            print('   - Controller initialized: ${_cameraController?.value.isInitialized ?? false}');
+          }
+          
+          // Stop camera stream AFTER image is captured (or attempted)
+          if (_cameraController != null && _cameraController!.value.isStreamingImages) {
             try {
-              imageFile = await _cameraController!.takePicture();
-              imageBytes = await imageFile.readAsBytes();
-
+              await _cameraController!.stopImageStream();
+              print('✅ Image stream stopped');
+            } catch (e) {
+              print('⚠️ Error stopping stream: $e');
+            }
+          }
+          _detectionTimer?.cancel();
+          
+          // Process captured image if userId is available
+          if (userId != null && userId.isNotEmpty && imageFile != null && imageBytes != null) {
+            try {
               if (imageBytes.isNotEmpty && imageBytes.length >= 1000) {
                 // Re-detect face in captured image for accuracy
                 final InputImage inputImage = InputImage.fromFilePath(imageFile.path);
@@ -593,17 +622,12 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                           final luxandUuid = enrollResult['luxandUuid']?.toString() ?? '';
                           print('✅ Face enrolled successfully from move closer step. UUID: $luxandUuid');
                           
-                          // Save enrollment info to SharedPreferences
-                          prefs.setBool('face_verification_moveCloserCompleted', true);
-                          prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
-                          if (imageFile.path.isNotEmpty) {
-                            prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
-                          }
+                          // Image path already saved above, just save UUID if available
                           if (luxandUuid.isNotEmpty) {
-                            prefs.setString('face_verification_moveCloserLuxandUuid', luxandUuid);
+                            await prefs.setString('face_verification_moveCloserLuxandUuid', luxandUuid);
                           }
                           
-                          // Update Firebase directly (userId is guaranteed to be non-null in this else block)
+                          // Update Firebase directly
                           try {
                             await FaceDataService.updateFaceVerificationStep(
                               'moveCloserCompleted',
@@ -617,14 +641,9 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                         } else {
                           final error = enrollResult['error']?.toString() ?? 'Unknown error';
                           print('⚠️ Face enrollment failed: $error');
-                          // Still save that we completed the step
-                          prefs.setBool('face_verification_moveCloserCompleted', true);
-                          prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
-                          if (imageFile.path.isNotEmpty) {
-                            prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
-                          }
+                          // Image path already saved above, no need to save again
                           
-                          // Update Firebase directly even if enrollment failed (userId is guaranteed to be non-null in this else block)
+                          // Update Firebase directly even if enrollment failed
                           try {
                             await FaceDataService.updateFaceVerificationStep(
                               'moveCloserCompleted',
@@ -638,14 +657,9 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                         }
                       } catch (enrollError) {
                         print('⚠️ Enrollment error: $enrollError');
-                        // Still save that we completed the step
-                        prefs.setBool('face_verification_moveCloserCompleted', true);
-                        prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
-                        if (imageFile.path.isNotEmpty) {
-                          prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
-                        }
+                        // Image path already saved above, no need to save again
                         
-                        // Update Firebase directly even on enrollment error (userId is guaranteed to be non-null in this else block)
+                        // Update Firebase directly even on enrollment error
                         try {
                           await FaceDataService.updateFaceVerificationStep(
                             'moveCloserCompleted',
@@ -659,14 +673,9 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                       }
                     } else {
                       print('ℹ️ No email available - enrollment will happen later in fill_information_screen');
-                      // Still save that we completed the step and captured the image
-                      prefs.setBool('face_verification_moveCloserCompleted', true);
-                      prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
-                      if (imageFile.path.isNotEmpty) {
-                        prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
-                      }
+                      // Image path already saved above, no need to save again
                       
-                      // Update Firebase directly even without email (userId is guaranteed to be non-null in this else block)
+                      // Update Firebase directly even without email
                       try {
                         await FaceDataService.updateFaceVerificationStep(
                           'moveCloserCompleted',
@@ -681,16 +690,13 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                   }
                 }
               }
-            } catch (captureError) {
-              print('⚠️ Image capture error: $captureError');
-              // Continue anyway - don't block navigation
+            } catch (e, stackTrace) {
+              print('⚠️ Error processing captured image: $e');
+              print('❌ Stack trace: $stackTrace');
             }
+          } else if (userId == null || userId.isEmpty) {
+            print('⚠️ No userId found - image path should still be saved if camera was ready');
           }
-        } catch (e) {
-          print('⚠️ Error in face registration: $e');
-          // Continue anyway - don't block navigation
-        }
-      }
 
       // Always navigate after short delay
       if (mounted && shouldNavigate) {

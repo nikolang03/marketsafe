@@ -395,20 +395,32 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
   }
 
   Future<void> _completeBlinkVerification(Face face) async {
+    print('🔍 _completeBlinkVerification called');
     try {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('face_verification_blinkCompleted', true);
       await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
+      print('✅ Blink completion flags saved');
       
+      // CRITICAL: Capture image BEFORE stopping the stream
+      print('📸 Starting image capture for blink verification...');
       await _registerBlinkEmbedding(face);
+      print('✅ Image capture completed');
+      
+      // Stop stream AFTER image is captured
+      if (_cameraController != null && _cameraController!.value.isStreamingImages) {
+        try {
+          await _cameraController!.stopImageStream();
+          print('✅ Image stream stopped');
+        } catch (e) {
+          print('⚠️ Error stopping stream: $e');
+        }
+      }
+      _detectionTimer?.cancel();
       
       Future.delayed(const Duration(milliseconds: 1500), () {
         if (mounted && !_navigated) {
           _navigated = true;
-          if (_cameraController != null && _cameraController!.value.isStreamingImages) {
-            _cameraController!.stopImageStream();
-          }
-          _detectionTimer?.cancel();
           Navigator.pushReplacement(
             context,
             MaterialPageRoute(builder: (_) => const FaceMoveCloserScreen()),
@@ -416,6 +428,7 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
         }
       });
     } catch (e) {
+      print('❌ Error in _completeBlinkVerification: $e');
       if (mounted && !_navigated) {
         _navigated = true;
         Future.delayed(const Duration(milliseconds: 1500), () {
@@ -435,46 +448,88 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
   }
 
   Future<void> _registerBlinkEmbedding(Face face) async {
+    print('🔍 _registerBlinkEmbedding called');
     try {
       final prefs = await SharedPreferences.getInstance();
       final userId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
       final email = prefs.getString('signup_email') ?? '';
       final phone = prefs.getString('signup_phone') ?? '';
       
-      if (userId == null || userId.isEmpty) return;
+      print('🔍 Camera controller state: ${_cameraController != null ? "exists" : "null"}, initialized: ${_cameraController?.value.isInitialized ?? false}');
       
       if (_cameraController != null && _cameraController!.value.isInitialized) {
+        print('📸 Taking picture for blink verification...');
         final XFile imageFile = await _cameraController!.takePicture();
+        print('📸 Picture taken: ${imageFile.path}');
         final Uint8List imageBytes = await imageFile.readAsBytes();
+        print('📸 Image bytes read: ${imageBytes.length} bytes');
         
-        // CRITICAL: Save image path to SharedPreferences for enrollAllThreeFaces
+        // CRITICAL: Save image path FIRST, regardless of userId (needed for enrollment later)
         if (imageFile.path.isNotEmpty) {
           await prefs.setString('face_verification_blinkImagePath', imageFile.path);
+          await prefs.setBool('face_verification_blinkCompleted', true);
+          await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
           print('✅ Blink image path saved: ${imageFile.path}');
+          print('✅ Blink verification completed flag saved');
+          
+          // Verify the save was successful
+          final savedPath = prefs.getString('face_verification_blinkImagePath');
+          if (savedPath == imageFile.path) {
+            print('✅ Verified: Blink image path correctly saved to SharedPreferences');
+          } else {
+            print('❌ WARNING: Blink image path save verification failed! Expected: ${imageFile.path}, Got: $savedPath');
+          }
+        } else {
+          print('❌ ERROR: Blink image path is empty! Cannot save to SharedPreferences.');
         }
         
-        final inputImage = InputImage.fromFilePath(imageFile.path);
-        final faces = await _faceDetector.processImage(inputImage);
-        
-        if (faces.isNotEmpty) {
-          final capturedFace = faces.first;
-          final result = await ProductionFaceRecognitionService.registerAdditionalEmbedding(
-            userId: userId,
-            detectedFace: capturedFace,
-            cameraImage: null,
-            imageBytes: imageBytes,
-            source: 'blink_twice',
-            email: email.isNotEmpty ? email : null,
-            phoneNumber: phone.isNotEmpty ? phone : null,
-          );
+        // Only register embedding if userId is available (optional - image path already saved above)
+        if (userId != null && userId.isNotEmpty) {
+          final inputImage = InputImage.fromFilePath(imageFile.path);
+          final faces = await _faceDetector.processImage(inputImage);
           
-          if (result['success'] == true) {
-            print('✅ Blink verification embedding registered successfully');
+          if (faces.isNotEmpty) {
+            final capturedFace = faces.first;
+            final result = await ProductionFaceRecognitionService.registerAdditionalEmbedding(
+              userId: userId,
+              detectedFace: capturedFace,
+              cameraImage: null,
+              imageBytes: imageBytes,
+              source: 'blink_twice',
+              email: email.isNotEmpty ? email : null,
+              phoneNumber: phone.isNotEmpty ? phone : null,
+            );
+            
+            if (result['success'] == true) {
+              print('✅ Blink verification embedding registered successfully');
+            }
+          }
+        } else {
+          print('⚠️ No userId available - skipping embedding registration, but image path is saved for enrollment');
+        }
+      } else {
+        print('❌ ERROR: Camera controller is null or not initialized! Cannot capture image.');
+        print('   - Controller null: ${_cameraController == null}');
+        print('   - Controller initialized: ${_cameraController?.value.isInitialized ?? false}');
+        // Try to save a note that we attempted but camera wasn't ready
+        await prefs.setString('face_verification_blinkImagePath', 'CAMERA_NOT_READY');
+      }
+    } catch (e, stackTrace) {
+      print('❌ Error registering blink embedding: $e');
+      print('❌ Stack trace: $stackTrace');
+      // Even on error, try to save image path if we have it
+      try {
+        if (_cameraController != null && _cameraController!.value.isInitialized) {
+          final XFile imageFile = await _cameraController!.takePicture();
+          if (imageFile.path.isNotEmpty) {
+            final prefs = await SharedPreferences.getInstance();
+            await prefs.setString('face_verification_blinkImagePath', imageFile.path);
+            print('✅ Blink image path saved after error: ${imageFile.path}');
           }
         }
+      } catch (saveError) {
+        print('❌ Failed to save blink image path after error: $saveError');
       }
-    } catch (e) {
-      print('❌ Error registering blink embedding: $e');
     }
   }
 

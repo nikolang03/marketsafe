@@ -70,11 +70,30 @@ class FaceAuthBackendService {
       final body = jsonDecode(response.body) as Map<String, dynamic>;
       final bool ok = body['ok'] == true;
       final String? uuid = body['uuid']?.toString();
+      
+      // CRITICAL: Log the response for debugging
+      print('📦 Backend enrollment response:');
+      print('   - ok: $ok');
+      print('   - uuid: ${uuid ?? "NULL"}');
+      print('   - success: ${body['success'] ?? "N/A"}');
+      print('   - error: ${body['error'] ?? "N/A"}');
+      print('   - message: ${body['message'] ?? "N/A"}');
+      print('   - Full response keys: ${body.keys.toList()}');
+      
+      if (ok && uuid != null && uuid.isNotEmpty) {
+        print('✅✅✅ Backend returned valid UUID: $uuid');
+      } else if (ok && (uuid == null || uuid.isEmpty)) {
+        print('❌❌❌ CRITICAL: Backend returned ok=true but UUID is null/empty!');
+        print('❌ This means enrollment appeared to succeed but no UUID was returned!');
+        print('❌ Full response: ${jsonEncode(body)}');
+      } else {
+        print('❌ Backend enrollment failed: ${body['error'] ?? body['message'] ?? "Unknown error"}');
+      }
 
       return {
         'success': ok,
         'uuid': uuid,
-        'error': ok ? null : 'Enrollment failed',
+        'error': ok ? null : (body['error']?.toString() ?? body['message']?.toString() ?? 'Enrollment failed'),
       };
     } on TimeoutException catch (e) {
       print('❌ Backend enroll timeout: $e');

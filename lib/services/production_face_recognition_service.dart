@@ -198,11 +198,32 @@ class ProductionFaceRecognitionService {
       final blinkImagePath = prefs.getString('face_verification_blinkImagePath');
       final moveCloserImagePath = prefs.getString('face_verification_moveCloserImagePath');
       final headMovementImagePath = prefs.getString('face_verification_headMovementImagePath');
+      
+      // Also check completion flags
+      final blinkCompleted = prefs.getBool('face_verification_blinkCompleted') ?? false;
+      final moveCloserCompleted = prefs.getBool('face_verification_moveCloserCompleted') ?? false;
+      final headMovementCompleted = prefs.getBool('face_verification_headMovementCompleted') ?? false;
 
       print('🔍 Checking for saved face images:');
+      print('  - Blink completed: $blinkCompleted');
       print('  - Blink image: ${blinkImagePath != null && blinkImagePath.isNotEmpty ? "✅ Found: $blinkImagePath" : "❌ Not found"}');
+      print('  - Move closer completed: $moveCloserCompleted');
       print('  - Move closer image: ${moveCloserImagePath != null && moveCloserImagePath.isNotEmpty ? "✅ Found: $moveCloserImagePath" : "❌ Not found"}');
+      print('  - Head movement completed: $headMovementCompleted');
       print('  - Head movement image: ${headMovementImagePath != null && headMovementImagePath.isNotEmpty ? "✅ Found: $headMovementImagePath" : "❌ Not found"}');
+      
+      // Debug: List all face verification keys in SharedPreferences
+      final allKeys = prefs.getKeys();
+      final faceVerificationKeys = allKeys.where((key) => key.startsWith('face_verification_')).toList();
+      print('🔍 All face verification keys in SharedPreferences: ${faceVerificationKeys.length}');
+      for (final key in faceVerificationKeys) {
+        final value = prefs.get(key);
+        if (value is String && value.length > 100) {
+          print('  - $key: ${value.substring(0, 50)}... (${value.length} chars)');
+        } else {
+          print('  - $key: $value');
+        }
+      }
 
       final List<String> imagePaths = [];
       
@@ -370,12 +391,21 @@ class ProductionFaceRecognitionService {
 
           if (enrollResult['success'] == true) {
             final uuid = enrollResult['uuid']?.toString();
+            print('🔍 Face ${i + 1} enrollment result:');
+            print('   - success: true');
+            print('   - uuid from result: ${uuid ?? "NULL"}');
+            print('   - uuid type: ${uuid.runtimeType}');
+            print('   - uuid isEmpty: ${uuid?.isEmpty ?? "N/A"}');
+            
             if (uuid != null && uuid.isNotEmpty) {
               luxandUuid = uuid; // Store the UUID (should be same for all enrollments)
               enrolledCount++;
               print('✅ Face ${i + 1} enrolled successfully via backend. UUID: $uuid');
             } else {
-              errors.add('Face ${i + 1}: No UUID returned from backend');
+              print('❌❌❌ CRITICAL: Backend returned success=true but UUID is null or empty!');
+              print('❌ enrollResult keys: ${enrollResult.keys.toList()}');
+              print('❌ enrollResult full: $enrollResult');
+              errors.add('Face ${i + 1}: No UUID returned from backend (success=true but uuid is null/empty)');
             }
           } else {
             final error = enrollResult['error']?.toString() ?? 'Unknown error';

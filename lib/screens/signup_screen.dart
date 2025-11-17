@@ -32,6 +32,23 @@ class _SignUpScreenState extends State<SignUpScreen> {
     _hasAgreedToTerms = widget.hasAgreedToTerms ?? false;
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Set global context for network monitoring overlays
+    NetworkService.setGlobalContext(context);
+    // Start monitoring network connectivity
+    NetworkService.startMonitoring();
+  }
+
+  @override
+  void dispose() {
+    // Stop network monitoring when leaving the screen
+    NetworkService.stopMonitoring();
+    _inputController.dispose();
+    super.dispose();
+  }
+
   void _detectInputType(String input) {
     // Check if it's a Philippine phone number (starts with 09, 10 digits total)
     if (RegExp(r'^09\d{9}$').hasMatch(input)) {
@@ -52,6 +69,19 @@ class _SignUpScreenState extends State<SignUpScreen> {
   }
 
   Future<void> _sendOtp() async {
+    // Check network connection first
+    final isConnected = await NetworkService.checkConnectivity();
+    if (!isConnected) {
+      if (mounted) {
+        NetworkService.showNetworkErrorDialog(
+          context,
+          'No internet connection. Please check your network and try again.',
+          onRetry: () => _sendOtp(),
+        );
+      }
+      return;
+    }
+
     // Check if user has agreed to terms
     if (!_hasAgreedToTerms) {
       final agreed = await TermsAndConditionsDialog.show(context);
@@ -240,6 +270,13 @@ class _SignUpScreenState extends State<SignUpScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Ensure global context is set for network monitoring
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        NetworkService.setGlobalContext(context);
+      }
+    });
+
     return Scaffold(
       resizeToAvoidBottomInset: true,
       body: Container(

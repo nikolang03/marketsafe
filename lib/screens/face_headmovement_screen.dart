@@ -519,17 +519,30 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
   }
 
   Future<void> _completeHeadMovementVerification(Face face) async {
+    print('🔍 _completeHeadMovementVerification called');
     String? imagePath;
     try {
+      print('🔍 Camera controller state: ${_cameraController != null ? "exists" : "null"}, initialized: ${_cameraController?.value.isInitialized ?? false}');
       if (_cameraController != null && _cameraController!.value.isInitialized) {
+        print('📸 Taking picture for head movement verification...');
         final XFile image = await _cameraController!.takePicture();
         imagePath = image.path;
+        print('📸 Picture taken: $imagePath');
         final file = File(imagePath);
-        if (!await file.exists()) {
+        if (await file.exists()) {
+          print('✅ Head movement image file exists: $imagePath');
+        } else {
+          print('❌ ERROR: Head movement image file does not exist: $imagePath');
           imagePath = null;
         }
+      } else {
+        print('❌ ERROR: Camera controller is null or not initialized! Cannot capture image.');
+        print('   - Controller null: ${_cameraController == null}');
+        print('   - Controller initialized: ${_cameraController?.value.isInitialized ?? false}');
       }
-    } catch (e) {
+    } catch (e, stackTrace) {
+      print('❌ Error capturing head movement image: $e');
+      print('❌ Stack trace: $stackTrace');
       imagePath = null;
     }
 
@@ -538,8 +551,19 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
       await prefs.setBool('face_verification_headMovementCompleted', true);
       await prefs.setString('face_verification_headMovementCompletedAt', DateTime.now().toIso8601String());
       
-      if (imagePath != null) {
+      if (imagePath != null && imagePath.isNotEmpty) {
         await prefs.setString('face_verification_headMovementImagePath', imagePath);
+        print('✅ Head movement image path saved: $imagePath');
+        
+        // Verify the save was successful
+        final savedPath = prefs.getString('face_verification_headMovementImagePath');
+        if (savedPath == imagePath) {
+          print('✅ Verified: Head movement image path correctly saved to SharedPreferences');
+        } else {
+          print('❌ WARNING: Head movement image path save verification failed! Expected: $imagePath, Got: $savedPath');
+        }
+      } else {
+        print('❌ ERROR: Head movement image path is null or empty! Cannot save to SharedPreferences.');
       }
       
       await prefs.setString('face_verification_headMovementMetrics', 

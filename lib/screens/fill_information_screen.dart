@@ -482,9 +482,17 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         // This must happen after the form is submitted and user document is created
         // The profile photo upload will then verify against this enrolled face
         print('🔄 Enrolling 3 facial verification images to Luxand...');
+        print('🔍 Enrollment will use:');
+        print('   - Email: ${userEmail.isNotEmpty ? userEmail : "N/A"}');
+        print('   - Phone: ${userPhone.isNotEmpty ? userPhone : "N/A"}');
+        print('   - User ID: $userId');
+        
         try {
           final identifier = userEmail.isNotEmpty ? userEmail : userPhone;
+          print('🔍 Enrollment identifier: $identifier');
+          
           if (identifier.isNotEmpty) {
+            print('✅ Identifier is valid, proceeding with enrollment...');
             // Pass userId directly to ensure we update the correct document
             // Wrap with network retry and loading
             final enrollResult = await NetworkService.executeWithRetry(
@@ -499,14 +507,27 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
               showNetworkErrors: true,
             );
             
+            print('📦 Enrollment result received:');
+            print('   - success: ${enrollResult['success']}');
+            print('   - luxandUuid: ${enrollResult['luxandUuid'] ?? "NULL"}');
+            print('   - enrolledCount: ${enrollResult['enrolledCount'] ?? "NULL"}');
+            print('   - errors: ${enrollResult['errors'] ?? "NULL"}');
+            print('   - All keys: ${enrollResult.keys.toList()}');
+            
             if (enrollResult['success'] == true) {
               final luxandUuid = enrollResult['luxandUuid']?.toString();
               final enrolledCount = enrollResult['enrolledCount'] as int? ?? 0;
               final errors = enrollResult['errors'] as List<String>?;
+              print('✅✅✅ Enrollment SUCCESS!');
               print('✅ Enrolled $enrolledCount face(s) from 3 verification steps. UUID: $luxandUuid');
               print('🔍 Enrollment identifier used: $identifier');
               if (errors != null && errors.isNotEmpty) {
                 print('⚠️ Enrollment had some errors: ${errors.join(", ")}');
+              }
+              
+              if (luxandUuid == null || luxandUuid.isEmpty) {
+                print('❌❌❌ CRITICAL: Enrollment returned success=true but UUID is null/empty!');
+                print('❌ This is a backend issue - enrollment appeared to succeed but no UUID was returned!');
               }
               
               // Clean up test enrollment if it exists
@@ -517,6 +538,7 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
               }
               
               // Verify the UUID was saved to Firestore with network retry
+              print('🔍 Verifying UUID was saved to Firestore...');
               await Future.delayed(const Duration(milliseconds: 500));
               final verifyDoc = await NetworkService.executeWithRetry(
                 () => FirebaseFirestore.instanceFor(
@@ -581,12 +603,19 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
               }
             }
           } else {
-            print('⚠️ Cannot enroll faces: No email or phone number');
+            print('❌❌❌ CRITICAL: Cannot enroll faces - No email or phone number!');
+            print('❌ Email: ${userEmail.isNotEmpty ? userEmail : "EMPTY"}');
+            print('❌ Phone: ${userPhone.isNotEmpty ? userPhone : "EMPTY"}');
+            print('❌ This means enrollment will NOT happen and profile photo upload will fail!');
           }
         } catch (e, stackTrace) {
           print('❌❌❌ CRITICAL ERROR enrolling faces from 3 verification steps: $e');
+          print('❌ Error type: ${e.runtimeType}');
           print('❌ Stack trace: $stackTrace');
+          print('❌ Enrollment identifier: ${userEmail.isNotEmpty ? userEmail : userPhone}');
+          print('❌ User ID: $userId');
           print('⚠️ WARNING: Enrollment failed with exception! Face verification will NOT work!');
+          print('⚠️ User will see "Face Verification Required" error when trying to upload profile photo!');
           // Don't block form submission - enrollment can be retried later
           // But log it clearly so we can see what went wrong
         }
