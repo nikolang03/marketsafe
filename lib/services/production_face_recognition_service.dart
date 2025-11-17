@@ -161,6 +161,40 @@ class ProductionFaceRecognitionService {
     return enrollUserFaceWithLuxand(email: email, imageBytes: imageBytes);
   }
 
+  /// Test backend and Luxand API connection
+  /// Returns: { ok: bool, message: String, luxandConfigured: bool?, luxandWorking: bool? }
+  static Future<Map<String, dynamic>> testBackendConnection() async {
+    try {
+      print('🔍 Testing backend and Luxand API connection...');
+      print('🔍 Backend URL: $_backendUrl');
+      
+      final testResult = await _backendServiceInstance.testConnection();
+      
+      print('📦 Backend connection test result:');
+      print('   - ok: ${testResult['ok']}');
+      print('   - message: ${testResult['message']}');
+      print('   - luxandConfigured: ${testResult['luxandConfigured']}');
+      print('   - luxandWorking: ${testResult['luxandWorking']}');
+      
+      if (testResult['ok'] != true) {
+        print('❌❌❌ CRITICAL: Backend connection test FAILED!');
+        print('❌ This means the app cannot connect to the backend or Luxand API!');
+        print('❌ Error: ${testResult['error'] ?? testResult['message']}');
+      } else {
+        print('✅✅✅ Backend connection test PASSED!');
+      }
+      
+      return testResult;
+    } catch (e) {
+      print('❌ Error testing backend connection: $e');
+      return {
+        'ok': false,
+        'message': 'Failed to test backend connection: ${e.toString()}',
+        'error': e.toString(),
+      };
+    }
+  }
+
   /// Enroll all 3 face images from signup (blink, move closer, head movement)
   /// This provides better accuracy by enrolling multiple angles/expressions
   /// Returns: { success: bool, luxandUuid: String?, enrolledCount: int, errors: List<String>? }
@@ -271,8 +305,22 @@ class ProductionFaceRecognitionService {
       print('🔍 Enrolling ${imagePaths.length} face images to Luxand via backend...');
       print('🔍 Backend URL: $_backendUrl');
       
-      // Check if backend URL is configured
-      print('🔍 Backend URL: $_backendUrl');
+      // CRITICAL: Test backend connection before attempting enrollment
+      print('🔍 Testing backend connection before enrollment...');
+      final connectionTest = await testBackendConnection();
+      if (connectionTest['ok'] != true) {
+        final errorMsg = connectionTest['message']?.toString() ?? 'Backend connection failed';
+        print('❌❌❌ CRITICAL: Cannot enroll - backend connection test failed!');
+        print('❌ Error: $errorMsg');
+        return {
+          'success': false,
+          'error': 'Cannot connect to backend server. $errorMsg',
+          'enrolledCount': 0,
+          'errors': ['Backend connection failed: $errorMsg'],
+        };
+      }
+      
+      print('✅ Backend connection test passed - proceeding with enrollment');
       if (_backendUrl == 'https://your-backend-domain.com' || _backendUrl.isEmpty) {
         print('❌❌❌ CRITICAL: Backend URL not configured!');
         print('❌ Backend URL is: "$_backendUrl"');

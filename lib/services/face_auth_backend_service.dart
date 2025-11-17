@@ -27,6 +27,115 @@ class FaceAuthBackendService {
 
   final String backendUrl;
 
+  /// Test backend connection and Luxand API availability
+  /// Returns: { ok: bool, message: String, luxandConfigured: bool? }
+  Future<Map<String, dynamic>> testConnection() async {
+    try {
+      print('🔍 Testing backend connection: $backendUrl');
+      
+      // Test 1: Health check
+      final healthUri = Uri.parse('$backendUrl/api/health');
+      print('🔍 Testing health endpoint: $healthUri');
+      
+      final healthResponse = await http.get(healthUri).timeout(
+        const Duration(seconds: 10),
+        onTimeout: () {
+          throw TimeoutException('Health check timeout after 10 seconds');
+        },
+      );
+      
+      print('📥 Health check response: ${healthResponse.statusCode}');
+      print('📥 Health check body: ${healthResponse.body}');
+      
+      if (healthResponse.statusCode ~/ 100 != 2) {
+        return {
+          'ok': false,
+          'message': 'Backend health check failed',
+          'statusCode': healthResponse.statusCode,
+        };
+      }
+      
+      final healthBody = jsonDecode(healthResponse.body) as Map<String, dynamic>?;
+      final luxandConfigured = healthBody?['luxandConfigured'] as bool? ?? false;
+      
+      print('✅ Backend is reachable');
+      print('🔑 Luxand configured: $luxandConfigured');
+      
+      if (!luxandConfigured) {
+        return {
+          'ok': false,
+          'message': 'Backend is reachable but Luxand API key is not configured',
+          'luxandConfigured': false,
+        };
+      }
+      
+      // Test 2: Test Luxand connection (optional - might fail if API key is invalid)
+      try {
+        final testUri = Uri.parse('$backendUrl/api/test-luxand');
+        print('🔍 Testing Luxand connection: $testUri');
+        
+        final testResponse = await http.get(testUri).timeout(
+          const Duration(seconds: 15),
+          onTimeout: () {
+            throw TimeoutException('Luxand test timeout after 15 seconds');
+          },
+        );
+        
+        print('📥 Luxand test response: ${testResponse.statusCode}');
+        print('📥 Luxand test body: ${testResponse.body}');
+        
+        final testBody = jsonDecode(testResponse.body) as Map<String, dynamic>?;
+        final luxandOk = testBody?['ok'] as bool? ?? false;
+        
+        if (luxandOk) {
+          return {
+            'ok': true,
+            'message': 'Backend and Luxand API are both reachable',
+            'luxandConfigured': true,
+            'luxandWorking': true,
+          };
+        } else {
+          return {
+            'ok': false,
+            'message': 'Backend is reachable but Luxand API test failed',
+            'luxandConfigured': true,
+            'luxandWorking': false,
+            'error': testBody?['error']?.toString(),
+          };
+        }
+      } catch (luxandTestError) {
+        print('⚠️ Luxand test failed (non-critical): $luxandTestError');
+        return {
+          'ok': true,
+          'message': 'Backend is reachable and Luxand is configured (test endpoint unavailable)',
+          'luxandConfigured': true,
+          'luxandWorking': null, // Unknown
+        };
+      }
+    } on TimeoutException catch (e) {
+      print('❌ Backend connection timeout: $e');
+      return {
+        'ok': false,
+        'message': 'Backend connection timeout. The backend server may be down or unreachable.',
+        'error': e.toString(),
+      };
+    } on SocketException catch (e) {
+      print('❌ Backend connection failed: $e');
+      return {
+        'ok': false,
+        'message': 'Cannot connect to backend server. Please check if the backend is running.',
+        'error': e.toString(),
+      };
+    } catch (e) {
+      print('❌ Backend test error: $e');
+      return {
+        'ok': false,
+        'message': 'Backend test failed: ${e.toString()}',
+        'error': e.toString(),
+      };
+    }
+  }
+
   /// Enroll user face during signup
   /// Returns: { success: bool, uuid: String?, error: String? }
   /// Note: Luxand supports multiple enrollments per subject for better accuracy
