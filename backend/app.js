@@ -1102,8 +1102,19 @@ app.post('/api/verify', async (req, res) => {
           
           const verifyRes = await Promise.race([verifyPromise, timeoutPromise]);
           
-          const similarity = parseFloat(verifyRes?.similarity ?? verifyRes?.confidence ?? 0);
-          const match = verifyRes?.match ?? verifyRes?.verified ?? false;
+          // Luxand verify endpoint returns 'probability' field, not 'similarity'
+          // Also check for 'verified' status in message or status field
+          const similarity = parseFloat(
+            verifyRes?.similarity ?? 
+            verifyRes?.confidence ?? 
+            verifyRes?.probability ?? 
+            0
+          );
+          const match = verifyRes?.match ?? 
+                       verifyRes?.verified ?? 
+                       (verifyRes?.message === 'verified') ||
+                       (verifyRes?.status === 'success' && verifyRes?.message === 'verified') ||
+                       false;
           
           let normalizedSimilarity = similarity;
           if (similarity > 1.0 && similarity <= 100) {
