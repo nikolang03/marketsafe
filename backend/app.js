@@ -1110,10 +1110,12 @@ app.post('/api/verify', async (req, res) => {
             verifyRes?.probability ?? 
             0
           );
+          // Check multiple ways Luxand indicates verification success
           const match = verifyRes?.match ?? 
                        verifyRes?.verified ?? 
                        (verifyRes?.message === 'verified') ||
                        (verifyRes?.status === 'success' && verifyRes?.message === 'verified') ||
+                       (verifyRes?.status === 'success' && verifyRes?.probability >= 0.85) ||
                        false;
           
           let normalizedSimilarity = similarity;
@@ -1126,11 +1128,11 @@ app.post('/api/verify', async (req, res) => {
           console.log(`📊 1:1 Verification result: similarity=${normalizedSimilarity.toFixed(3)}, match=${match}`);
           
           if (normalizedSimilarity >= SIMILARITY_THRESHOLD || match === true) {
-            console.log(`✅ Verification PASSED (1:1): similarity=${normalizedSimilarity.toFixed(3)}`);
+            console.log(`✅ Verification PASSED (1:1): similarity=${finalSimilarity.toFixed(3)}, match=${match}`);
             console.log(`✅ Email match confirmed: ${expectedEmail}`);
             return res.json({
               ok: true,
-              similarity: normalizedSimilarity,
+              similarity: finalSimilarity,
               threshold: SIMILARITY_THRESHOLD,
               message: 'verified',
               method: '1:1_verification'
