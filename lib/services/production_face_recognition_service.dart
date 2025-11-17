@@ -238,6 +238,7 @@ class ProductionFaceRecognitionService {
       final moveCloserCompleted = prefs.getBool('face_verification_moveCloserCompleted') ?? false;
       final headMovementCompleted = prefs.getBool('face_verification_headMovementCompleted') ?? false;
 
+      print('🔍🔍🔍 ========== CHECKING FOR SAVED FACE IMAGES ==========');
       print('🔍 Checking for saved face images:');
       print('  - Blink completed: $blinkCompleted');
       print('  - Blink image: ${blinkImagePath != null && blinkImagePath.isNotEmpty ? "✅ Found: $blinkImagePath" : "❌ Not found"}');
@@ -258,39 +259,57 @@ class ProductionFaceRecognitionService {
           print('  - $key: $value');
         }
       }
+      print('🔍🔍🔍 ====================================================');
 
       final List<String> imagePaths = [];
       
       // Check each image path and verify file exists
+      print('🔍🔍🔍 ========== VERIFYING IMAGE FILES EXIST ==========');
       if (blinkImagePath != null && blinkImagePath.isNotEmpty) {
         final file = File(blinkImagePath);
-        if (await file.exists()) {
+        final exists = await file.exists();
+        if (exists) {
+          final fileSize = await file.length();
           imagePaths.add(blinkImagePath);
-          print('✅ Blink image file exists: ${blinkImagePath}');
+          print('✅ Blink image file exists: ${blinkImagePath} (${fileSize} bytes)');
         } else {
-          print('⚠️ Blink image file not found: ${blinkImagePath}');
+          print('❌❌❌ CRITICAL: Blink image file NOT FOUND at path: ${blinkImagePath}');
+          print('❌ This means the path was saved but the file was deleted or never created!');
         }
+      } else {
+        print('❌❌❌ CRITICAL: Blink image path is NULL or EMPTY in SharedPreferences!');
       }
       
       if (moveCloserImagePath != null && moveCloserImagePath.isNotEmpty) {
         final file = File(moveCloserImagePath);
-        if (await file.exists()) {
+        final exists = await file.exists();
+        if (exists) {
+          final fileSize = await file.length();
           imagePaths.add(moveCloserImagePath);
-          print('✅ Move closer image file exists: ${moveCloserImagePath}');
+          print('✅ Move closer image file exists: ${moveCloserImagePath} (${fileSize} bytes)');
         } else {
-          print('⚠️ Move closer image file not found: ${moveCloserImagePath}');
+          print('❌❌❌ CRITICAL: Move closer image file NOT FOUND at path: ${moveCloserImagePath}');
+          print('❌ This means the path was saved but the file was deleted or never created!');
         }
+      } else {
+        print('❌❌❌ CRITICAL: Move closer image path is NULL or EMPTY in SharedPreferences!');
       }
       
       if (headMovementImagePath != null && headMovementImagePath.isNotEmpty) {
         final file = File(headMovementImagePath);
-        if (await file.exists()) {
+        final exists = await file.exists();
+        if (exists) {
+          final fileSize = await file.length();
           imagePaths.add(headMovementImagePath);
-          print('✅ Head movement image file exists: ${headMovementImagePath}');
+          print('✅ Head movement image file exists: ${headMovementImagePath} (${fileSize} bytes)');
         } else {
-          print('⚠️ Head movement image file not found: ${headMovementImagePath}');
+          print('❌❌❌ CRITICAL: Head movement image file NOT FOUND at path: ${headMovementImagePath}');
+          print('❌ This means the path was saved but the file was deleted or never created!');
         }
+      } else {
+        print('❌❌❌ CRITICAL: Head movement image path is NULL or EMPTY in SharedPreferences!');
       }
+      print('🔍🔍🔍 ====================================================');
 
       if (imagePaths.isEmpty) {
         print('❌ No valid face images found. Please complete face verification steps.');
