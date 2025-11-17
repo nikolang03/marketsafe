@@ -840,7 +840,7 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
           }
         }
         
-        if (imageFile == null || imageFile.path.isEmpty) {
+        if (imageFile.path.isEmpty) {
           print('❌ IMMEDIATE CAPTURE: Image file is null or path is empty');
           return false;
         }
