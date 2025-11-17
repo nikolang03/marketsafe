@@ -91,19 +91,39 @@ app.get('/api/health', (req, res) => {
 // ==========================================
 app.get('/api/test-luxand', async (req, res) => {
   try {
-    // Try a simple search with empty photo to see API response format
-    const testResponse = await searchPhoto('dGVzdA=='); // base64 of "test"
+    console.log('🔍 Testing Luxand API connection...');
+    console.log(`🔑 API Key loaded: ${process.env.LUXAND_API_KEY ? process.env.LUXAND_API_KEY.substring(0, 10) + '...' + process.env.LUXAND_API_KEY.substring(process.env.LUXAND_API_KEY.length - 4) : 'NOT SET!'}`);
+    
+    if (!process.env.LUXAND_API_KEY) {
+      return res.status(500).json({
+        ok: false,
+        error: 'LUXAND_API_KEY environment variable is not set',
+        message: 'Please set LUXAND_API_KEY in your Railway environment variables'
+      });
+    }
+    
+    console.log('📤 Calling listPersons() to test API connection...');
+    const allPersons = await listPersons();
+    const persons = allPersons.persons || allPersons.data || allPersons || [];
+    
+    console.log(`✅ Luxand API is reachable. Found ${persons.length} person(s)`);
+    
     res.json({
       ok: true,
-      message: 'Luxand API is reachable',
-      responseFormat: testResponse,
-      note: 'This is just to check API format, not a real search'
+      success: true,
+      message: 'Luxand API is reachable and working',
+      personsCount: persons.length,
+      apiKeyConfigured: !!process.env.LUXAND_API_KEY,
+      apiKeyPreview: process.env.LUXAND_API_KEY ? `${process.env.LUXAND_API_KEY.substring(0, 10)}...${process.env.LUXAND_API_KEY.substring(process.env.LUXAND_API_KEY.length - 4)}` : 'NOT SET'
     });
   } catch (error) {
-    res.json({
+    console.error('❌ Luxand API test failed:', error.message);
+    console.error('❌ Stack:', error.stack);
+    res.status(500).json({
       ok: false,
       error: error.message,
-      note: 'Check if API key is valid'
+      message: 'Luxand API connection test failed. Check your API key and network connection.',
+      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
     });
   }
 });
