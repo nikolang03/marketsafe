@@ -614,7 +614,45 @@ class _FaceHeadMovementScreenState extends State<FaceHeadMovementScreen> with Ti
       await prefs.setBool('face_verification_headMovementCompleted', true);
       await prefs.setString('face_verification_headMovementCompletedAt', DateTime.now().toIso8601String());
       
-      // If imagePath is null, try to capture it directly
+      // CRITICAL: Capture image IMMEDIATELY if not already captured
+      if ((imagePath == null || imagePath.isEmpty) && _cameraController != null && _cameraController!.value.isInitialized) {
+        print('🚨🚨🚨 CRITICAL: Starting IMMEDIATE image capture for head movement...');
+        try {
+          print('📸 Taking picture IMMEDIATELY...');
+          final imageFile = await _cameraController!.takePicture();
+          if (imageFile.path.isNotEmpty) {
+            imagePath = imageFile.path;
+            print('✅✅✅ Image captured IMMEDIATELY: $imagePath');
+            
+            // Save path IMMEDIATELY
+            try {
+              final permanentPath = await _copyImageToPermanentLocation(
+                imagePath,
+                'headmovement_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              await prefs.setString('face_verification_headMovementImagePath', permanentPath);
+              print('✅✅✅ Image path saved IMMEDIATELY: $permanentPath');
+              
+              // Verify
+              final verify = prefs.getString('face_verification_headMovementImagePath');
+              if (verify != null && verify.isNotEmpty) {
+                print('✅✅✅ VERIFIED: Head movement image path saved successfully: $verify');
+              } else {
+                print('❌❌❌ VERIFICATION FAILED: Image path not found after save!');
+              }
+            } catch (saveError) {
+              print('❌ Error saving image path: $saveError');
+              // Fallback: save original path
+              await prefs.setString('face_verification_headMovementImagePath', imagePath);
+              print('✅ Saved original path as fallback: $imagePath');
+            }
+          }
+        } catch (captureError) {
+          print('❌ Immediate capture failed: $captureError');
+        }
+      }
+      
+      // If imagePath is still null, try to capture it directly (backup method)
       if (imagePath == null || imagePath.isEmpty) {
         print('⚠️⚠️⚠️ WARNING: imagePath is null/empty, attempting direct capture...');
         final capturedPath = await _captureImageDirectly(prefs);

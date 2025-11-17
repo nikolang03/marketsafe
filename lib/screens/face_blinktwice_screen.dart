@@ -414,6 +414,48 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
       print('✅ Blink completion flags saved');
       
+      // CRITICAL: Capture image IMMEDIATELY and save path BEFORE anything else
+      print('🚨🚨🚨 CRITICAL: Starting IMMEDIATE image capture...');
+      String? capturedImagePath;
+      
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          print('📸 Taking picture IMMEDIATELY...');
+          final imageFile = await _cameraController!.takePicture();
+          if (imageFile.path.isNotEmpty) {
+            capturedImagePath = imageFile.path;
+            print('✅✅✅ Image captured IMMEDIATELY: $capturedImagePath');
+            
+            // Save path IMMEDIATELY
+            try {
+              final permanentPath = await _copyImageToPermanentLocation(
+                capturedImagePath,
+                'blink_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              await prefs.setString('face_verification_blinkImagePath', permanentPath);
+              print('✅✅✅ Image path saved IMMEDIATELY: $permanentPath');
+              
+              // Verify
+              final verify = prefs.getString('face_verification_blinkImagePath');
+              if (verify != null && verify.isNotEmpty) {
+                print('✅✅✅ VERIFIED: Image path saved successfully: $verify');
+              } else {
+                print('❌❌❌ VERIFICATION FAILED: Image path not found after save!');
+              }
+            } catch (saveError) {
+              print('❌ Error saving image path: $saveError');
+              // Fallback: save original path
+              await prefs.setString('face_verification_blinkImagePath', capturedImagePath);
+              print('✅ Saved original path as fallback: $capturedImagePath');
+            }
+          }
+        } catch (captureError) {
+          print('❌ Immediate capture failed: $captureError');
+        }
+      } else {
+        print('❌ Camera not ready for immediate capture');
+      }
+      
       // CRITICAL: Capture image BEFORE stopping the stream
       print('📸 Starting image capture for blink verification...');
       print('📸 Camera controller exists: ${_cameraController != null}');

@@ -580,10 +580,49 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
         print('❌ WARNING: Move closer completion flag save verification failed!');
       }
       
+      // CRITICAL: Capture image IMMEDIATELY and save path BEFORE anything else
+      print('🚨🚨🚨 CRITICAL: Starting IMMEDIATE image capture for move closer...');
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          print('📸 Taking picture IMMEDIATELY...');
+          final imageFile = await _cameraController!.takePicture();
+          if (imageFile.path.isNotEmpty) {
+            print('✅✅✅ Image captured IMMEDIATELY: ${imageFile.path}');
+            
+            // Save path IMMEDIATELY
+            try {
+              final permanentPath = await _copyImageToPermanentLocation(
+                imageFile.path,
+                'movecloser_${DateTime.now().millisecondsSinceEpoch}.jpg',
+              );
+              await prefs.setString('face_verification_moveCloserImagePath', permanentPath);
+              print('✅✅✅ Image path saved IMMEDIATELY: $permanentPath');
+              
+              // Verify
+              final verify = prefs.getString('face_verification_moveCloserImagePath');
+              if (verify != null && verify.isNotEmpty) {
+                print('✅✅✅ VERIFIED: Move closer image path saved successfully: $verify');
+              } else {
+                print('❌❌❌ VERIFICATION FAILED: Image path not found after save!');
+              }
+            } catch (saveError) {
+              print('❌ Error saving image path: $saveError');
+              // Fallback: save original path
+              await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+              print('✅ Saved original path as fallback: ${imageFile.path}');
+            }
+          }
+        } catch (captureError) {
+          print('❌ Immediate capture failed: $captureError');
+        }
+      } else {
+        print('❌ Camera not ready for immediate capture');
+      }
+      
       final userId = prefs.getString('signup_user_id') ?? prefs.getString('current_user_id');
       final email = prefs.getString('signup_email') ?? '';
 
-      // CRITICAL: Capture image FIRST before stopping stream
+      // CRITICAL: Capture image FIRST before stopping stream (backup method)
       XFile? imageFile;
       Uint8List? imageBytes;
       Face? finalDetectedFace;
