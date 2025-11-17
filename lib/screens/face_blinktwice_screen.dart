@@ -388,8 +388,13 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
             _isBlinkComplete = true;
             print('✅✅✅ BLINK COMPLETE - Calling _completeBlinkVerification');
             print('✅✅✅ Current time: ${DateTime.now().toIso8601String()}');
-            // CRITICAL: Don't use catchError - let errors propagate so we can see them
-            _completeBlinkVerification(face);
+            // CRITICAL: Await the method and catch errors to ensure image is saved
+            _completeBlinkVerification(face).catchError((error, stackTrace) {
+              print('❌❌❌ ERROR in _completeBlinkVerification: $error');
+              print('❌ Stack trace: $stackTrace');
+              // Even on error, try to save image path
+              _saveImagePathOnError();
+            });
           }
         }
       }
@@ -749,6 +754,40 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
       }
       // Re-throw the error so the caller can handle it
       rethrow;
+    }
+  }
+
+  /// Emergency fallback to save image path even if everything else fails
+  Future<void> _saveImagePathOnError() async {
+    try {
+      print('🚨🚨🚨 EMERGENCY: Attempting to save image path after error...');
+      final prefs = await SharedPreferences.getInstance();
+      
+      if (_cameraController != null && _cameraController!.value.isInitialized) {
+        try {
+          print('🚨🚨🚨 EMERGENCY: Taking picture...');
+          final imageFile = await _cameraController!.takePicture();
+          if (imageFile.path.isNotEmpty) {
+            // Save directly without copying
+            await prefs.setString('face_verification_blinkImagePath', imageFile.path);
+            print('✅✅✅ EMERGENCY: Image path saved: ${imageFile.path}');
+            
+            // Verify
+            final verify = prefs.getString('face_verification_blinkImagePath');
+            if (verify != null && verify.isNotEmpty) {
+              print('✅✅✅ EMERGENCY VERIFIED: Path saved: $verify');
+            } else {
+              print('❌❌❌ EMERGENCY FAILED: Path not found after save!');
+            }
+          }
+        } catch (e) {
+          print('❌ Emergency capture failed: $e');
+        }
+      } else {
+        print('❌ Emergency: Camera not ready');
+      }
+    } catch (e) {
+      print('❌ Emergency save failed: $e');
     }
   }
 
