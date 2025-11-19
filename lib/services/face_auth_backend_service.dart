@@ -144,15 +144,17 @@ class FaceAuthBackendService {
     required Uint8List photoBytes,
   }) async {
     try {
-      final base64Image = base64Encode(photoBytes);
-      final uri = Uri.parse('$backendUrl/api/enroll');
-      
       print('🔍🔍🔍 ========== ENROLLMENT REQUEST STARTING ==========');
       print('🔍🔍🔍 Backend URL: $backendUrl');
-      print('🔍🔍🔍 Enrollment endpoint: $uri');
       print('🔍🔍🔍 Email: $email');
       print('🔍🔍🔍 Image size: ${photoBytes.length} bytes');
-      print('🔍🔍🔍 Base64 length: ${base64Image.length} characters');
+      
+      final base64Image = base64Encode(photoBytes);
+      print('🔍🔍🔍 Base64 encoded size: ${base64Image.length} characters');
+      
+      final uri = Uri.parse('$backendUrl/api/enroll');
+      print('🔍🔍🔍 Enrollment endpoint: $uri');
+      print('🔍🔍🔍 Full URL: ${uri.toString()}');
       print('🔍🔍🔍 ================================================');
       
       final stopwatch = Stopwatch()..start();

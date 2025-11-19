@@ -4,6 +4,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:path/path.dart' as path;
 import '../services/user_check_service.dart';
 import '../services/production_face_recognition_service.dart';
 import '../services/face_auth_backend_service.dart';
@@ -476,6 +478,92 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
         print('   - Email: ${userEmail.isNotEmpty ? userEmail : "N/A"}');
         print('   - Phone: ${userPhone.isNotEmpty ? userPhone : "N/A"}');
         print('   - User ID: $userId');
+        
+        // CRITICAL: Verify and re-save image paths before enrollment
+        print('🔍🔍🔍 ========== FINAL VERIFICATION BEFORE ENROLLMENT ==========');
+        // Reuse existing prefs variable from line 163
+        final blinkPath = prefs.getString('face_verification_blinkImagePath');
+        final moveCloserPath = prefs.getString('face_verification_moveCloserImagePath');
+        final headMovementPath = prefs.getString('face_verification_headMovementImagePath');
+        
+        print('🔍 Current image paths in SharedPreferences:');
+        print('   - Blink: ${blinkPath ?? "NULL"}');
+        print('   - Move closer: ${moveCloserPath ?? "NULL"}');
+        print('   - Head movement: ${headMovementPath ?? "NULL"}');
+        
+        // If any paths are missing, try to recover from file system
+        if (blinkPath == null || blinkPath.isEmpty) {
+          print('⚠️ Blink path missing - attempting to find saved image...');
+          // Try to find the most recent blink image in the face verification directory
+          try {
+            final appDocDir = await getApplicationDocumentsDirectory();
+            final faceImagesDir = Directory(path.join(appDocDir.path, 'face_verification_images'));
+            if (await faceImagesDir.exists()) {
+              final files = await faceImagesDir.list().toList();
+              final blinkFiles = files.where((f) => f.path.contains('blink')).toList();
+              if (blinkFiles.isNotEmpty) {
+                // Sort by modification time, get most recent
+                blinkFiles.sort((a, b) => (b as File).lastModifiedSync().compareTo((a as File).lastModifiedSync()));
+                final mostRecentBlink = (blinkFiles.first as File).path;
+                await prefs.setString('face_verification_blinkImagePath', mostRecentBlink);
+                print('✅ Recovered blink path: $mostRecentBlink');
+              }
+            }
+          } catch (e) {
+            print('❌ Could not recover blink path: $e');
+          }
+        }
+        
+        if (moveCloserPath == null || moveCloserPath.isEmpty) {
+          print('⚠️ Move closer path missing - attempting to find saved image...');
+          try {
+            final appDocDir = await getApplicationDocumentsDirectory();
+            final faceImagesDir = Directory(path.join(appDocDir.path, 'face_verification_images'));
+            if (await faceImagesDir.exists()) {
+              final files = await faceImagesDir.list().toList();
+              final moveCloserFiles = files.where((f) => f.path.contains('movecloser')).toList();
+              if (moveCloserFiles.isNotEmpty) {
+                moveCloserFiles.sort((a, b) => (b as File).lastModifiedSync().compareTo((a as File).lastModifiedSync()));
+                final mostRecentMoveCloser = (moveCloserFiles.first as File).path;
+                await prefs.setString('face_verification_moveCloserImagePath', mostRecentMoveCloser);
+                print('✅ Recovered move closer path: $mostRecentMoveCloser');
+              }
+            }
+          } catch (e) {
+            print('❌ Could not recover move closer path: $e');
+          }
+        }
+        
+        if (headMovementPath == null || headMovementPath.isEmpty) {
+          print('⚠️ Head movement path missing - attempting to find saved image...');
+          try {
+            final appDocDir = await getApplicationDocumentsDirectory();
+            final faceImagesDir = Directory(path.join(appDocDir.path, 'face_verification_images'));
+            if (await faceImagesDir.exists()) {
+              final files = await faceImagesDir.list().toList();
+              final headMovementFiles = files.where((f) => f.path.contains('headmovement')).toList();
+              if (headMovementFiles.isNotEmpty) {
+                headMovementFiles.sort((a, b) => (b as File).lastModifiedSync().compareTo((a as File).lastModifiedSync()));
+                final mostRecentHeadMovement = (headMovementFiles.first as File).path;
+                await prefs.setString('face_verification_headMovementImagePath', mostRecentHeadMovement);
+                print('✅ Recovered head movement path: $mostRecentHeadMovement');
+              }
+            }
+          } catch (e) {
+            print('❌ Could not recover head movement path: $e');
+          }
+        }
+        
+        // Final check after recovery
+        final finalBlinkPath = prefs.getString('face_verification_blinkImagePath');
+        final finalMoveCloserPath = prefs.getString('face_verification_moveCloserImagePath');
+        final finalHeadMovementPath = prefs.getString('face_verification_headMovementImagePath');
+        
+        print('🔍 Final image paths after recovery:');
+        print('   - Blink: ${finalBlinkPath ?? "NULL"}');
+        print('   - Move closer: ${finalMoveCloserPath ?? "NULL"}');
+        print('   - Head movement: ${finalHeadMovementPath ?? "NULL"}');
+        print('🔍🔍🔍 ====================================================');
         
         try {
           final identifier = userEmail.isNotEmpty ? userEmail : userPhone;

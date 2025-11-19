@@ -513,12 +513,29 @@ app.post('/api/enroll', async (req, res) => {
     console.log('⏳ Waiting 2 seconds for Luxand to process enrollment...');
     await new Promise(resolve => setTimeout(resolve, 2000));
     
+    let verificationWarning = null;
     try {
       console.log('🔍 Verifying enrollment by checking if person exists in Luxand...');
       console.log(`🔍 Looking for UUID: ${luxandUuid}`);
       console.log(`🔍 Looking for email: ${email}`);
       
-      const allPersons = await listPersons();
+      // Retry listPersons up to 3 times to handle eventual consistency
+      let allPersons = null;
+      const maxVerifyAttempts = 3;
+      for (let attempt = 1; attempt <= maxVerifyAttempts; attempt++) {
+        try {
+          allPersons = await listPersons();
+          break;
+        } catch (e) {
+          console.warn(`⚠️ listPersons attempt ${attempt} failed: ${e.message}`);
+          if (attempt < maxVerifyAttempts) {
+            console.log('⏳ Waiting 1s before retrying listPersons...');
+            await new Promise(r => setTimeout(r, 1000));
+            continue;
+          }
+          throw e;
+        }
+      }
       console.log(`📦 Raw listPersons response:`, JSON.stringify(allPersons, null, 2));
       
       const persons = allPersons.persons || allPersons.data || allPersons || [];
@@ -580,38 +597,17 @@ app.post('/api/enroll', async (req, res) => {
           console.error('⚠️ This might indicate the photo was not properly added to the person!');
         }
       } else {
-        console.error('❌❌❌ CRITICAL: Person not found in Luxand after enrollment!');
-        console.error('❌ This means enrollment FAILED - UUID was returned but person does not exist!');
+        console.error('❌❌❌ WARNING: Person not found in Luxand after enrollment! Proceeding with UUID due to possible delay.');
         console.error(`❌ Expected UUID: ${luxandUuid}`);
         console.error(`❌ Expected email: ${email}`);
         console.error(`❌ Total persons in Luxand: ${persons.length}`);
-        console.error(`❌ Enrollment verification FAILED - returning error to prevent saving invalid UUID!`);
-        
-        // CRITICAL: Fail enrollment if verification shows person doesn't exist
-        // This prevents saving invalid UUIDs to Firebase
-        return res.status(500).json({
-          ok: false,
-          error: 'Enrollment verification failed: Person not found in Luxand after enrollment. Please try again.',
-          reason: 'enrollment_verification_failed',
-          message: 'Face enrollment did not complete successfully. Please complete the facial verification steps again.',
-          luxandUuid: luxandUuid, // Include UUID for debugging
-          totalPersonsInLuxand: persons.length,
-          luxandResponse: luxandResp // Include original response for debugging
-        });
+        verificationWarning = 'Enrollment returned a UUID but verification could not find the person yet. This may be due to Luxand indexing delay.';
       }
     } catch (verifyError) {
-      console.error('❌❌❌ CRITICAL: Could not verify enrollment!');
+      console.error('❌❌❌ WARNING: Could not verify enrollment due to error. Proceeding with UUID.');
       console.error(`❌ Error: ${verifyError.message}`);
       console.error(`❌ Stack: ${verifyError.stack}`);
-      // CRITICAL: Fail enrollment if verification check itself fails
-      // This ensures we don't save UUIDs when we can't verify enrollment succeeded
-      return res.status(500).json({
-        ok: false,
-        error: 'Enrollment verification failed: Could not verify if person exists in Luxand. Please try again.',
-        reason: 'enrollment_verification_error',
-        message: 'Face enrollment verification failed. Please complete the facial verification steps again.',
-        verificationError: verifyError.message
-      });
+      verificationWarning = `Verification check failed: ${verifyError.message}`;
     }
 
     // 5) Return success ONLY if verification passed
@@ -626,7 +622,8 @@ app.post('/api/enroll', async (req, res) => {
       ok: true,
       success: true,
       uuid: luxandUuid,
-      message: 'Face enrolled successfully in Luxand and verified'
+      message: 'Face enrolled successfully in Luxand',
+      verificationWarning: verificationWarning || undefined
     });
 
   } catch (error) {

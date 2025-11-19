@@ -586,19 +586,45 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
               print('⚠️ IMMEDIATE CAPTURE: Copy failed, using original: $copyError');
             }
             
-            // Save path
-            await prefs.setString('face_verification_moveCloserImagePath', pathToSave);
-            print('🚨🚨🚨 IMMEDIATE CAPTURE: Path saved: $pathToSave');
+            // Save path with retry logic
+            print('🚨🚨🚨 IMMEDIATE CAPTURE: Saving path to SharedPreferences: $pathToSave');
+            bool saveSuccess = false;
+            for (int retry = 0; retry < 3; retry++) {
+              try {
+                await prefs.setString('face_verification_moveCloserImagePath', pathToSave);
+                print('🚨🚨🚨 IMMEDIATE CAPTURE: Save attempt ${retry + 1}/3');
+                
+                // Wait for commit
+                await Future.delayed(const Duration(milliseconds: 100));
+                
+                // Reload and verify
+                final freshPrefs = await SharedPreferences.getInstance();
+                final verify = freshPrefs.getString('face_verification_moveCloserImagePath');
+                
+                if (verify != null && verify.isNotEmpty && verify == pathToSave) {
+                  print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
+                  saveSuccess = true;
+                  break;
+                } else {
+                  print('⚠️ IMMEDIATE CAPTURE: Retry ${retry + 1}/3 - Path not verified, retrying...');
+                  if (retry < 2) {
+                    await Future.delayed(const Duration(milliseconds: 200));
+                  }
+                }
+              } catch (saveError) {
+                print('❌ IMMEDIATE CAPTURE: Save error on retry ${retry + 1}: $saveError');
+                if (retry < 2) {
+                  await Future.delayed(const Duration(milliseconds: 200));
+                }
+              }
+            }
             
-            // Verify
-            final verify = prefs.getString('face_verification_moveCloserImagePath');
-            if (verify != null && verify.isNotEmpty) {
-              print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
-              return true;
-            } else {
-              print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not found after save!');
+            if (!saveSuccess) {
+              print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not saved after 3 retries!');
               return false;
             }
+            
+            return true;
           } else {
             print('❌ IMMEDIATE CAPTURE: Image path is empty');
             return false;
@@ -681,21 +707,47 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
                 imageFile.path,
                 'movecloser_${DateTime.now().millisecondsSinceEpoch}.jpg',
               );
-              await prefs.setString('face_verification_moveCloserImagePath', permanentPath);
-              print('✅✅✅ Image path saved IMMEDIATELY: $permanentPath');
               
-              // Verify
-              final verify = prefs.getString('face_verification_moveCloserImagePath');
-              if (verify != null && verify.isNotEmpty) {
-                print('✅✅✅ VERIFIED: Move closer image path saved successfully: $verify');
-              } else {
-                print('❌❌❌ VERIFICATION FAILED: Image path not found after save!');
+              // Save with retry logic
+              bool saveSuccess = false;
+              for (int retry = 0; retry < 3; retry++) {
+                try {
+                  await prefs.setString('face_verification_moveCloserImagePath', permanentPath);
+                  await Future.delayed(const Duration(milliseconds: 100));
+                  
+                  final freshPrefs = await SharedPreferences.getInstance();
+                  final verify = freshPrefs.getString('face_verification_moveCloserImagePath');
+                  
+                  if (verify != null && verify.isNotEmpty && verify == permanentPath) {
+                    print('✅✅✅ Image path saved IMMEDIATELY (retry ${retry + 1}/3): $permanentPath');
+                    saveSuccess = true;
+                    break;
+                  } else {
+                    if (retry < 2) {
+                      await Future.delayed(const Duration(milliseconds: 200));
+                    }
+                  }
+                } catch (retryError) {
+                  if (retry < 2) {
+                    await Future.delayed(const Duration(milliseconds: 200));
+                  }
+                }
+              }
+              
+              if (!saveSuccess) {
+                // Fallback: save original path
+                await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+                print('✅ Saved original path as fallback: ${imageFile.path}');
               }
             } catch (saveError) {
               print('❌ Error saving image path: $saveError');
               // Fallback: save original path
-              await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
-              print('✅ Saved original path as fallback: ${imageFile.path}');
+              try {
+                await prefs.setString('face_verification_moveCloserImagePath', imageFile.path);
+                print('✅ Saved original path as fallback: ${imageFile.path}');
+              } catch (fallbackError) {
+                print('❌ Fallback save also failed: $fallbackError');
+              }
             }
           }
         } catch (captureError) {
@@ -768,19 +820,43 @@ class _FaceMoveCloserScreenState extends State<FaceMoveCloserScreen> with Ticker
               imagePathToSave = imageFile.path; // Fallback to original path
             }
             
-            // ALWAYS save the path, even if copy failed
+            // ALWAYS save the path, even if copy failed - with retry logic
             try {
-              await prefs.setString('face_verification_moveCloserImagePath', imagePathToSave);
-              await prefs.setBool('face_verification_moveCloserCompleted', true);
-              await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
-              print('✅✅✅ Move closer image path SAVED: $imagePathToSave');
+              bool saveSuccess = false;
+              for (int retry = 0; retry < 3; retry++) {
+                try {
+                  await prefs.setString('face_verification_moveCloserImagePath', imagePathToSave);
+                  await prefs.setBool('face_verification_moveCloserCompleted', true);
+                  await prefs.setString('face_verification_moveCloserCompletedAt', DateTime.now().toIso8601String());
+                  
+                  // Wait for commit
+                  await Future.delayed(const Duration(milliseconds: 100));
+                  
+                  // Reload and verify
+                  final freshPrefs = await SharedPreferences.getInstance();
+                  final savedPath = freshPrefs.getString('face_verification_moveCloserImagePath');
+                  
+                  if (savedPath != null && savedPath.isNotEmpty && savedPath == imagePathToSave) {
+                    print('✅✅✅ Move closer image path SAVED (retry ${retry + 1}/3): $savedPath');
+                    saveSuccess = true;
+                    break;
+                  } else {
+                    print('⚠️ Save retry ${retry + 1}/3 - Path not verified, retrying...');
+                    if (retry < 2) {
+                      await Future.delayed(const Duration(milliseconds: 200));
+                    }
+                  }
+                } catch (retryError) {
+                  print('❌ Save error on retry ${retry + 1}: $retryError');
+                  if (retry < 2) {
+                    await Future.delayed(const Duration(milliseconds: 200));
+                  }
+                }
+              }
               
-              // Verify the save was successful
-              final savedPath = prefs.getString('face_verification_moveCloserImagePath');
-              if (savedPath != null && savedPath.isNotEmpty) {
-                print('✅✅✅ VERIFIED: Move closer image path correctly saved to SharedPreferences: $savedPath');
-              } else {
-                print('❌❌❌ CRITICAL: Move closer image path save verification FAILED! Path is null or empty!');
+              if (!saveSuccess) {
+                print('❌❌❌ CRITICAL: Move closer image path save FAILED after 3 retries!');
+                print('❌❌❌ This will cause enrollment to fail!');
               }
             } catch (saveError) {
               print('❌❌❌ CRITICAL ERROR saving move closer image path: $saveError');

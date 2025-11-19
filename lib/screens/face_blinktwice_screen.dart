@@ -703,20 +703,44 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
           imagePathToSave = imageFile.path; // Fallback to original path
         }
         
-        // ALWAYS save the path, even if copy failed
+        // ALWAYS save the path, even if copy failed - with retry logic
         try {
-          await prefs.setString('face_verification_blinkImagePath', imagePathToSave);
-          await prefs.setBool('face_verification_blinkCompleted', true);
-          await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
-          print('✅✅✅ Blink image path SAVED: $imagePathToSave');
-          print('✅ Blink verification completed flag saved');
+          bool saveSuccess = false;
+          for (int retry = 0; retry < 3; retry++) {
+            try {
+              await prefs.setString('face_verification_blinkImagePath', imagePathToSave);
+              await prefs.setBool('face_verification_blinkCompleted', true);
+              await prefs.setString('face_verification_blinkCompletedAt', DateTime.now().toIso8601String());
+              
+              // Wait for commit
+              await Future.delayed(const Duration(milliseconds: 100));
+              
+              // Reload and verify
+              final freshPrefs = await SharedPreferences.getInstance();
+              final savedPath = freshPrefs.getString('face_verification_blinkImagePath');
+              
+              if (savedPath != null && savedPath.isNotEmpty && savedPath == imagePathToSave) {
+                print('✅✅✅ Blink image path SAVED (retry ${retry + 1}/3): $savedPath');
+                print('✅ Blink verification completed flag saved');
+                saveSuccess = true;
+                break;
+              } else {
+                print('⚠️ Save retry ${retry + 1}/3 - Path not verified, retrying...');
+                if (retry < 2) {
+                  await Future.delayed(const Duration(milliseconds: 200));
+                }
+              }
+            } catch (retryError) {
+              print('❌ Save error on retry ${retry + 1}: $retryError');
+              if (retry < 2) {
+                await Future.delayed(const Duration(milliseconds: 200));
+              }
+            }
+          }
           
-          // Verify the save was successful
-          final savedPath = prefs.getString('face_verification_blinkImagePath');
-          if (savedPath != null && savedPath.isNotEmpty) {
-            print('✅✅✅ VERIFIED: Blink image path correctly saved to SharedPreferences: $savedPath');
-          } else {
-            print('❌❌❌ CRITICAL: Blink image path save verification FAILED! Path is null or empty!');
+          if (!saveSuccess) {
+            print('❌❌❌ CRITICAL: Blink image path save FAILED after 3 retries!');
+            print('❌❌❌ This will cause enrollment to fail!');
           }
         } catch (saveError) {
           print('❌❌❌ CRITICAL ERROR saving blink image path: $saveError');
@@ -871,31 +895,55 @@ class _FaceBlinkTwiceScreenState extends State<FaceBlinkTwiceScreen> with Ticker
           pathToSave = imageFile.path;
         }
         
-        // CRITICAL: Save path - this MUST succeed
+        // CRITICAL: Save path - this MUST succeed with retry logic
         print('🚨🚨🚨 IMMEDIATE CAPTURE: Saving path to SharedPreferences: $pathToSave');
-        final saveResult = await prefs.setString('face_verification_blinkImagePath', pathToSave);
-        print('🚨🚨🚨 IMMEDIATE CAPTURE: Save result: $saveResult');
-        
-        // Verify immediately
-        final verify = prefs.getString('face_verification_blinkImagePath');
-        if (verify != null && verify.isNotEmpty) {
-          print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
-          
-          // Double-check file exists
-          final verifyFile = File(verify);
-          if (await verifyFile.exists()) {
-            final verifySize = await verifyFile.length();
-            print('✅✅✅ IMMEDIATE CAPTURE: File verified exists: ${verifySize} bytes');
-            return true;
-          } else {
-            print('⚠️ IMMEDIATE CAPTURE: Path saved but file does not exist: $verify');
-            // Still return true - path is saved, file might be in temp location
-            return true;
+        bool saveSuccess = false;
+        for (int retry = 0; retry < 3; retry++) {
+          try {
+            final saveResult = await prefs.setString('face_verification_blinkImagePath', pathToSave);
+            print('🚨🚨🚨 IMMEDIATE CAPTURE: Save attempt ${retry + 1}/3 result: $saveResult');
+            
+            // Wait a bit for SharedPreferences to commit
+            await Future.delayed(const Duration(milliseconds: 100));
+            
+            // Reload SharedPreferences to ensure we get the latest value
+            final freshPrefs = await SharedPreferences.getInstance();
+            final verify = freshPrefs.getString('face_verification_blinkImagePath');
+            
+            if (verify != null && verify.isNotEmpty && verify == pathToSave) {
+              print('✅✅✅ IMMEDIATE CAPTURE SUCCESS: Verified path saved: $verify');
+              saveSuccess = true;
+              break;
+            } else {
+              print('⚠️ IMMEDIATE CAPTURE: Retry ${retry + 1}/3 - Path not verified, retrying...');
+              if (retry < 2) {
+                await Future.delayed(const Duration(milliseconds: 200));
+              }
+            }
+          } catch (saveError) {
+            print('❌ IMMEDIATE CAPTURE: Save error on retry ${retry + 1}: $saveError');
+            if (retry < 2) {
+              await Future.delayed(const Duration(milliseconds: 200));
+            }
           }
-        } else {
-          print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not found after save!');
+        }
+        
+        if (!saveSuccess) {
+          print('❌❌❌ IMMEDIATE CAPTURE FAILED: Path not saved after 3 retries!');
           print('❌❌❌ This is a critical error - path was not saved!');
           return false;
+        }
+        
+        // Double-check file exists
+        final verifyFile = File(pathToSave);
+        if (await verifyFile.exists()) {
+          final verifySize = await verifyFile.length();
+          print('✅✅✅ IMMEDIATE CAPTURE: File verified exists: ${verifySize} bytes');
+          return true;
+        } else {
+          print('⚠️ IMMEDIATE CAPTURE: Path saved but file does not exist: $pathToSave');
+          // Still return true - path is saved, file might be in temp location
+          return true;
         }
       } catch (captureError, stackTrace) {
         print('❌ IMMEDIATE CAPTURE ERROR: $captureError');
