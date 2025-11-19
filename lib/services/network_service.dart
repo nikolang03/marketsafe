@@ -231,6 +231,10 @@ class NetworkService {
         attempts++;
         lastError = e.toString();
         
+        print('🚨🚨🚨 NetworkService.executeWithRetry: Attempt $attempts/$maxRetries FAILED');
+        print('🚨 Error: $lastError');
+        print('🚨 Error type: ${e.runtimeType}');
+        
         // Hide loading if shown
         if (context != null && loadingMessage != null) {
           _hideLoadingOverlay(context);
@@ -248,6 +252,8 @@ class NetworkService {
         }
         
         if (attempts >= maxRetries) {
+          print('❌❌❌ NetworkService.executeWithRetry: ALL RETRIES EXHAUSTED!');
+          print('❌ Final error: $lastError');
           if (showNetworkErrors && context != null && isNetworkError) {
             showNetworkErrorDialog(
               context,

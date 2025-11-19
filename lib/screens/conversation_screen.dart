@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/message_service.dart';
+import '../services/presence_service.dart';
 import 'user_profile_view_screen.dart' as profile_screen;
 
 class ConversationScreen extends StatefulWidget {
@@ -29,6 +30,8 @@ class _ConversationScreenState extends State<ConversationScreen> {
     super.initState();
     // Mark messages as read when opening conversation
     MessageService.markMessagesAsRead(widget.conversationId, widget.currentUserId);
+    
+    // Online status is now handled by StreamBuilder in the UI
   }
 
   Future<void> sendMessage() async {
@@ -70,19 +73,37 @@ class _ConversationScreenState extends State<ConversationScreen> {
     }
   }
 
+  // Cache formatted timestamps to prevent recalculation
+  final Map<String, String> _timestampCache = {};
+  
   String _formatMessageTime(DateTime timestamp) {
+    // Use timestamp as cache key (milliseconds since epoch)
+    final cacheKey = timestamp.millisecondsSinceEpoch.toString();
+    
+    // Return cached value if available
+    if (_timestampCache.containsKey(cacheKey)) {
+      return _timestampCache[cacheKey]!;
+    }
+    
+    // Calculate and cache the formatted time
     final now = DateTime.now();
     final difference = now.difference(timestamp);
-
+    
+    String formatted;
     if (difference.inDays > 0) {
-      return '${timestamp.day}/${timestamp.month} ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}';
+      formatted = '${timestamp.day}/${timestamp.month} ${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}';
     } else if (difference.inHours > 0) {
-      return '${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}';
+      formatted = '${timestamp.hour}:${timestamp.minute.toString().padLeft(2, '0')}';
     } else if (difference.inMinutes > 0) {
-      return '${timestamp.minute}m ago';
+      formatted = '${difference.inMinutes}m ago';
     } else {
-      return 'Just now';
+      formatted = 'Just now';
     }
+    
+    // Cache the formatted time
+    _timestampCache[cacheKey] = formatted;
+    
+    return formatted;
   }
 
   @override
@@ -168,12 +189,33 @@ class _ConversationScreenState extends State<ConversationScreen> {
                             ),
                           ),
                         ),
-                        Text(
-                          'Online',
-                          style: TextStyle(
-                            color: Colors.green.shade400,
-                            fontSize: 12,
+                        StreamBuilder<Map<String, dynamic>>(
+                          stream: PresenceService.listenToUserStatus(
+                            widget.otherUser['id']?.toString() ?? '',
                           ),
+                          builder: (context, snapshot) {
+                            String statusText = 'Offline';
+                            Color statusColor = Colors.grey;
+                            
+                            if (snapshot.hasData) {
+                              final status = snapshot.data!;
+                              if (status['isOnline'] == true) {
+                                statusText = 'Online';
+                                statusColor = Colors.green.shade400;
+                              } else {
+                                statusText = PresenceService.formatLastSeen(status['lastSeen']);
+                                statusColor = Colors.grey.shade400;
+                              }
+                            }
+                            
+                            return Text(
+                              statusText,
+                              style: TextStyle(
+                                color: statusColor,
+                                fontSize: 12,
+                              ),
+                            );
+                          },
                         ),
                       ],
                     ),

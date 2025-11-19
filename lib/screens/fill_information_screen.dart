@@ -570,20 +570,30 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           print('🔍 Enrollment identifier: $identifier');
           
           if (identifier.isNotEmpty) {
-            print('✅ Identifier is valid, proceeding with enrollment...');
+            print('✅✅✅ Identifier is valid, proceeding with enrollment...');
+            print('🚨🚨🚨 ABOUT TO CALL enrollAllThreeFaces 🚨🚨🚨');
+            print('🚨 Email/Phone: $identifier');
+            print('🚨 User ID: $userId');
+            print('🚨 Backend URL should be: https://marketsafe-production.up.railway.app');
+            
             // Pass userId directly to ensure we update the correct document
             // Wrap with network retry and loading
+            print('🚨🚨🚨 CALLING NetworkService.executeWithRetry NOW 🚨🚨🚨');
             final enrollResult = await NetworkService.executeWithRetry(
-              () => ProductionFaceRecognitionService.enrollAllThreeFaces(
-                email: identifier,
-                userId: userId, // Pass userId directly to avoid query issues
-              ),
+              () {
+                print('🚨🚨🚨 INSIDE executeWithRetry - calling enrollAllThreeFaces 🚨🚨🚨');
+                return ProductionFaceRecognitionService.enrollAllThreeFaces(
+                  email: identifier,
+                  userId: userId, // Pass userId directly to avoid query issues
+                );
+              },
               maxRetries: 3,
               retryDelay: const Duration(seconds: 3),
               loadingMessage: 'Enrolling face verification...',
               context: context,
               showNetworkErrors: true,
             );
+            print('🚨🚨🚨 RETURNED FROM executeWithRetry 🚨🚨🚨');
             
             print('📦 Enrollment result received:');
             print('   - success: ${enrollResult['success']}');
@@ -720,8 +730,19 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
           print('❌ Stack trace: $stackTrace');
           print('❌ Enrollment identifier: ${userEmail.isNotEmpty ? userEmail : userPhone}');
           print('❌ User ID: $userId');
+          print('❌❌❌ THIS EXCEPTION PREVENTED ENROLLMENT FROM REACHING RAILWAY!');
+          print('❌❌❌ Check the stack trace above to see where it failed!');
           print('⚠️ WARNING: Enrollment failed with exception! Face verification will NOT work!');
           print('⚠️ User will see "Face Verification Required" error when trying to upload profile photo!');
+          
+          // Try to get more details about the error
+          if (e is Exception) {
+            print('❌ Exception message: ${e.toString()}');
+          }
+          if (e is Error) {
+            print('❌ Error message: ${e.toString()}');
+          }
+          
           // Don't block form submission - enrollment can be retried later
           // But log it clearly so we can see what went wrong
         }
@@ -806,8 +827,51 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      body: Container(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        
+        // Show confirmation dialog when back button is pressed
+        final shouldPop = await showDialog<bool>(
+          context: context,
+          builder: (BuildContext context) {
+            return AlertDialog(
+              backgroundColor: Colors.grey[900],
+              title: const Text(
+                'Exit Form?',
+                style: TextStyle(color: Colors.white),
+              ),
+              content: const Text(
+                'Are you sure you want to go back? Your progress will be saved, but you\'ll need to complete this form to continue.',
+                style: TextStyle(color: Colors.white70),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(false),
+                  child: const Text(
+                    'Cancel',
+                    style: TextStyle(color: Colors.grey),
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(true),
+                  child: const Text(
+                    'Go Back',
+                    style: TextStyle(color: Colors.red),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+        
+        if (shouldPop == true && mounted) {
+          Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
             colors: [Colors.black, Color(0xFF2B0000)],
@@ -981,6 +1045,7 @@ class _FillInformationScreenState extends State<FillInformationScreen> {
             ),
           ),
         ),
+      ),
       ),
     );
   }

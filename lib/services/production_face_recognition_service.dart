@@ -312,14 +312,19 @@ class ProductionFaceRecognitionService {
       print('🔍🔍🔍 ====================================================');
 
       if (imagePaths.isEmpty) {
-        print('❌ No valid face images found. Please complete face verification steps.');
+        print('❌❌❌ CRITICAL: No valid face images found. Please complete face verification steps.');
+        print('❌❌❌ This means enrollment will NOT happen and no luxandUuid will be created!');
+        print('❌❌❌ Check the logs above to see why image paths are missing!');
         return {
           'success': false,
           'error': 'No face images found. Please complete face verification steps.',
+          'enrolledCount': 0,
+          'errors': ['No face images found. Please complete face verification steps.'],
         };
       }
       
-      print('✅ Found ${imagePaths.length} valid face image(s) to enroll');
+      print('✅✅✅ Found ${imagePaths.length} valid face image(s) to enroll');
+      print('✅✅✅ Enrollment WILL proceed with ${imagePaths.length} image(s)');
 
       print('🔍 Enrolling ${imagePaths.length} face images to Luxand via backend...');
       print('🔍🔍🔍 BACKEND URL BEING USED: $_backendUrl');
@@ -458,18 +463,31 @@ class ProductionFaceRecognitionService {
             // Continue with enrollment - backend will also validate
           }
 
-          print('📸 Enrolling face ${i + 1}/${imagePaths.length} via backend...');
+          print('🚨🚨🚨 ========== ENROLLING FACE ${i + 1}/${imagePaths.length} ==========');
           print('📸 Image file: ${imagePaths[i]}');
           print('📸 Image size: ${imageBytes.length} bytes');
           print('📸 Enrollment identifier: $email');
+          print('🚨🚨🚨 ABOUT TO CALL BACKEND enroll() METHOD 🚨🚨🚨');
+          print('🚨 Backend service instance: $_backendServiceInstance');
+          print('🚨 Backend URL: $_backendUrl');
           
           // Call backend API for enrollment (backend handles liveness + Luxand enrollment)
-          final enrollResult = await _backendServiceInstance.enroll(
-            email: email,
-            photoBytes: imageBytes,
-          );
-          
-          print('📸 Enrollment result for face ${i + 1}: success=${enrollResult['success']}, uuid=${enrollResult['uuid']}, error=${enrollResult['error']}');
+          Map<String, dynamic> enrollResult;
+          try {
+            print('🚨🚨🚨 CALLING _backendServiceInstance.enroll() NOW 🚨🚨🚨');
+            enrollResult = await _backendServiceInstance.enroll(
+              email: email,
+              photoBytes: imageBytes,
+            );
+            print('🚨🚨🚨 RETURNED FROM _backendServiceInstance.enroll() 🚨🚨🚨');
+            print('📸 Enrollment result for face ${i + 1}: success=${enrollResult['success']}, uuid=${enrollResult['uuid']}, error=${enrollResult['error']}');
+          } catch (enrollException, enrollStackTrace) {
+            print('❌❌❌ CRITICAL: Exception during backend enrollment call!');
+            print('❌ Exception: $enrollException');
+            print('❌ Stack trace: $enrollStackTrace');
+            print('❌ This means the HTTP request to Railway failed!');
+            rethrow;
+          }
 
           if (enrollResult['success'] == true) {
             final uuid = enrollResult['uuid']?.toString();

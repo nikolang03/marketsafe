@@ -926,11 +926,6 @@ class _ProductCardState extends State<ProductCard> with WidgetsBindingObserver {
                         onPressed: () => _navigateToProductPreview(),
                         child: const Text("MAKE OFFER"),
                       ),
-                    if (!isOwner) const SizedBox(width: 10),
-                    IconButton(
-                      icon: const Icon(Icons.bookmark_border, color: Colors.white),
-                      onPressed: () {},
-                    ),
                   ],
                 ),
               ),

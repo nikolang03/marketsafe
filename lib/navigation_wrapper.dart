@@ -2,11 +2,13 @@ import 'screens/message_list_screen.dart';
 import 'screens/post_details_screen.dart';
 import 'screens/notifications_screen.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'screens/categories_screen.dart';
 import 'screens/profile_screen.dart';
 import 'services/notification_service.dart';
 import 'services/badge_update_service.dart';
 import 'services/navigation_service.dart';
+import 'services/presence_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -20,7 +22,7 @@ class NavigationWrapper extends StatefulWidget {
 }
 
 class _NavigationWrapperState extends State<NavigationWrapper> 
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   int _selectedIndex = 0;
   int _unreadNotificationCount = 0;
   int _unreadMessageCount = 0;
@@ -34,12 +36,18 @@ class _NavigationWrapperState extends State<NavigationWrapper>
   late AnimationController _badgeAnimationController;
   late Animation<double> _fabScaleAnimation;
   late Animation<double> _badgeBounceAnimation;
+  
+  // Back button handling
+  DateTime? _lastBackPressTime;
 
   @override
   void initState() {
     super.initState();
     print('🔍 NavigationWrapper: Initialized');
     _pageController = PageController(initialPage: _selectedIndex);
+    
+    // Add lifecycle observer for app state changes
+    WidgetsBinding.instance.addObserver(this);
     
     // Initialize animation controllers
     _fabAnimationController = AnimationController(
@@ -78,13 +86,44 @@ class _NavigationWrapperState extends State<NavigationWrapper>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _notificationSubscription?.cancel();
     _messageSubscription?.cancel();
     _pageController.dispose();
     _fabAnimationController.dispose();
     _badgeAnimationController.dispose();
     BadgeUpdateService.removeListener(_onBadgeUpdate);
+    
+    // Set user offline when disposing
+    if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      PresenceService.setOffline(_currentUserId!);
+    }
+    
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    
+    if (_currentUserId == null || _currentUserId!.isEmpty) return;
+    
+    switch (state) {
+      case AppLifecycleState.resumed:
+        // App is in foreground - set online
+        PresenceService.setOnline(_currentUserId!);
+        break;
+      case AppLifecycleState.paused:
+      case AppLifecycleState.inactive:
+      case AppLifecycleState.detached:
+        // App is in background - set offline
+        PresenceService.setOffline(_currentUserId!);
+        break;
+      case AppLifecycleState.hidden:
+        // App is hidden - set offline
+        PresenceService.setOffline(_currentUserId!);
+        break;
+    }
   }
 
   /// Called when badge count should be updated
@@ -101,6 +140,8 @@ class _NavigationWrapperState extends State<NavigationWrapper>
     
     // Set up real-time listener after getting user ID
     if (_currentUserId != null && _currentUserId!.isNotEmpty) {
+      // Set user as online when app is active
+      PresenceService.setOnline(_currentUserId!);
       _setupRealTimeListener();
       _loadMessageCount();
     }
@@ -423,10 +464,60 @@ class _NavigationWrapperState extends State<NavigationWrapper>
     }
   }
 
+  Future<bool> _shouldExitApp() async {
+    // We're at the root of NavigationWrapper - prevent accidental logout
+    final now = DateTime.now();
+    
+    // Check if this is the first back press or if enough time has passed
+    if (_lastBackPressTime == null || 
+        now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+      _lastBackPressTime = now;
+      
+      // Show snackbar message
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Press back again to exit'),
+          duration: Duration(seconds: 2),
+          backgroundColor: Colors.grey,
+        ),
+      );
+      
+      return false; // Don't exit
+    }
+    
+    // User pressed back twice within 2 seconds - exit app
+    return true;
+  }
+
   @override
   Widget build(BuildContext context) {
     print('🔍 NavigationWrapper: Building with selectedIndex: $_selectedIndex');
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvoked: (didPop) async {
+        if (didPop) return;
+        
+        // Get the navigator
+        final navigator = Navigator.of(context);
+        
+        // Check if there are nested routes that can be popped
+        // If canPop() returns true, it means there are screens pushed on top of NavigationWrapper
+        // (like conversation screen, product details, etc.) - allow normal back navigation
+        if (navigator.canPop()) {
+          // Allow normal back navigation for nested screens
+          navigator.pop();
+          return;
+        }
+        
+        // We're at the root of NavigationWrapper - no nested screens
+        // Show exit confirmation to prevent accidental logout
+        final shouldExit = await _shouldExitApp();
+        if (shouldExit && mounted) {
+          // Exit app (double-tap confirmed)
+          SystemNavigator.pop();
+        }
+      },
+      child: Scaffold(
       body: Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
@@ -483,6 +574,7 @@ class _NavigationWrapperState extends State<NavigationWrapper>
             ),
           ),
         ),
+      ),
       ),
     );
   }

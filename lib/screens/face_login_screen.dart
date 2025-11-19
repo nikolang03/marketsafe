@@ -1502,9 +1502,11 @@ Future<void> _processImageFromFile() async {
                 // User is verified, navigate to main app
                 print('✅ User is verified! Navigating to main app...');
                 print('✅ Navigation: FaceLoginScreen -> NavigationWrapper');
-                Navigator.pushReplacement(
+                // Use pushAndRemoveUntil to clear all previous routes and prevent back navigation to login
+                Navigator.pushAndRemoveUntil(
                   context,
                   MaterialPageRoute(builder: (_) => const NavigationWrapper()),
+                  (route) => false, // Remove all previous routes
                 );
               } else {
                 // User is pending, navigate to under verification screen
